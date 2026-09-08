@@ -122,6 +122,8 @@ interface ProviderDefInput {
   readonly apiKeyUrl?: string;
   /** Default base URL */
   readonly defaultBaseUrl: string;
+  /** Default API key value, when one is configured by the provider definition */
+  readonly defaultApiKey?: string;
   /** Default API format */
   readonly defaultApiFormat: ApiFormat;
   /** Whether this provider supports codingPlan mode */
@@ -206,6 +208,7 @@ const PROVIDER_DEFINITIONS = [
     apiKeyUrl: 'https://platform.deepseek.com/api_keys',
     openClawProviderId: OpenClawProviderId.DeepSeek,
     defaultBaseUrl: 'https://api.deepseek.com',
+    defaultApiKey: '123456',
     defaultApiFormat: ApiFormat.OpenAI,
     codingPlanSupported: false,
     switchableBaseUrls: {
@@ -591,6 +594,8 @@ export interface ProviderDef {
   readonly apiKeyUrl?: string;
   /** Default base URL */
   readonly defaultBaseUrl: string;
+  /** Default API key value, when one is configured by the provider definition */
+  readonly defaultApiKey?: string;
   /** Default API format */
   readonly defaultApiFormat: ApiFormat;
   /** Whether this provider supports codingPlan mode */
