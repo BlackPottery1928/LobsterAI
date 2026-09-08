@@ -577,8 +577,7 @@ const UserMenu: React.FC<UserMenuProps> = ({
           />
         )}
         <DailyCheckInAccountMenuEntry
-          enabled={startupCreditEntry.resolved
-            && !startupCreditEntry.available}
+          enabled={false}
           initialSnapshot={dailyCheckInSnapshot}
           loadOnMount={false}
           suppressed={!startupCreditEntry.resolved

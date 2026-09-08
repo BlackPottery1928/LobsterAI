@@ -844,7 +844,7 @@ const CoworkView: React.FC<CoworkViewProps> = ({
           </button>
         )}
         <DailyCheckInHeaderEntry
-          enabled={!isEnterpriseAccount}
+          enabled={false}
           suppressed={!startupCreditEntry.resolved
             || startupCreditEntry.available}
         />

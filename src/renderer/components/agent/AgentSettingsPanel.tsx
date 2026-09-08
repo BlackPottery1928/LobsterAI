@@ -543,7 +543,7 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
     { key: AgentDetailTab.User, label: i18nService.t('coworkBootstrapUserTitle') },
     { key: AgentDetailTab.Skills, label: i18nService.t('agentTabSkills') },
     { key: AgentDetailTab.Collaboration, label: i18nService.t('agentTabCollaboration') },
-    { key: AgentDetailTab.Im, label: i18nService.t('agentTabIM') },
+    // { key: AgentDetailTab.Im, label: i18nService.t('agentTabIM') },
   ];
 
   const renderTextEditor = (
