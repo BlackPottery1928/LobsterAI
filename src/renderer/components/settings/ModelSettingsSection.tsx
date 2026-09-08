@@ -635,8 +635,8 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
     const displayLabel = isCustom
       ? ((config as ProviderConfig).displayName || getCustomProviderDefaultName(provider))
       : (ProviderRegistry.get(providerKey)?.label ?? getProviderDisplayName(provider));
-    return { providerKey, config, isCustom, displayLabel };
-  });
+    return { providerKey, config  , isCustom, displayLabel };
+  }).filter(({ providerKey }) => providerKey == ProviderName.DeepSeek);
   const providerFilterText = providerFilter.trim().toLowerCase();
   const filteredProviderEntries = providerFilterText
     ? providerEntries.filter(({ providerKey, displayLabel }) =>
@@ -693,7 +693,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
                       {enabledProviderCount}/{providerEntries.length} {i18nService.t('providersEnabledSuffix')}
                     </span>
                   </h3>
-                  <div className="flex items-center space-x-1">
+                  <div className="flex items-center space-x-1" style={{ display: 'none' }}>
                     <button
                       type="button"
                       onClick={handleImportProvidersClick}
@@ -712,7 +712,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
                     </button>
                   </div>
                 </div>
-                <div className="relative">
+                <div className="relative" style={{ display: 'none' }}>
                   <MagnifyingGlassIcon className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
                   <input
                     type="text"
@@ -830,6 +830,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
               {CUSTOM_PROVIDER_KEYS.some(k => !providers[k]) && (
               <button
                 type="button"
+                style={{ display: 'none' }}
                 onClick={handleAddCustomProvider}
                 className="w-full flex items-center justify-center p-2 rounded-xl border border-dashed border-claude-border dark:border-claude-darkBorder text-claude-secondaryText dark:text-claude-darkSecondaryText hover:border-claude-accent hover:text-claude-accent transition-colors text-sm"
               >
@@ -851,6 +852,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
                   </h3>
                   {ProviderRegistry.get(activeProvider)?.website && (
                     <button
+                      style={{ display: 'none' }}
                       type="button"
                       onClick={() => void window.electron.shell.openExternal(ProviderRegistry.get(activeProvider)!.website!)}
                       className="p-0.5 rounded text-secondary hover:text-primary transition-colors"
@@ -1507,6 +1509,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
                         </label>
                         {ProviderRegistry.get(activeProvider)?.apiKeyUrl && (
                           <button
+                            style={{ display: 'none' }}
                             type="button"
                             onClick={() => void window.electron.shell.openExternal(ProviderRegistry.get(activeProvider)!.apiKeyUrl!)}
                             className="text-[11px] text-claude-accent hover:underline transition-colors"
@@ -1524,7 +1527,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
                           className="block w-full rounded-xl bg-claude-surfaceInset dark:bg-claude-darkSurfaceInset dark:border-claude-darkBorder border-claude-border border focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30 dark:text-claude-darkText text-claude-text px-3 py-2 pr-16 text-xs"
                           placeholder={i18nService.t('apiKeyPlaceholder')}
                         />
-                        <div className="absolute right-2 inset-y-0 flex items-center gap-1">
+                        <div className="absolute right-2 inset-y-0 flex items-center gap-1" style={{ display: 'none' }}>
                           {providers[activeProvider].apiKey && (
                             <button
                               type="button"
@@ -1736,7 +1739,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
                     }
                   />
                   {providers[activeProvider].baseUrl && !isBaseUrlLocked && (
-                    <div className="absolute right-2 inset-y-0 flex items-center">
+                    <div className="absolute right-2 inset-y-0 flex items-center" style={{ display: 'none' }}>
                       <button
                         type="button"
                         onClick={() => handleProviderConfigChange(activeProvider, 'baseUrl', '')}
@@ -1837,6 +1840,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
                         type="radio"
                         name={`${activeProvider}-apiFormat`}
                         value="anthropic"
+                        disabled={isBaseUrlLocked}
                         checked={getEffectiveApiFormat(activeProvider, providers[activeProvider].apiFormat) !== 'openai'}
                         onChange={() => handleProviderConfigChange(activeProvider, 'apiFormat', 'anthropic')}
                         className="h-3.5 w-3.5 text-claude-accent focus:ring-claude-accent dark:bg-claude-darkSurface bg-claude-surface disabled:opacity-50"
@@ -2069,7 +2073,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
               )}
 
               <div>
-                <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center justify-between mb-1.5" style={{ display: 'none' }}>
                   <h3 className="text-xs font-medium text-foreground">
                     {i18nService.t('availableModels')}
                     {(providers[activeProvider].models?.length ?? 0) > 0 && (
@@ -2116,6 +2120,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
                           )}
                           <button
                             type="button"
+                            style={{ display: 'none' }}
                             onClick={() => handleEditModel(
                               model.id,
                               model.name,
@@ -2130,6 +2135,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
                           </button>
                           <button
                             type="button"
+                            style={{ display: 'none' }}
                             onClick={() => handleDeleteModel(model.id)}
                             className="p-0.5 text-secondary hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
                           >

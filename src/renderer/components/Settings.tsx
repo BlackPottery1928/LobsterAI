@@ -773,12 +773,12 @@ const SETTINGS_TAB_SHORTCUT_COMMANDS: ShortcutCommandDefinition[] = [
   { key: ShortcutAction.OpenSettingsAppearance, tabLabelKey: 'appearance' },
   { key: ShortcutAction.OpenSettingsAgentEngine, tabLabelKey: 'coworkAgentEngine' },
   { key: ShortcutAction.OpenSettingsModel, tabLabelKey: 'settingsCustomModel' },
-  { key: ShortcutAction.OpenSettingsIm, tabLabelKey: 'imBot' },
+  // { key: ShortcutAction.OpenSettingsIm, tabLabelKey: 'imBot' },
   { key: ShortcutAction.OpenSettingsBrowser, tabLabelKey: 'browserWebAccessTab' },
-  { key: ShortcutAction.OpenSettingsEmail, tabLabelKey: 'emailTab' },
+  // { key: ShortcutAction.OpenSettingsEmail, tabLabelKey: 'emailTab' },
   { key: ShortcutAction.OpenSettingsMemory, tabLabelKey: 'coworkMemoryTitle' },
-  { key: ShortcutAction.OpenSettingsDreaming, tabLabelKey: 'coworkMemoryTabDreaming' },
-  { key: ShortcutAction.OpenSettingsPlugins, tabLabelKey: 'pluginsTab' },
+  // { key: ShortcutAction.OpenSettingsDreaming, tabLabelKey: 'coworkMemoryTabDreaming' },
+  // { key: ShortcutAction.OpenSettingsPlugins, tabLabelKey: 'pluginsTab' },
   { key: ShortcutAction.OpenSettingsAbout, tabLabelKey: 'about' },
 ].map(command => ({
   ...command,
@@ -1403,7 +1403,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [autoLaunch, setAutoLaunchState] = useState(false);
   const [useSystemProxy, setUseSystemProxy] = useState(false);
   const [sqliteAutoBackupEnabled, setSqliteAutoBackupEnabled] = useState(false);
-  const [usageAnalyticsEnabled, setUsageAnalyticsEnabled] = useState(true);
+  const [usageAnalyticsEnabled, setUsageAnalyticsEnabled] = useState(false);
   const [taskCompletionNotificationMode, setTaskCompletionNotificationMode] =
     useState<TaskCompletionNotificationMode>(TaskCompletionNotificationMode.Unfocused);
   const [permissionNotificationsEnabled, setPermissionNotificationsEnabled] = useState(true);
@@ -4542,13 +4542,13 @@ const Settings: React.FC<SettingsProps> = ({
       { key: 'appearance' as TabType,     label: i18nService.t('appearance'),     icon: <SunIcon className="h-5 w-5" /> },
       { key: 'coworkAgentEngine' as TabType, label: i18nService.t('coworkAgentEngine'), icon: <CpuChipIcon className="h-5 w-5" /> },
       { key: 'model' as TabType,          label: i18nService.t('settingsCustomModel'), icon: <CubeIcon className="h-5 w-5" /> },
-      { key: 'im' as TabType,             label: i18nService.t('imBot'),          icon: <ChatBubbleLeftIcon className="h-5 w-5" /> },
+      // { key: 'im' as TabType,             label: i18nService.t('imBot'),          icon: <ChatBubbleLeftIcon className="h-5 w-5" /> },
       { key: 'browserWebAccess' as TabType, label: i18nService.t('browserWebAccessTab'), icon: <GlobeAltIcon className="h-5 w-5" /> },
-      { key: 'email' as TabType,          label: i18nService.t('emailTab'),       icon: <EnvelopeIcon className="h-5 w-5" /> },
+      // { key: 'email' as TabType,          label: i18nService.t('emailTab'),       icon: <EnvelopeIcon className="h-5 w-5" /> },
       { key: 'coworkMemory' as TabType,   label: i18nService.t('coworkMemoryTitle'), icon: <BrainIcon className="h-5 w-5" /> },
-      { key: 'coworkDreaming' as TabType, label: i18nService.t('coworkMemoryTabDreaming'), icon: <DreamingTabIcon className="h-5 w-5" /> },
-      { key: 'plugins' as TabType,        label: i18nService.t('pluginsTab'),     icon: <PlugIcon className="h-5 w-5" /> },
-      { key: 'experimental' as TabType,   label: i18nService.t('experimentalTab'), icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3v6.4c0 .35-.09.68-.27.98l-4.4 7.34A2 2 0 0 0 6.8 20.75h10.4a2 2 0 0 0 1.72-3.03l-4.4-7.34a1.9 1.9 0 0 1-.27-.98V3M8.25 3h7.5M7.5 14.25h9" /></svg> },
+      // { key: 'coworkDreaming' as TabType, label: i18nService.t('coworkMemoryTabDreaming'), icon: <DreamingTabIcon className="h-5 w-5" /> },
+      // { key: 'plugins' as TabType,        label: i18nService.t('pluginsTab'),     icon: <PlugIcon className="h-5 w-5" /> },
+      // { key: 'experimental' as TabType,   label: i18nService.t('experimentalTab'), icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3v6.4c0 .35-.09.68-.27.98l-4.4 7.34A2 2 0 0 0 6.8 20.75h10.4a2 2 0 0 0 1.72-3.03l-4.4-7.34a1.9 1.9 0 0 1-.27-.98V3M8.25 3h7.5M7.5 14.25h9" /></svg> },
       { key: 'shortcuts' as TabType,      label: i18nService.t('shortcuts'),      icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5"><rect x="2" y="4" width="20" height="14" rx="2" /><line x1="6" y1="8" x2="8" y2="8" /><line x1="10" y1="8" x2="12" y2="8" /><line x1="14" y1="8" x2="16" y2="8" /><line x1="6" y1="12" x2="8" y2="12" /><line x1="10" y1="12" x2="14" y2="12" /><line x1="16" y1="12" x2="18" y2="12" /><line x1="8" y1="15.5" x2="16" y2="15.5" /></svg> },
       { key: 'about' as TabType,          label: i18nService.t('about'),          icon: <InformationCircleIcon className="h-5 w-5" /> },
     ];
