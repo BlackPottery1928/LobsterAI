@@ -2073,7 +2073,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
               )}
 
               <div>
-                <div className="flex items-center justify-between mb-1.5" style={{ display: 'none' }}>
+                <div className="flex items-center justify-between mb-1.5">
                   <h3 className="text-xs font-medium text-foreground">
                     {i18nService.t('availableModels')}
                     {(providers[activeProvider].models?.length ?? 0) > 0 && (
@@ -2083,6 +2083,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
                     )}
                   </h3>
                   <button
+                    style={{ display: 'none' }}
                     type="button"
                     onClick={handleAddModel}
                     className="inline-flex items-center text-xs text-primary hover:text-primary-hover"

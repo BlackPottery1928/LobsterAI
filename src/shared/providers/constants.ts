@@ -218,9 +218,7 @@ const PROVIDER_DEFINITIONS = [
     region: 'china',
     enPriority: 0,
     defaultModels: [
-      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', supportsImage: false, supportsThinking: true, contextWindow: DEEPSEEK_V4_CONTEXT_WINDOW },
-      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', supportsImage: false, supportsThinking: true, contextWindow: DEEPSEEK_V4_CONTEXT_WINDOW },
-      { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', supportsImage: false, supportsThinking: true },
+      { id: 'DeepSeek-V4-Flash', name: 'DeepSeek V4 Flash', supportsImage: false, supportsThinking: true, contextWindow: DEEPSEEK_V4_CONTEXT_WINDOW },
     ],
   },
   {
