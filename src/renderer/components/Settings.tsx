@@ -5070,16 +5070,18 @@ const Settings: React.FC<SettingsProps> = ({
                 />
               </SettingsRow>
 
-              <SettingsRow>
-                <SettingsToggleRow
-                  title={i18nService.t('usageAnalyticsEnabled')}
-                  description={i18nService.t('usageAnalyticsEnabledDescription')}
-                  checked={usageAnalyticsEnabled}
-                  onToggle={() => {
-                    setUsageAnalyticsEnabled((prev) => !prev);
-                  }}
-                />
-              </SettingsRow>
+              <div style={{ display: 'none' }}>
+                <SettingsRow>
+                  <SettingsToggleRow
+                    title={i18nService.t('usageAnalyticsEnabled')}
+                    description={i18nService.t('usageAnalyticsEnabledDescription')}
+                    checked={usageAnalyticsEnabled}
+                    onToggle={() => {
+                      setUsageAnalyticsEnabled((prev) => !prev);
+                    }}
+                  />
+                </SettingsRow>
+              </div>
             </SettingsGroup>
           </div>
         );

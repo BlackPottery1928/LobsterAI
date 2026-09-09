@@ -79,8 +79,8 @@ test('defaultConfig uses OpenAI-compatible DeepSeek defaults', () => {
   expect(defaultConfig.providers?.[ProviderName.Xiaomi]?.apiFormat).toBe(ApiFormat.OpenAI);
 });
 
-test('defaultConfig enables usage analytics by default', () => {
-  expect(defaultConfig.usageAnalyticsEnabled).toBe(true);
+test('defaultConfig disables usage analytics by default', () => {
+  expect(defaultConfig.usageAnalyticsEnabled).toBe(false);
 });
 
 test('defaultConfig gives DeepSeek V4 models 1M context', () => {

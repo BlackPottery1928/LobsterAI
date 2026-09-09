@@ -193,7 +193,7 @@ export const defaultConfig: AppConfig = {
   useSystemProxy: false,
   artifactAutoPreviewEnabled: true,
   sqliteAutoBackupEnabled: false,
-  usageAnalyticsEnabled: true,
+  usageAnalyticsEnabled: false,
   notificationSettings: defaultNotificationSettings,
   browserWebAccess: defaultBrowserWebAccessConfig,
   app: {
