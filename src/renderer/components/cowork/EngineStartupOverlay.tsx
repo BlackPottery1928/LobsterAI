@@ -5,11 +5,12 @@ import { coworkService } from '../../services/cowork';
 import { i18nService } from '../../services/i18n';
 import type { OpenClawEngineStatus } from '../../types/cowork';
 
+// [INTRA-ONLY] engineStartingTip4 (IM channels) is hidden for intranet builds.
+// Re-add it here and to index.html's splash tips to restore.
 const TIP_KEYS = [
   'engineStartingTip1',
   'engineStartingTip2',
   'engineStartingTip3',
-  'engineStartingTip4',
   'engineStartingTip5',
   'engineStartingTip6',
 ] as const;
