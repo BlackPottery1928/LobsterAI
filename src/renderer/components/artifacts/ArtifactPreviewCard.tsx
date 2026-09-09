@@ -23,6 +23,7 @@ import {
   ArtifactPublishEntryPoint,
   reportArtifactPreviewAction,
 } from './artifactAnalytics';
+import { ARTIFACT_DEPLOY_HIDDEN } from './artifactDeployVisibility';
 import { useOptionalArtifactFileShare } from './ArtifactFileShareController';
 import { ARTIFACT_SHARE_HIDDEN, isArtifactFileShareable } from './artifactFileSharePolicy';
 import ArtifactPreviewIdentity from './ArtifactPreviewIdentity';
@@ -406,7 +407,8 @@ const ArtifactPreviewCard: React.FC<ArtifactPreviewCardProps> = ({
     artifact.type !== ArtifactTypeValue.LocalService &&
     Boolean(artifactFileShare) &&
     isArtifactFileShareable(artifact);
-  const canDeploy = artifact.type === ArtifactTypeValue.LocalService &&
+  const canDeploy = !ARTIFACT_DEPLOY_HIDDEN &&
+    artifact.type === ArtifactTypeValue.LocalService &&
     Boolean(onDeployLocalService);
   const cardClassName = 'artifact-preview-card-row group flex min-h-[58px] items-center gap-3 px-4 py-3 transition-colors w-full text-left';
   const iconClassName = 'w-5 h-5';

@@ -115,6 +115,7 @@ import {
   getArtifactBrowserUrlType,
   reportArtifactPreviewAction,
 } from './artifactAnalytics';
+import { ARTIFACT_DEPLOY_HIDDEN } from './artifactDeployVisibility';
 import { useOptionalArtifactFileShare } from './ArtifactFileShareController';
 import {
   ARTIFACT_SHARE_HIDDEN,
@@ -5156,7 +5157,10 @@ const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
         onClick: handleShareBrowserHtmlArtifact,
       };
     }
-    if (browserToolbarPublishTarget?.kind === ArtifactToolbarPublishActionKind.Deploy) {
+    if (
+      !ARTIFACT_DEPLOY_HIDDEN
+      && browserToolbarPublishTarget?.kind === ArtifactToolbarPublishActionKind.Deploy
+    ) {
       return {
         kind: ArtifactToolbarPublishActionKind.Deploy,
         label: browserDeploymentActionLabel,
@@ -7298,7 +7302,9 @@ const BrowserTabContent: React.FC<BrowserTabContentProps> = ({
 
   useEffect(() => {
     if (currentUrl) return;
-    void loadLocalServices();
+    // [INTRA-ONLY] Local-service discovery is disabled for intranet builds.
+    // Restore this call and the panel below when merging upstream.
+    // void loadLocalServices();
   }, [currentUrl, loadLocalServices]);
 
   useEffect(() => {
@@ -8337,7 +8343,9 @@ const BrowserTabContent: React.FC<BrowserTabContentProps> = ({
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 items-center justify-center overflow-auto px-6 py-10">
+        // [INTRA-ONLY] Local-service panel hidden for intranet builds.
+        // Delete the `hidden` class when merging upstream.
+        <div className="hidden flex-1 items-center justify-center overflow-auto px-6 py-10">
           <div className="w-full max-w-[420px]">
             <div className="mb-3 flex items-center justify-between px-1">
               <div className="text-xs text-muted">{t('artifactBrowserLocalServices')}</div>
