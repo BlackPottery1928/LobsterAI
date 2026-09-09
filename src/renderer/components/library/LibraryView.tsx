@@ -211,6 +211,11 @@ const SOURCE_FILTERS = [
   LibrarySourceFilter.Cloud,
 ] as const;
 
+// [INTRA-ONLY] Hide the "Cloud" source in "My Files" for intranet builds.
+// Set to false to restore; delete this const and every `CLOUD_SOURCE_HIDDEN`
+// reference below when merging upstream.
+const CLOUD_SOURCE_HIDDEN = true;
+
 const getLibrarySessionKey = (item: LibraryItem): string => {
   if (item.itemKind === LibraryItemKind.LocalArtifact) {
     return `session:${item.latestSession.sessionId}`;
@@ -366,7 +371,9 @@ const LibraryViewContent: React.FC<LibraryViewProps> = ({
   ));
   const favoriteOwnerScope = ownerAccountKey ?? undefined;
   const [analyticsPageViewId] = useState(createLibraryAnalyticsPageViewId);
-  const [source, setSource] = useState<LibrarySourceFilter>(requestedSource);
+  const [source, setSource] = useState<LibrarySourceFilter>(() => (
+    CLOUD_SOURCE_HIDDEN ? LibrarySourceFilter.Local : requestedSource
+  ));
   const [category, setCategory] = useState<LibraryCategory>(LibraryCategory.All);
   const [keywordInput, setKeywordInput] = useState('');
   const [keyword, setKeyword] = useState('');
@@ -451,7 +458,7 @@ const LibraryViewContent: React.FC<LibraryViewProps> = ({
   }, [keywordInput]);
 
   const wantsLocal = source === LibrarySourceFilter.Local;
-  const wantsCloud = source === LibrarySourceFilter.Cloud;
+  const wantsCloud = !CLOUD_SOURCE_HIDDEN && source === LibrarySourceFilter.Cloud;
   const hasActiveLocalFilter = category !== LibraryCategory.All
     || keyword.length > 0
     || favoritesOnly;
@@ -684,7 +691,7 @@ const LibraryViewContent: React.FC<LibraryViewProps> = ({
     setCategory(LibraryCategory.All);
     setKeywordInput('');
     setKeyword('');
-    setSource(requestedSource);
+    setSource(CLOUD_SOURCE_HIDDEN ? LibrarySourceFilter.Local : requestedSource);
     scrollContainerRef.current?.scrollTo({ top: 0 });
   }, [navigationRequestId, requestedSource]);
 
@@ -1574,16 +1581,18 @@ const LibraryViewContent: React.FC<LibraryViewProps> = ({
           aria-label={i18nService.t('libraryTitle')}
           className="non-draggable flex items-center gap-1"
         >
-          {SOURCE_FILTERS.map(value => (
-            <SourceTab
-              key={value}
-              source={value}
-              active={source === value}
-              loading={source === value && loadingFeedback.showSourceActivity}
-              announceLoading={loadingFeedback.showLongWaitLabel}
-              onClick={() => handleSourceChange(value)}
-            />
-          ))}
+          {SOURCE_FILTERS
+            .filter(value => !CLOUD_SOURCE_HIDDEN || value !== LibrarySourceFilter.Cloud)
+            .map(value => (
+              <SourceTab
+                key={value}
+                source={value}
+                active={source === value}
+                loading={source === value && loadingFeedback.showSourceActivity}
+                announceLoading={loadingFeedback.showLongWaitLabel}
+                onClick={() => handleSourceChange(value)}
+              />
+            ))}
         </div>
       </div>
 
