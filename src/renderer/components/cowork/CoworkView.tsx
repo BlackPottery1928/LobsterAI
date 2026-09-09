@@ -1007,7 +1007,10 @@ const CoworkView: React.FC<CoworkViewProps> = ({
                     />
                   </div>
                 )}
-                <CreditsResetCampaignFloat />
+                {/* Credits reset campaign float hidden for this build; kept for upstream merges. */}
+                <div className="hidden">
+                  <CreditsResetCampaignFloat />
+                </div>
               </div>
 
               <div aria-hidden="true" className="w-full min-h-[24px] flex-[3_0_0px]" />

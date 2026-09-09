@@ -599,22 +599,28 @@ const UserMenu: React.FC<UserMenuProps> = ({
           label={i18nService.t('authUsageOverview')}
           onClick={handleUsageOverview}
         />
-        <AccountMenuAction
-          icon={<PortalMenuIcon src={rechargeIconUrl} darkInvert />}
-          label={i18nService.t('authGoRecharge')}
-          onClick={handleRecharge}
-        />
+        {/* Recharge entry hidden for this build; kept for upstream merges. */}
+        <div className="hidden">
+          <AccountMenuAction
+            icon={<PortalMenuIcon src={rechargeIconUrl} darkInvert />}
+            label={i18nService.t('authGoRecharge')}
+            onClick={handleRecharge}
+          />
+        </div>
       </div>
 
       {/* Campaigns and invitations */}
       <div className="border-b border-border py-1">
-        {campaignActionLabel && (
-          <AccountMenuAction
-            icon={<PortalMenuIcon src={promoSubscriptionIconUrl} darkInvert />}
-            label={campaignActionLabel}
-            onClick={handleCreditsResetActivity}
-          />
-        )}
+        {/* Campaign promo entry hidden for this build; kept for upstream merges. */}
+        <div className="hidden">
+          {campaignActionLabel && (
+            <AccountMenuAction
+              icon={<PortalMenuIcon src={promoSubscriptionIconUrl} darkInvert />}
+              label={campaignActionLabel}
+              onClick={handleCreditsResetActivity}
+            />
+          )}
+        </div>
         {finalRewards.map(reward => {
           const rewardText = getFinalRewardText(reward);
           return (

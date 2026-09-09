@@ -71,6 +71,8 @@ const MAX_SIDEBAR_WIDTH = 420;
 const SIDEBAR_COLLAPSE_TRANSITION_MS = 200;
 const SIDEBAR_LOGIN_PROMO_TIP_DURATION_MS = 5000;
 const SIDEBAR_LOGIN_PROMO_TIP_FADE_MS = 220;
+// Login promo tip bubble is hidden for this build; kept for upstream merges.
+const SIDEBAR_LOGIN_PROMO_TIP_ENABLED = false;
 
 const SidebarPromoStar: React.FC<{ className?: string; idPrefix: string }> = ({
   className,
@@ -286,7 +288,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   const isWindows = window.electron.platform === 'win32';
   const showHeaderRow = !isWindows;
   const showLoginPromo = !hideLogin && !isAuthLoading && !isLoggedIn;
-  const shouldShowLoginPromoTip = showLoginPromo && showLoginPromoTip;
+  const shouldShowLoginPromoTip = SIDEBAR_LOGIN_PROMO_TIP_ENABLED
+    && showLoginPromo
+    && showLoginPromoTip;
   const shouldReserveLoginPromoTipSpace = shouldShowLoginPromoTip;
   const batchSelectableKeySet = useMemo(
     () => new Set(batchSelectableItems.map((item) => item.key)),
