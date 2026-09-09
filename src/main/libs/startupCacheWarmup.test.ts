@@ -26,21 +26,7 @@ describe('startup server model warmup', () => {
     });
   });
 
-  test('passes the complete server model metadata into the main cache', async () => {
-    const serverModels = [{
-      modelId: 'kimi-k3-YoudaoInner',
-      modelName: 'Kimi K3',
-      provider: 'moonshot',
-      apiFormat: 'openai',
-      runtimeProfile: 'moonshot-kimi-k3',
-      supportsImage: true,
-      supportsVideo: true,
-      supportsThinking: true,
-      supportsToolCalling: true,
-      agenticReady: false,
-      contextWindow: 1_048_576,
-      maxTokens: 8_192,
-    }];
+  test('does not prefetch or cache server models while disabled', async () => {
     const fetchWithAuth = vi.fn(async (url: string) => {
       if (url.includes('/api/user/quota')) {
         return new Response(JSON.stringify({
@@ -50,9 +36,7 @@ describe('startup server model warmup', () => {
           },
         }), { status: 200 });
       }
-      return new Response(JSON.stringify({ code: 0, data: serverModels }), {
-        status: 200,
-      });
+      return new Response(JSON.stringify({ code: 0, data: [] }), { status: 200 });
     });
 
     await runStartupCacheWarmup({
@@ -64,16 +48,11 @@ describe('startup server model warmup', () => {
       t: key => key,
     });
 
-    expect(updateServerModelMetadata).toHaveBeenCalledWith(serverModels);
-    expect(fetchWithAuth).toHaveBeenCalledWith(
-      'https://lobster.test/api/models/available',
-      expect.objectContaining({
-        headers: {
-          Accept: 'application/json',
-          'X-LobsterAI-Client-Capabilities': 'kimi-k3-agentic-v1,thinking-level-control-v1',
-          'X-LobsterAI-Client-Version': '2026.7.23',
-        },
-      }),
-    );
+    // The quota branch still runs …
+    const urls = fetchWithAuth.mock.calls.map(call => String(call[0]));
+    expect(urls.some(url => url.includes('/api/user/quota'))).toBe(true);
+    // … but the server model branch is skipped.
+    expect(urls.some(url => url.includes('/api/models/available'))).toBe(false);
+    expect(updateServerModelMetadata).not.toHaveBeenCalled();
   });
 });

@@ -121,6 +121,10 @@ export interface AvailableServerModelEntry {
   restrictionHint?: string;
 }
 
+// Server plan models (isServerModel) are intentionally disabled in this build.
+// Set to true (or delete this guard) to restore LobsterAI plan-model loading.
+const SERVER_PLAN_MODELS_ENABLED: boolean = false;
+
 const readString = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
@@ -945,6 +949,9 @@ class AuthService {
    * whole app session, because nothing else re-runs this until the next launch.
    */
   private loadServerModels(): Promise<boolean> {
+    if (!SERVER_PLAN_MODELS_ENABLED) {
+      return Promise.resolve(false);
+    }
     const requestSnapshot = store.getState().auth;
     if (
       !requestSnapshot.isLoggedIn
@@ -1047,6 +1054,9 @@ class AuthService {
    * Load public pricing catalog models for unauthenticated read-only display.
    */
   private async loadPublicPricingCatalogModels() {
+    if (!SERVER_PLAN_MODELS_ENABLED) {
+      return;
+    }
     const authStateAtStart = store.getState().auth;
     if (authStateAtStart.isLoggedIn || authStateAtStart.ownerAccountKey) {
       return;

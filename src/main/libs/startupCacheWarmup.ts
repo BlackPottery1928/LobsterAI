@@ -27,6 +27,10 @@ export type StartupCacheWarmupResult = {
 
 const WARMUP_TIMEOUT = 5000;
 
+// Server plan model warmup is intentionally disabled in this build.
+// Set to true (or delete this guard) to restore the startup /api/models/available prefetch.
+const SERVER_MODEL_WARMUP_ENABLED: boolean = false;
+
 export const buildServerModelCapabilityHeaders = (
   clientVersion: string,
 ): Record<string, string> => ({
@@ -80,6 +84,7 @@ export async function runStartupCacheWarmup(deps: StartupCacheWarmupDeps): Promi
       }
     })(),
     (async () => {
+      if (!SERVER_MODEL_WARMUP_ENABLED) return;
       try {
         const url = appendKeyfromQuery(`${serverBaseUrl}/api/models/available`);
         const resp = await fetchWithAuth(url, {
