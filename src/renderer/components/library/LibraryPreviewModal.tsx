@@ -33,7 +33,7 @@ import {
   ArtifactFileShareProvider,
   useOptionalArtifactFileShare,
 } from '../artifacts/ArtifactFileShareController';
-import { isArtifactFileShareable } from '../artifacts/artifactFileSharePolicy';
+import { ARTIFACT_SHARE_HIDDEN, isArtifactFileShareable } from '../artifacts/artifactFileSharePolicy';
 import ArtifactRenderer from '../artifacts/ArtifactRenderer';
 import {
   CARD_OVERFLOW_MENU_ITEM_CLASSNAME,
@@ -235,7 +235,7 @@ const LibraryPreviewModalContent: React.FC<LibraryPreviewModalProps> = ({
     ? Math.max(localItem.relatedSessionCount, sessions.length)
     : sessions.length;
   const hasPreviewMenuItems = previewActions.length > 0;
-  const canShare = Boolean(
+  const canShare = !ARTIFACT_SHARE_HIDDEN && Boolean(
     localItem
     && artifact
     && artifactFileShare

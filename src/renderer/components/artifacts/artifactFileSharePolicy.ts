@@ -11,6 +11,11 @@ import {
   ArtifactTypeValue,
 } from '@/types/artifact';
 
+// [INTRA-ONLY] Hide every artifact/file share entry point for intranet builds.
+// Set to false to restore; delete this const and every `ARTIFACT_SHARE_HIDDEN`
+// reference below when merging upstream.
+export const ARTIFACT_SHARE_HIDDEN = true;
+
 export const ArtifactFileShareRequestSource = {
   HtmlFile: 'htmlFile',
   ArtifactFile: 'artifactFile',

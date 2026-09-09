@@ -59,7 +59,7 @@ import {
   ArtifactFileShareProvider,
   useOptionalArtifactFileShare,
 } from '../artifacts/ArtifactFileShareController';
-import { isArtifactFileShareable } from '../artifacts/artifactFileSharePolicy';
+import { ARTIFACT_SHARE_HIDDEN, isArtifactFileShareable } from '../artifacts/artifactFileSharePolicy';
 import { shouldShowFreePublishingDeleteQuotaNotice } from '../artifacts/publishingDeleteNoticePolicy';
 import CardOverflowMenu, { type CardOverflowMenuItem } from '../common/CardOverflowMenu';
 import {
@@ -1489,8 +1489,15 @@ const LibraryViewContent: React.FC<LibraryViewProps> = ({
     return <ArrowTopRightOnSquareIcon className="h-4 w-4" />;
   };
 
+  // [INTRA-ONLY] Drop the share entry from the card menu for intranet builds.
+  const getVisibleCardActionIds = (item: LibraryItem): readonly LibraryItemActionValue[] => (
+    ARTIFACT_SHARE_HIDDEN
+      ? getLibraryCardActionIds(item).filter(action => action !== LibraryItemAction.ShareLocal)
+      : getLibraryCardActionIds(item)
+  );
+
   const buildCardMenuItems = (item: LibraryItem): CardOverflowMenuItem[] => (
-    getLibraryCardActionIds(item).map(action => ({
+    getVisibleCardActionIds(item).map(action => ({
       key: action,
       label: getCardActionLabel(item, action),
       icon: getCardActionIcon(item, action),
