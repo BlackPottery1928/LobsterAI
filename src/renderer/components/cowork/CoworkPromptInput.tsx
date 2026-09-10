@@ -151,7 +151,6 @@ import {
   MediaMentionSegmentKind,
   resolveMediaMentionTrigger,
 } from './mediaMentionUtils';
-import MediaModelPicker from './MediaModelPicker';
 import {
   getAttachmentAnalyticsParams,
   getKitAnalyticsParams,
@@ -743,6 +742,12 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     );
     try {
       const result = await authService.login();
+      // [INTRA-ONLY] Dismissing the in-app credential form is not a failure: no toast.
+      if (result.cancelled) {
+        logPromptModelSelection('debug', `${source} login handoff cancelled by the user`);
+        setChatLoginExperiencePending(false);
+        return;
+      }
       if (!result.success) {
         throw new Error(result.error || i18nService.t('welcomeLoginFailed'));
       }

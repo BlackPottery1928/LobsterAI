@@ -46,6 +46,18 @@ base URL 三级优先级：
 2. `INTRANET_BASE_URL` 常量（`src/main/libs/intranetEndpoints.ts`，默认 `http://127.0.0.1:8080`）
 3. 上游 `getServerApiBaseUrl()`（把常量置为 `''` 即回到这一级）
 
+### 取消登录不报错
+
+表单里按 Esc 或点「取消」→ `AuthLoginResult.cancelled = true`
+（`src/shared/auth/constants.ts`，`[INTRA-ONLY]` 字段，与 `error` 分开），
+`src/renderer/services/intranetCredentialLogin.ts` 在两处取消分支上置位。
+
+四个会检查登录结果的调用点据此**不再弹「登录发起失败」类提示**：
+`App.tsx`（新用户引导）、`CoworkPromptInput.tsx`（提示框登录）、
+`DailyCheckInActivity.tsx`（每日签到）直接静默返回，`StartupCreditCampaign.tsx`
+（积分活动弹窗）额外把弹窗关掉而不是显示 Failed 视图。
+其余调用点（`LoginButton`、`ModelSelector` 等）本来就不看返回值。
+
 ### 已知边界
 
 **只有登录与自动更新被指向内网，刷新等其它认证/主服务端请求仍打上游。** 这是有意的取舍：

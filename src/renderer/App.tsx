@@ -1422,6 +1422,13 @@ const App: React.FC = () => {
     finishNewUserOnboarding('start_experience');
     void authService.login()
       .then((result) => {
+        // [INTRA-ONLY] Dismissing the in-app credential form is not a failure:
+        // stay silent instead of reporting a login that never happened.
+        if (result.cancelled) {
+          console.log('[Onboarding] login handoff from new user onboarding cancelled by the user');
+          consumeNewUserWelcomeAfterLoginPending();
+          return;
+        }
         if (!result.success) {
           console.warn(
             `[Onboarding] login handoff from new user onboarding failed: ${result.error ?? 'unknown error'}`,

@@ -104,6 +104,10 @@ export const DailyCheckInLoginModal: React.FC<DailyCheckInLoginModalProps> = ({
     setStartingLogin(true);
     try {
       const result = await authService.login();
+      // [INTRA-ONLY] Dismissing the in-app credential form is not a failure: no toast.
+      if (result.cancelled) {
+        return;
+      }
       if (!result.success) {
         throw new Error(result.error || i18nService.t('dailyCheckInLoginFailed'));
       }

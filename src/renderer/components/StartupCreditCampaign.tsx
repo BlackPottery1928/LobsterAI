@@ -726,6 +726,17 @@ const StartupCreditCampaign: React.FC<StartupCreditCampaignProps> = ({
       showTerminalView(CampaignModalView.StartingLogin);
       try {
         const loginResult = await authService.login();
+        // [INTRA-ONLY] Dismissing the in-app credential form is not a failure:
+        // close the campaign instead of showing its "failed" view.
+        if (loginResult.cancelled) {
+          clearPendingStartupCreditClaim(localStorage);
+          if (mountedRef.current) {
+            setModalView(CampaignModalView.Offer);
+            modalOpenRef.current = false;
+            setModalOpen(false);
+          }
+          return;
+        }
         // [INTRA-ONLY] The in-app credential form completes login without a
         // browser redirect, so `redirectUrl` is absent on that path.
         if (!loginResult.success

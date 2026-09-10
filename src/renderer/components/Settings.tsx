@@ -5119,7 +5119,7 @@ const Settings: React.FC<SettingsProps> = ({
                         </div>
 
                         {openClawGatewayHttpUrl ? (
-                          <div className="mt-3 flex max-w-full items-center gap-2 rounded-lg border border-border-subtle bg-surface-raised/60 p-1.5">
+                          <div className="mt-3 flex max-w-full items-center gap-2 rounded-lg border border-border-subtle bg-surface-raised/60 p-1.5" style={{ display: 'none' }}>
                             <span className="shrink-0 rounded-md bg-background px-2 py-1 text-[11px] font-medium text-secondary">
                               {i18nService.t('openClawGatewayAddress')}
                             </span>
@@ -5367,7 +5367,7 @@ const Settings: React.FC<SettingsProps> = ({
       case 'coworkMemory': {
         const memoryTabs = [
           { key: 'entries' as const, titleKey: 'coworkMemoryTabEntries' },
-          { key: 'embedding' as const, titleKey: 'coworkMemoryTabEmbedding' },
+          // { key: 'embedding' as const, titleKey: 'coworkMemoryTabEmbedding' },
         ];
         const coworkMemoryGroups: Array<{ section?: string; entries: CoworkUserMemoryEntry[] }> = [];
         for (const entry of coworkMemoryEntries) {

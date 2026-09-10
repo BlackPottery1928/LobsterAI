@@ -111,7 +111,7 @@ async function runCredentialLogin(
     const credentials = await requestIntranetCredentialLogin();
     if (!credentials) {
       deps.log('info', `login attempt ${attemptId} cancelled before submitting credentials`);
-      return { success: false, error: i18nService.t('intranetLoginCancelled') };
+      return { success: false, cancelled: true, error: i18nService.t('intranetLoginCancelled') };
     }
 
     try {
@@ -121,7 +121,7 @@ async function runCredentialLogin(
       return { success: true };
     } catch (error) {
       if (isIntranetCredentialLoginCancelled()) {
-        return { success: false, error: i18nService.t('intranetLoginCancelled') };
+        return { success: false, cancelled: true, error: i18nService.t('intranetLoginCancelled') };
       }
       deps.log('warn', `login attempt ${attemptId} was rejected by the intranet API`);
       const reason = error instanceof IntranetCredentialLoginFailure ? error.reason : undefined;

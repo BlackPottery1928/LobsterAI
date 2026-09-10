@@ -354,6 +354,7 @@ describe('login diagnostics', () => {
 
     await expect(pending).resolves.toEqual({
       success: false,
+      cancelled: true,
       error: i18nService.t('intranetLoginCancelled'),
     });
     expect(loginWithCredentials).not.toHaveBeenCalled();
