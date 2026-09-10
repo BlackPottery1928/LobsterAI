@@ -255,6 +255,7 @@ import { registerBrowserCredentialHandlers } from './ipcHandlers/browserCredenti
 import { registerCoworkSubagentHandlers } from './ipcHandlers/coworkSubagent';
 import { ensureDshEngineReady, registerDshHandlers } from './ipcHandlers/dsh/handlers';
 import { registerEnterpriseAccountHandlers } from './ipcHandlers/enterpriseAccount';
+import { registerIntranetAuthIpcHandlers } from './ipcHandlers/intranetAuth/handlers'; // [INTRA-ONLY]
 import { registerKitHandlers } from './ipcHandlers/kits';
 import { registerMcpHandlers } from './ipcHandlers/mcp';
 import { registerNimQrLoginHandlers } from './ipcHandlers/nimQrLogin';
@@ -400,6 +401,7 @@ import {
   buildArtifactIdentityClientSourceKey,
   buildHtmlShareClientSourceKey,
 } from './libs/htmlShare/htmlShareSourceKey';
+import { getIntranetAuthBaseUrl } from './libs/intranetAuthLogin'; // [INTRA-ONLY]
 import { getKeyfromAttribution, initializeKeyfromAttribution } from './libs/keyfromAttribution';
 import { LibraryThumbnailRenderer } from './libs/libraryThumbnailRenderer';
 import { LibraryThumbnailService } from './libs/libraryThumbnailService';
@@ -6986,6 +6988,47 @@ if (!gotTheLock) {
         };
       }
     }
+  });
+
+  // [INTRA-ONLY] Employee-ID (工号) + password login against the intranet
+  // permission service (replaces the browser portal handoff for intranet builds).
+  registerIntranetAuthIpcHandlers({
+    ipcMain,
+    fetch: (url, init) => net.fetch(url, init),
+    getBaseUrl: getIntranetAuthBaseUrl,
+    getAccountChangedMessage: () => t('authAccountChanged'),
+    accountGeneration: {
+      get: () => authAccountGeneration,
+      begin: () => {
+        authAccountGeneration += 1;
+      },
+    },
+    quotaGate: {
+      get: getAuthQuotaGateState,
+      sync: syncOpenClawConfigIfAuthQuotaGateChanged,
+      reset: resetAuthQuotaGateState,
+      normalize: normalizeQuota,
+    },
+    session: {
+      clearEnterpriseContext: () => clearEnterpriseAccountContext(getStore()),
+      clearServerModelMetadata,
+      saveTokens: saveAuthTokens,
+      saveUser: saveAuthUser,
+      clearMediaForAccountSwitch: () => {
+        const scope = getCurrentMediaAccountScope();
+        mediaSelectionBySession.clear();
+        mediaTurnAccountScopeBySession.clear();
+        mediaReferencesBySession.clear();
+        if (scope) {
+          clearMediaPollingStateForOwner(scope.ownerAccountKey);
+        }
+      },
+      settlePendingMediaTasks: () => {
+        if (pendingMediaTasks.size === 0) {
+          stopMediaPollTimer();
+        }
+      },
+    },
   });
 
   registerActivityIpcHandlers({

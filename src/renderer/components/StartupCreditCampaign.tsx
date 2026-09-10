@@ -24,6 +24,7 @@ import { coworkService } from '../services/cowork';
 import { i18nService } from '../services/i18n';
 import { LogReporterAction } from '../services/logReporter';
 import type { RootState } from '../store';
+import { INTRANET_CREDENTIAL_LOGIN_ENABLED } from './auth/intranetLoginVisibility'; // [INTRA-ONLY]
 import {
   reportStartupCreditCampaignEvent,
   StartupCreditCampaignSource,
@@ -725,7 +726,10 @@ const StartupCreditCampaign: React.FC<StartupCreditCampaignProps> = ({
       showTerminalView(CampaignModalView.StartingLogin);
       try {
         const loginResult = await authService.login();
-        if (!loginResult.success || !loginResult.redirectUrl) {
+        // [INTRA-ONLY] The in-app credential form completes login without a
+        // browser redirect, so `redirectUrl` is absent on that path.
+        if (!loginResult.success
+            || (!INTRANET_CREDENTIAL_LOGIN_ENABLED && !loginResult.redirectUrl)) {
           throw new Error(
             loginResult.error || i18nService.t('startupCreditLoginFailed'),
           );

@@ -18,6 +18,7 @@ import {
 import type { ModelRuntimeProfile } from '@shared/providers/modelRuntimeProfiles';
 
 import type { EnterpriseAccountContext } from '../../shared/enterpriseAccount/types';
+import { INTRANET_CREDENTIAL_LOGIN_ENABLED } from '../components/auth/intranetLoginVisibility'; // [INTRA-ONLY]
 import {
   applyEnterpriseAccountContext,
   refreshEnterpriseAccountContext,
@@ -43,6 +44,10 @@ import {
   setServerModels,
 } from '../store/slices/modelSlice';
 import { i18nService } from './i18n';
+import {
+  loginWithIntranetCredentials,
+  resetIntranetCredentialLogin,
+} from './intranetCredentialLogin'; // [INTRA-ONLY]
 import { LogReporterAction, reportYdAnalyzer } from './logReporter';
 import {
   clearPendingPublishingConversionAttribution,
@@ -461,6 +466,20 @@ class AuthService {
     const attemptId = ++this.loginAttemptSequence;
     writeAuthRendererLog('info', `login attempt ${attemptId} started`);
 
+    // [INTRA-ONLY] Intranet builds collect the employee ID (工号) and password
+    // in-app instead of handing off to the system browser.
+    if (INTRANET_CREDENTIAL_LOGIN_ENABLED) {
+      return loginWithIntranetCredentials(
+        {
+          applyAuthenticatedState: (user, quota, enterpriseContext) => {
+            this.applyAuthenticatedState(user, quota, enterpriseContext);
+          },
+          log: writeAuthRendererLog,
+        },
+        attemptId,
+      );
+    }
+
     try {
       const loginUrl = await this.fetchLoginUrl();
       const result = await window.electron.auth.login(loginUrl);
@@ -825,6 +844,8 @@ class AuthService {
     this.pendingQuotaCheck = null;
     this.pendingServerModelLoad = null;
     this.serverModelLoadSequence += 1;
+    // [INTRA-ONLY] Drop any credential-login form so a later login starts clean.
+    resetIntranetCredentialLogin();
     this.clearEnterpriseQuotaBoundaryTimer();
     this.unsubCallback?.();
     this.unsubCallback = null;

@@ -11,6 +11,11 @@ import {
   EnterpriseQuotaReason,
 } from '../../shared/enterpriseAccount/constants';
 import type { EnterpriseAccountContext } from '../../shared/enterpriseAccount/types';
+import {
+  closeIntranetCredentialLogin,
+  getIntranetCredentialLoginState,
+  submitIntranetCredentialLogin,
+} from '../components/auth/intranetCredentialLoginBridge';
 import { setEnterpriseAccountContext } from '../features/enterpriseAccount/enterpriseAccountSlice';
 import { store } from '../store';
 import { setLoggedIn, setLoggedOut } from '../store/slices/authSlice';
@@ -264,73 +269,94 @@ describe('auth-scoped renderer requests', () => {
   });
 });
 
+// [INTRA-ONLY] Login is routed through the in-app credential form for intranet
+// builds, so the system-browser handoff these tests used to cover is no longer
+// reachable while `INTRANET_CREDENTIAL_LOGIN_ENABLED` is true.
+// [INTRA-ONLY] Login is routed through the in-app credential form for intranet
+// builds, so the system-browser handoff these tests used to cover is no longer
+// reachable while `INTRANET_CREDENTIAL_LOGIN_ENABLED` is true.
 describe('login diagnostics', () => {
-  test('persists renderer lifecycle logs without including the login URL', async () => {
+  const INTRANET_USER = {
+    userId: 'E1001',
+    yid: 'E1001',
+    nickname: 'E1001',
+    avatarUrl: null,
+  };
+
+  const stubCredentialLoginWindow = (loginWithCredentials: ReturnType<typeof vi.fn>) => {
+    const login = vi.fn();
     const fromRenderer = vi.fn();
-    const loginResult = {
-      success: true,
-      redirectUrl: 'https://lobsterai.youdao.com/portal#/login?source=electron',
-    };
-    const login = vi.fn().mockResolvedValue(loginResult);
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'debug').mockImplementation(() => {});
-    vi.stubGlobal('window', {
-      electron: {
-        api: {
-          fetch: vi.fn().mockResolvedValue({
-            ok: true,
-            data: { data: { value: 'https://lobsterai.youdao.com/portal#/login' } },
-          }),
-        },
-        auth: { login },
-        log: { fromRenderer },
-      },
-    });
-
-    await expect(authService.login()).resolves.toEqual(loginResult);
-
-    expect(login).toHaveBeenCalledWith('https://lobsterai.youdao.com/portal#/login');
-    expect(fromRenderer).toHaveBeenCalledWith(
-      'info',
-      'AuthService',
-      expect.stringMatching(/^login attempt \d+ started$/),
-    );
-    expect(fromRenderer).toHaveBeenCalledWith(
-      'info',
-      'AuthService',
-      expect.stringMatching(/^login attempt \d+ handed off to the system browser$/),
-    );
-    expect(fromRenderer.mock.calls.flat().join(' ')).not.toContain('lobsterai.youdao.com');
-  });
-
-  test('returns the IPC failure result without throwing and records a warning', async () => {
-    const fromRenderer = vi.fn();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'debug').mockImplementation(() => {});
-    vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.stubGlobal('window', {
+      dispatchEvent: vi.fn(),
       electron: {
-        api: {
-          fetch: vi.fn().mockResolvedValue({
-            ok: true,
-            data: { data: { value: 'https://lobsterai.youdao.com/portal#/login' } },
-          }),
-        },
-        auth: { login: vi.fn().mockResolvedValue({ success: false, error: 'open failed' }) },
+        auth: { login, loginWithCredentials },
         log: { fromRenderer },
       },
     });
+    return { fromRenderer, login };
+  };
 
-    await expect(authService.login()).resolves.toEqual({
-      success: false,
-      error: 'open failed',
+  test('collects credentials in-app instead of handing off to the system browser', async () => {
+    const loginWithCredentials = vi.fn().mockResolvedValue({
+      success: true,
+      user: INTRANET_USER,
+      quota: null,
+      enterpriseContext: null,
     });
+    const { fromRenderer, login } = stubCredentialLoginWindow(loginWithCredentials);
 
-    expect(fromRenderer).toHaveBeenCalledWith(
-      'warn',
-      'AuthService',
-      expect.stringMatching(/^login attempt \d+ could not open the system browser$/),
-    );
+    const pending = authService.login();
+    expect(getIntranetCredentialLoginState().open).toBe(true);
+    submitIntranetCredentialLogin({ employeeId: 'E1001', password: 'p@ssw0rd' });
+    await expect(pending).resolves.toEqual({ success: true });
+
+    expect(loginWithCredentials).toHaveBeenCalledWith('E1001', 'p@ssw0rd');
+    expect(login).not.toHaveBeenCalled();
+    expect(store.getState().auth.ownerAccountKey).toBe('personal:E1001');
+    expect(getIntranetCredentialLoginState().open).toBe(false);
+    expect(fromRenderer.mock.calls.flat().join(' ')).not.toContain('p@ssw0rd');
+  });
+
+  test('re-opens the form with an inline error and retries after a rejection', async () => {
+    const loginWithCredentials = vi.fn()
+      .mockResolvedValueOnce({ success: false, reason: 'invalid_credentials' })
+      .mockResolvedValueOnce({
+        success: true,
+        user: INTRANET_USER,
+        quota: null,
+        enterpriseContext: null,
+      });
+    stubCredentialLoginWindow(loginWithCredentials);
+
+    const pending = authService.login();
+    submitIntranetCredentialLogin({ employeeId: 'E1001', password: 'wrong' });
+
+    await vi.waitFor(() => {
+      expect(getIntranetCredentialLoginState().error)
+        .toBe(i18nService.t('intranetLoginInvalidCredentials'));
+    });
+    expect(getIntranetCredentialLoginState().open).toBe(true);
+
+    submitIntranetCredentialLogin({ employeeId: 'E1001', password: 'right' });
+    await expect(pending).resolves.toEqual({ success: true });
+    expect(loginWithCredentials).toHaveBeenLastCalledWith('E1001', 'right');
+  });
+
+  test('resolves as cancelled when the form closes', async () => {
+    const loginWithCredentials = vi.fn();
+    stubCredentialLoginWindow(loginWithCredentials);
+
+    const pending = authService.login();
+    closeIntranetCredentialLogin();
+
+    await expect(pending).resolves.toEqual({
+      success: false,
+      error: i18nService.t('intranetLoginCancelled'),
+    });
+    expect(loginWithCredentials).not.toHaveBeenCalled();
   });
 });
 

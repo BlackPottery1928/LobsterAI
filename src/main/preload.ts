@@ -69,6 +69,7 @@ import {
   type HtmlShareSourceType,
   type HtmlShareStatus,
 } from '../shared/htmlShare/constants';
+import { IntranetAuthIpcChannel } from '../shared/intranetAuth/constants'; // [INTRA-ONLY]
 import type {
   KitReference,
   KitSkillMetadata,
@@ -1300,6 +1301,10 @@ contextBridge.exposeInMainWorld('electron', {
   },
   auth: {
     login: (loginUrl?: string) => ipcRenderer.invoke(AuthIpcChannel.Login, { loginUrl }),
+    // [INTRA-ONLY] Employee-ID (工号) + password login against the intranet
+    // permission service.
+    loginWithCredentials: (employeeId: string, password: string) =>
+      ipcRenderer.invoke(IntranetAuthIpcChannel.Login, { employeeId, password }),
     exchange: (code: string) => ipcRenderer.invoke(AuthIpcChannel.Exchange, { code }),
     getUser: () => ipcRenderer.invoke(AuthIpcChannel.GetUser),
     getQuota: () => ipcRenderer.invoke(AuthIpcChannel.GetQuota),
