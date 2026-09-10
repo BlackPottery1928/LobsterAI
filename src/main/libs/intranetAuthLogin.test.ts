@@ -1,15 +1,17 @@
 // [INTRA-ONLY] Tests for the intranet credential login contract.
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { IntranetLoginFailureReason } from '../../shared/intranetAuth/constants';
 import {
   buildIntranetLoginRequest,
+  getIntranetAuthBaseUrl,
   INTRANET_AUTH_LOGIN_PATH,
   IntranetLoginError,
   normalizeIntranetUser,
   parseIntranetLoginResponse,
   performIntranetCredentialLogin,
 } from './intranetAuthLogin';
+import { INTRANET_BASE_URL, INTRANET_BASE_URL_ENV } from './intranetEndpoints';
 
 const jsonResponse = (body: unknown, status = 200): Response => ({
   ok: status >= 200 && status < 300,
@@ -192,5 +194,32 @@ describe('performIntranetCredentialLogin', () => {
       fetch: fetchImpl,
       timeoutMs: 5,
     })).rejects.toMatchObject({ reason: IntranetLoginFailureReason.Timeout });
+  });
+});
+
+describe('getIntranetAuthBaseUrl', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  test('defaults to the intranet origin the build ships with', () => {
+    vi.stubEnv(INTRANET_BASE_URL_ENV, '');
+    vi.stubEnv('LOBSTER_INTRANET_AUTH_BASE_URL', '');
+
+    expect(getIntranetAuthBaseUrl()).toBe(INTRANET_BASE_URL);
+  });
+
+  test('follows the shared intranet origin when it is overridden', () => {
+    vi.stubEnv(INTRANET_BASE_URL_ENV, 'http://10.0.0.5:8080/');
+    vi.stubEnv('LOBSTER_INTRANET_AUTH_BASE_URL', '');
+
+    expect(getIntranetAuthBaseUrl()).toBe('http://10.0.0.5:8080');
+  });
+
+  test('lets the login-specific variable win over the shared origin', () => {
+    vi.stubEnv(INTRANET_BASE_URL_ENV, 'http://10.0.0.5:8080');
+    vi.stubEnv('LOBSTER_INTRANET_AUTH_BASE_URL', 'https://perm.intranet.example.com/login');
+
+    expect(getIntranetAuthBaseUrl()).toBe('https://perm.intranet.example.com');
   });
 });

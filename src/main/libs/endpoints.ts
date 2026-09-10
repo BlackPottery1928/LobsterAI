@@ -3,6 +3,8 @@ import { app } from 'electron';
 import { HtmlSharePublicRoute } from '../../shared/htmlShare/constants';
 import type { SqliteStore } from '../sqliteStore';
 import { resolveDevelopmentServerBaseUrl } from './developmentServerBaseUrl';
+// [INTRA-ONLY]
+import { getIntranetBaseUrl } from './intranetEndpoints';
 
 let cachedTestMode: boolean | null = null;
 let loggedDevelopmentServerBaseUrl: string | null = null;
@@ -52,16 +54,20 @@ export const getHtmlSharePublicBaseUrl = (): string => {
   return `${getServerApiBaseUrl()}${HtmlSharePublicRoute.Root}`;
 };
 
+// [INTRA-ONLY] Auto-update checks go to the intranet origin; the upstream overmind
+// host is only used when the switch is off (`INTRANET_BASE_URL = ''` and no env
+// override). The other overmind endpoints (skill/kit store, MCP marketplace) are
+// deliberately left on the upstream host.
+const getUpdateCheckBaseUrl = (): string => getIntranetBaseUrl() ?? 'https://api-overmind.youdao.com';
+
+const getUpdateOvermindChannel = (): 'test' | 'prod' => (isTestModeEnabled() ? 'test' : 'prod');
+
 export const getUpdateCheckUrl = (): string => (
-  isTestModeEnabled()
-    ? 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/test/update'
-    : 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/prod/update'
+  `${getUpdateCheckBaseUrl()}/openapi/get/luna/hardware/lobsterai/${getUpdateOvermindChannel()}/update`
 );
 
 export const getManualUpdateCheckUrl = (): string => (
-  isTestModeEnabled()
-    ? 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/test/update-manual'
-    : 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/prod/update-manual'
+  `${getUpdateCheckBaseUrl()}/openapi/get/luna/hardware/lobsterai/${getUpdateOvermindChannel()}/update-manual`
 );
 
 export const getFallbackDownloadUrl = (): string => (

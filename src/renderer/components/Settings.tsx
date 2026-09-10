@@ -5832,7 +5832,7 @@ const Settings: React.FC<SettingsProps> = ({
                   )}
                 </div>
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 border-b border-border">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 border-b border-border"  style={{ display: 'none' }}>
                 <span className="shrink-0 text-sm text-foreground">{i18nService.t('aboutContactEmail')}</span>
                 <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
                   <button
@@ -5853,7 +5853,7 @@ const Settings: React.FC<SettingsProps> = ({
                   )}
                 </div>
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 border-b border-border">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 border-b border-border"  style={{ display: 'none' }}>
                 <span className="shrink-0 text-sm text-foreground">{i18nService.t('aboutUserCommunity')}</span>
                 <button
                   type="button"
@@ -5866,7 +5866,7 @@ const Settings: React.FC<SettingsProps> = ({
                   {ABOUT_USER_COMMUNITY_URL}
                 </button>
               </div>
-              <div className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3${testModeUnlocked ? ' border-b border-border' : ''}`}>
+              <div className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3${testModeUnlocked ? ' border-b border-border' : ''}`}  style={{ display: 'none' }}>
                 <span className="shrink-0 text-sm text-foreground">{i18nService.t('aboutUserManual')}</span>
                 <button
                   type="button"
@@ -5903,7 +5903,7 @@ const Settings: React.FC<SettingsProps> = ({
 
             {/* Footer */}
             <div className="mt-auto w-full pt-14 pb-2 flex flex-col items-center">
-              <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-sm text-secondary">
+              <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-sm text-secondary" style={{ display: 'none' }}>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -5931,7 +5931,7 @@ const Settings: React.FC<SettingsProps> = ({
               <p className="mt-5 text-center text-xs text-secondary">
                 {i18nService.t('copyrightHolder')}
               </p>
-              <p className="mt-1 text-center text-xs text-secondary">
+              <p className="mt-1 text-center text-xs text-secondary" style={{ display: 'none' }}>
                 Copyright &copy; {new Date().getFullYear()} NetEase Youdao. All Rights Reserved.
               </p>
             </div>

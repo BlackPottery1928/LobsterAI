@@ -13,6 +13,8 @@ import {
   type IntranetLoginFailureReason as IntranetLoginFailureReasonValue,
 } from '../../shared/intranetAuth/constants';
 import { getServerApiBaseUrl } from './endpoints';
+// [INTRA-ONLY]
+import { getIntranetBaseUrl } from './intranetEndpoints';
 
 // --- Service contract -------------------------------------------------------
 // Default convention; adjust these to match the real permission API.
@@ -29,15 +31,16 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const SENSITIVE_USER_KEYS = ['accessToken', 'refreshToken', 'token', 'password', 'secret'];
 
 /**
- * Base URL of the intranet permission service. Defaults to the Lobster server
- * origin so intranet builds reach the internal host without extra
- * configuration; override with `LOBSTER_INTRANET_AUTH_BASE_URL` when the
- * permission service lives elsewhere.
+ * Base URL of the intranet permission service. Defaults to the intranet origin
+ * this build ships with (`src/main/libs/intranetEndpoints.ts`), falling back to
+ * the Lobster server origin once that switch is turned off; override with
+ * `LOBSTER_INTRANET_AUTH_BASE_URL` when the permission service lives elsewhere.
  */
 export const getIntranetAuthBaseUrl = (): string => {
   const override = process.env.LOBSTER_INTRANET_AUTH_BASE_URL?.trim();
   if (!override) {
-    return getServerApiBaseUrl();
+    // [INTRA-ONLY]
+    return getIntranetBaseUrl() ?? getServerApiBaseUrl();
   }
   let parsed: URL;
   try {
