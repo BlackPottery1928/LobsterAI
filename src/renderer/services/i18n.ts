@@ -432,9 +432,10 @@ const translations: Record<LanguageType, Record<string, string>> = {
     loginNotAvailable: '登录功能暂未开放',
     // [INTRA-ONLY] 内网登录（工号 + 密码）
     intranetLoginTitle: '账号登录',
-    intranetLoginDescription: '请输入工号和密码登录',
     intranetLoginEmployeeIdLabel: '工号',
+    intranetLoginEmployeeIdPlaceholder: '请输入工号',
     intranetLoginPasswordLabel: '密码',
+    intranetLoginPasswordPlaceholder: '请输入密码',
     intranetLoginSubmit: '登录',
     intranetLoginSubmitting: '登录中…',
     intranetLoginEmployeeIdRequired: '请输入工号',
@@ -4246,9 +4247,10 @@ const translations: Record<LanguageType, Record<string, string>> = {
     loginNotAvailable: 'Login is not available yet',
     // [INTRA-ONLY] Intranet login (employee ID + password)
     intranetLoginTitle: 'Sign In',
-    intranetLoginDescription: 'Sign in with your employee ID and password.',
     intranetLoginEmployeeIdLabel: 'Employee ID',
+    intranetLoginEmployeeIdPlaceholder: 'Enter your employee ID',
     intranetLoginPasswordLabel: 'Password',
+    intranetLoginPasswordPlaceholder: 'Enter your password',
     intranetLoginSubmit: 'Sign In',
     intranetLoginSubmitting: 'Signing in…',
     intranetLoginEmployeeIdRequired: 'Enter your employee ID.',

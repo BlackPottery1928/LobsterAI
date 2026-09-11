@@ -96,12 +96,9 @@ const IntranetCredentialLoginView: React.FC = () => {
           draggable={false}
         />
 
-        <h1 id={TITLE_ID} className="text-center text-2xl font-bold text-foreground">
+        <h1 id={TITLE_ID} className="mb-6 text-center text-2xl font-bold text-foreground">
           {i18nService.t('intranetLoginTitle')}
         </h1>
-        <p className="mb-6 mt-2 text-center text-sm text-secondary">
-          {i18nService.t('intranetLoginDescription')}
-        </p>
 
         <form className="w-full space-y-4" onSubmit={handleSubmit}>
           <div>
@@ -120,6 +117,7 @@ const IntranetCredentialLoginView: React.FC = () => {
                   setValidationError(null);
                 }}
                 autoComplete="username"
+                placeholder={i18nService.t('intranetLoginEmployeeIdPlaceholder')}
                 autoFocus
                 disabled={submitting}
                 aria-invalid={Boolean(message) || undefined}
@@ -144,6 +142,7 @@ const IntranetCredentialLoginView: React.FC = () => {
                   setValidationError(null);
                 }}
                 autoComplete="current-password"
+                placeholder={i18nService.t('intranetLoginPasswordPlaceholder')}
                 disabled={submitting}
                 aria-invalid={Boolean(message) || undefined}
                 aria-describedby={message ? errorId : undefined}
