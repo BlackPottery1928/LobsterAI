@@ -6,6 +6,7 @@ import {
   SkinPackSkillId,
 } from '../../shared/skin/kit';
 import { OpenClawConfigImpact } from '../libs/openclawConfigImpact';
+import { isKitExcluded } from './local/kitExclusions';
 import {
   buildInstalledSkinPackKitRecord,
   buildSkinPackMarketplaceKit,
@@ -76,16 +77,18 @@ function appendToStoreResponse(
     ? JSON.parse(rawValue) as Record<string, unknown>
     : rawValue as Record<string, unknown>;
   const kits = Array.isArray(value.kits) ? value.kits : [];
+  // Excluded kits are not offered in this build; see ./local/kitExclusions.ts.
   const builtInKits = [
-    buildSkinPackMarketplaceKit(),
+    ...(isKitExcluded(SkinPackKitId.BuiltIn) ? [] : [buildSkinPackMarketplaceKit()]),
     ...additionalBuiltInKits,
   ];
   const builtInKitIds = new Set(builtInKits.map(kit => kit.id));
-  const withoutDuplicate = kits.filter((kit) => (
-    !kit
-    || typeof kit !== 'object'
-    || !builtInKitIds.has((kit as Record<string, unknown>).id)
-  ));
+  const withoutDuplicate = kits.filter((kit) => {
+    if (!kit || typeof kit !== 'object') return true;
+    const kitId = (kit as Record<string, unknown>).id;
+    if (typeof kitId === 'string' && isKitExcluded(kitId)) return false;
+    return !builtInKitIds.has(kitId);
+  });
   const nextValue = {
     ...value,
     kits: [
@@ -141,6 +144,9 @@ export function createSkinPackKitLifecycle(
   ): Promise<{ success: true; skillIds: string[] } | undefined> => {
     if (request.kitId !== SkinPackKitId.BuiltIn) {
       return undefined;
+    }
+    if (isKitExcluded(request.kitId)) {
+      throw new Error('The AI Skin Designer kit is not available in this build');
     }
     if (request.bundleUrl !== SkinPackKitBundle.BuiltIn) {
       throw new Error('AI Skin Designer kit bundle URL does not match the built-in catalog entry');

@@ -8,7 +8,15 @@ import {
   SkinPackSkillId,
 } from '../../shared/skin/kit';
 import { OpenClawConfigImpact } from '../libs/openclawConfigImpact';
+import { isKitExcluded } from './local/kitExclusions';
 import { createSkinPackKitLifecycle } from './skinPackKitLifecycle';
+
+/**
+ * This fork removes the AI Skin Designer kit (see ./local/kitExclusions.ts), so
+ * the cases below assert behaviour that can no longer be reached. They resume
+ * automatically if the kit is ever un-excluded.
+ */
+const skinKitIsExcluded = isKitExcluded(SkinPackKitId.BuiltIn);
 
 const SKILLS_STATE_KEY = 'skills_state';
 
@@ -56,7 +64,7 @@ describe('AI Skin Designer kit lifecycle', () => {
     vi.restoreAllMocks();
   });
 
-  test('adds one current skin kit while preserving remote and additional built-ins', () => {
+  test.skipIf(skinKitIsExcluded)('adds one current skin kit while preserving remote and additional built-ins', () => {
     const { lifecycle } = createHarness();
     const additionalKit = { id: 'computer-use', version: 'test' };
     const response = lifecycle.appendToStoreResponse(JSON.stringify({
@@ -82,7 +90,7 @@ describe('AI Skin Designer kit lifecycle', () => {
     expect(catalog.kits.at(-1)).toEqual(additionalKit);
   });
 
-  test('builds an offline catalog containing the skin kit', () => {
+  test.skipIf(skinKitIsExcluded)('builds an offline catalog containing the skin kit', () => {
     const { lifecycle } = createHarness();
     const response = lifecycle.buildOfflineStoreResponse();
     const envelope = JSON.parse(response) as { data: { value: { kits: Array<{ id: string }> } } };
@@ -90,7 +98,7 @@ describe('AI Skin Designer kit lifecycle', () => {
     expect(envelope.data.value.kits.map(kit => kit.id)).toEqual([SkinPackKitId.BuiltIn]);
   });
 
-  test('installs the trusted record and enables the bundled skill', async () => {
+  test.skipIf(skinKitIsExcluded)('installs the trusted record and enables the bundled skill', async () => {
     const {
       lifecycle,
       notifySkillsChanged,
@@ -121,7 +129,7 @@ describe('AI Skin Designer kit lifecycle', () => {
       });
   });
 
-  test('restores the watcher if the bundled skill is unavailable', async () => {
+  test.skipIf(skinKitIsExcluded)('restores the watcher if the bundled skill is unavailable', async () => {
     const { lifecycle, notifySkillsChanged, skillManager } = createHarness([]);
 
     await expect(lifecycle.installIfHandled({

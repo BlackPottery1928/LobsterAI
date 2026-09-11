@@ -16,6 +16,7 @@ import { appendPythonRuntimeToEnv } from '../libs/pythonRuntime';
 import { mergeReports,scanMultipleSkillDirs } from '../libs/skillSecurity/skillSecurityScanner';
 import type { SecurityReportAction,SkillSecurityReport } from '../libs/skillSecurity/skillSecurityTypes';
 import { SqliteStore } from '../sqliteStore';
+import { isSkillExcluded } from './local/skillExclusions';
 
 /**
  * Resolve the user's login shell PATH on macOS/Linux.
@@ -1671,6 +1672,8 @@ export class SkillManager {
       const skillDirs = listSkillDirs(root);
       skillDirs.forEach(dir => {
         const skillId = path.basename(dir);
+        // Skills that need public internet are excluded from this build; see ./local/skillExclusions.ts.
+        if (isSkillExcluded(skillId)) return;
         if (skillId === ComputerUseSkillId.BuiltIn && !isComputerUseKitInstalled(this.getStore())) {
           return;
         }
