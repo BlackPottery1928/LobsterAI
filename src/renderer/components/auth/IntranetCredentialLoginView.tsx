@@ -7,7 +7,7 @@
 // Layout mirrors the other full-window overlays in this app
 // (see `components/cowork/EngineStartupOverlay.tsx`).
 
-import { ExclamationCircleIcon } from '@heroicons/react/24/outline';
+import { ExclamationCircleIcon, LockClosedIcon, UserIcon } from '@heroicons/react/24/outline';
 import React, { useCallback, useId, useRef, useState } from 'react';
 
 import { i18nService } from '../../services/i18n';
@@ -20,7 +20,9 @@ import {
 
 const TITLE_ID = 'intranet-login-title';
 
-const INPUT_CLASS_NAME = 'w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-secondary transition-colors hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/40 disabled:opacity-60';
+const INPUT_CLASS_NAME = 'w-full rounded-xl border border-border bg-surface-raised py-2.5 pl-10 pr-3 text-sm text-foreground outline-none placeholder:text-secondary transition-colors hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/40 disabled:opacity-60';
+
+const INPUT_ICON_CLASS_NAME = 'pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-secondary';
 
 const LABEL_CLASS_NAME = 'mb-1.5 block text-sm font-medium text-foreground';
 
@@ -106,42 +108,48 @@ const IntranetCredentialLoginView: React.FC = () => {
             <label className={LABEL_CLASS_NAME} htmlFor={employeeIdInputId}>
               {i18nService.t('intranetLoginEmployeeIdLabel')}
             </label>
-            <input
-              id={employeeIdInputId}
-              ref={employeeIdRef}
-              type="text"
-              value={employeeId}
-              onChange={event => {
-                setEmployeeId(event.target.value);
-                setValidationError(null);
-              }}
-              autoComplete="username"
-              autoFocus
-              disabled={submitting}
-              aria-invalid={Boolean(message) || undefined}
-              aria-describedby={message ? errorId : undefined}
-              className={INPUT_CLASS_NAME}
-            />
+            <div className="relative">
+              <UserIcon className={INPUT_ICON_CLASS_NAME} aria-hidden="true" />
+              <input
+                id={employeeIdInputId}
+                ref={employeeIdRef}
+                type="text"
+                value={employeeId}
+                onChange={event => {
+                  setEmployeeId(event.target.value);
+                  setValidationError(null);
+                }}
+                autoComplete="username"
+                autoFocus
+                disabled={submitting}
+                aria-invalid={Boolean(message) || undefined}
+                aria-describedby={message ? errorId : undefined}
+                className={INPUT_CLASS_NAME}
+              />
+            </div>
           </div>
 
           <div>
             <label className={LABEL_CLASS_NAME} htmlFor={passwordInputId}>
               {i18nService.t('intranetLoginPasswordLabel')}
             </label>
-            <input
-              id={passwordInputId}
-              type="password"
-              value={password}
-              onChange={event => {
-                setPassword(event.target.value);
-                setValidationError(null);
-              }}
-              autoComplete="current-password"
-              disabled={submitting}
-              aria-invalid={Boolean(message) || undefined}
-              aria-describedby={message ? errorId : undefined}
-              className={INPUT_CLASS_NAME}
-            />
+            <div className="relative">
+              <LockClosedIcon className={INPUT_ICON_CLASS_NAME} aria-hidden="true" />
+              <input
+                id={passwordInputId}
+                type="password"
+                value={password}
+                onChange={event => {
+                  setPassword(event.target.value);
+                  setValidationError(null);
+                }}
+                autoComplete="current-password"
+                disabled={submitting}
+                aria-invalid={Boolean(message) || undefined}
+                aria-describedby={message ? errorId : undefined}
+                className={INPUT_CLASS_NAME}
+              />
+            </div>
           </div>
 
           {message ? (
