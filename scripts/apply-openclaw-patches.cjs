@@ -413,6 +413,33 @@ const legacyStrongPatchValidators = {
 };
 
 const v20260801StrongPatchValidators = {
+  'openclaw-lobsterai-startup-recovery.patch': [
+    {
+      file: 'src/agents/main-session-recovery/main-session-restart-recovery-marking.ts',
+      snippets: ['const LOBSTERAI_SESSION_PREFIX = "lobsterai:"'],
+      orderedSnippets: [
+        'export async function markStartupOrphanedMainSessionsForRecovery',
+        'entry.abortedLastRun === true',
+        'hasCurrentProcessOwner({',
+        'if (isMainRestartRecoveryAggregateTerminalOnly(entry))',
+        'return { action: "retire_terminal" }',
+        'parseAgentSessionKey(sessionKey)?.rest ?? sessionKey.trim()',
+        'sessionNamespace.startsWith(LOBSTERAI_SESSION_PREFIX)',
+        'sessionNamespace.slice(LOBSTERAI_SESSION_PREFIX.length).trim()',
+        'return undefined',
+        'return { action: "mark" }',
+      ],
+    },
+    {
+      file: 'src/agents/main-session-recovery/main-session-restart-recovery.test.ts',
+      snippets: [
+        'does not revive unmarked $age running session $sessionKey',
+        'preserves explicit recovery of $sessionKey across consecutive gateway restarts',
+        'retires terminal-only managed recovery residue before skipping new orphan marks',
+        'keeps upstream orphan recovery for unrelated namespace %s',
+      ],
+    },
+  ],
   'openclaw-aborted-tool-loop-breaker.patch': [
     {
       file: 'src/agents/embedded-agent-runner/replay-history.ts',
@@ -808,6 +835,99 @@ const v20260801StrongPatchValidators = {
     {
       file: 'src/agents/embedded-agent-runner/run/attempt.cwd-split.test.ts',
       snippets: ['expect(promptCall?.runtimeCwd).toBe(taskRepo)'],
+    },
+  ],
+  'openclaw-omit-default-model-from-system-prompt.patch': [
+    {
+      file: 'src/agents/system-prompt.ts',
+      snippets: ['runtimeInfo?.model ?'],
+      forbiddenSnippets: ['default_model='],
+    },
+    {
+      file: 'src/auto-reply/reply/session-reset-prompt.ts',
+      snippets: ['Execute your Session Startup sequence now'],
+      forbiddenSnippets: ['default_model'],
+    },
+    {
+      file: 'src/agents/system-prompt-default-model.test.ts',
+      snippets: [
+        'provider requests stable when another session changes the default model',
+        'expect(payload).toEqual(originalPayload)',
+        'still reports a change to the actual running model',
+      ],
+    },
+  ],
+  'openclaw-managed-npm-junction-cleanup.patch': [
+    {
+      file: 'src/commands/doctor-plugin-registry.ts',
+      snippets: ['removeManagedNpmPackages(stale, removeManagedNpmDependency)'],
+      forbiddenSnippets: ['fs.rmSync(params.packageDir'],
+    },
+    {
+      file: 'src/commands/doctor-plugin-npm-cleanup.ts',
+      snippets: [
+        'fs.lstatSync(target, { throwIfNoEntry: false })',
+        'fs.unlinkSync(target)',
+        'fs.rmdirSync(target)',
+        '".openclaw-npm-cleanup-"',
+        'fs.renameSync(entry.packageDir, stagedDir)',
+        'fs.copyFileSync(backupPath, filePath)',
+        'cleanupQuarantines(quarantines.values())',
+        'Managed npm cleanup rollback failed; recovery files retained at',
+      ],
+      forbiddenSnippets: ['fs.rmSync('],
+    },
+    {
+      file: 'src/commands/doctor-plugin-registry.cleanup.test.ts',
+      snippets: [
+        'removes stale packages without deleting nested junction targets',
+        'restores the $layout batch after a destructive $name write failure',
+        'retains original metadata and reports recovery paths when restoring a snapshot fails',
+        'persists all retirements and reports retained quarantine when payload cleanup fails',
+      ],
+    },
+  ],
+  'openclaw-memory-sidecar-archive-generations.patch': [
+    {
+      file: 'extensions/memory-core/src/migration/doctor-memory-sidecar.ts',
+      snippets: [
+        'archiveRoot = await root(path.dirname(params.source.legacyPath)',
+        'archiveSuffix = generation === 1 ? ".migrated" : `.migrated.${generation}`',
+        'await fs.lstat(`${params.source.legacyPath}${suffix}${archiveSuffix}`)',
+        'await archiveRoot.move(path.basename(sourcePath), path.basename(archivedPath))',
+        'path.basename(entry.archivedPath),',
+        'path.basename(entry.sourcePath),',
+      ],
+      forbiddenSnippets: [
+        'Left migrated Memory Core legacy memory index sidecar in place because',
+      ],
+    },
+    {
+      file: 'extensions/memory-core/doctor-contract-api.test.ts',
+      snippets: [
+        'archives a conflicting sidecar despite an existing archive and converges on retry',
+        'preserves the SQLite journal family across archive and retry',
+        'does not overwrite an archive created after generation selection',
+      ],
+    },
+  ],
+  'openclaw-workspace-attestation-quarantine.patch': [
+    {
+      file: 'src/infra/state-migrations.workspace-setup.ts',
+      snippets: [
+        'isRecoverableWorkspaceAttestation(params.source, snapshot)',
+        'backupCorruptWorkspaceAttestation({',
+        'remainingMessage: "legacy workspace source remains after quarantine cleanup"',
+      ],
+    },
+    {
+      file: 'src/infra/state-migrations.workspace-attestation-recovery.ts',
+      snippets: [
+        'snapshot.size === snapshot.raw.length',
+        'await sourceRoot.create(relativePath, bytes, { mode: 0o600 })',
+        'workspace attestation backup verification failed',
+        'attestation recovery requires existing workspace content',
+      ],
     },
   ],
 };

@@ -1458,7 +1458,7 @@ Windows 上 `realpath/stat`、杀毒软件扫描和目录 watcher 建立可能�
 7. PPTX 缩略图只解析并渲染第 1 张幻灯片，不得使用列表模式创建整份演示文稿的页面 DOM 后再隐藏；第一页为空白时保留真实空白结果，不擅自改用第 2 页；
 8. PPTX Renderer 在解析完成后必须直接从第一页源模型计算 `sourceHasVisualContent` 和 `sourceVisualElementCount`：检查有效背景、第一页节点以及布局/母版中的 `userDrawn` 节点；空占位符和纯白背景不算视觉内容。随后再从第一页 DOM 独立计算 `domHasVisualContent`。只有字体就绪、内嵌图片完成加载和解码、源模型有内容时 DOM 也有对应内容、布局连续两帧稳定后才可返回成功；媒体等待必须有超时并在失败时进入统一降级链路；
 9. 每次隐藏窗口渲染必须携带单调递增的 `renderGeneration`，Renderer 原样回传；主进程只接受与当前请求完全一致的代次，代次缺失或不匹配均视为失败；共享窗口只在实际尺寸变化时调整内容尺寸，不在每次请求中重复设置 zoom factor；
-10. Windows 的 HTML、DOCX 和 PPTX presentation frame 必须在内容区下方绘制由 `renderGeneration` 派生的 2px 提交戳；主进程订阅 frame、主动 `invalidate`，只接受颜色与当前代次匹配的帧，再裁掉提交戳生成 PNG。旧帧、尺寸不符帧和错误代次帧继续等待至 3 秒超时；所有订阅和定时器都必须在成功、失败和超时路径释放；macOS 和 Linux 保留隔离 Renderer 的限定区域 `capturePage` 路径；
+10. HTML、DOCX 和 PPTX presentation frame 必须在内容区下方绘制由 `renderGeneration` 派生的 2px 提交戳；所有平台的主进程都以最多 50ms 的间隔轮询限定区域 `capturePage`，只接受颜色与当前代次匹配的帧，再按物理像素比例裁掉提交戳、缩回请求尺寸生成 PNG。旧帧、尺寸不符帧和错误代次帧继续轮询至 3 秒超时；不使用 frame subscription，因为隐藏窗口在 Windows 上只投递订阅时的一帧快照，之后 `invalidate` 不会产生新帧；缩略图页面由 `vite.thumbnail.config.ts` 单独构建，其 chunk 图不得与主渲染器入口共享，否则 mermaid 等懒加载模块会把主应用入口加载进沙箱页面并抛出 `Failed to find the root element`；
 11. 代次不匹配、画面为空、源模型或 DOM 任一确认有内容但最终画面异常空白、渲染超时或画面提交超时时，必须销毁共享窗口；仅稳定标记为 `retryable` 的失败在全新窗口完整重渲染一次，格式不支持、文件过大、PPTX 无页面或确定性解析失败不得重复占用队列。Renderer 重试仍失败后才进入原生缩略图和类型封面降级链路；只有 `sourceHasVisualContent = false` 且 `domHasVisualContent = false` 时，空白画面才表示第一页确实为空并保留真实结果；
 12. 只有通过 Renderer 就绪契约或原生缩略图成功生成且通过 PNG 校验的图片才能写入缓存；栅格 Canvas、通用直接 Canvas、通用 presentation frame 和 PPTX 源内容感知的第一页 presentation frame 分别使用独立 rendererVersion，本次变更必须同时升级主进程策略缓存版本与 Renderer 内存缓存版本，使历史白图和串图全部自然失效；
 13. 缩略图 IPC 返回共享的稳定 `failureCode`、`failureStage` 和 `retryable`，至少区分源文件读取、Renderer 初始化/超时、PPTX 解析、第一页 DOM、媒体、布局、presentation、画面校验、取消和原生降级。客户端状态明确区分 `queued / rendering / retry-wait / ready / failed / unsupported`；瞬态失败仅在卡片仍位于预取区时按 500ms、2s 最多重试两次，确定性失败停在可手动重试的类型封面；
@@ -1469,6 +1469,8 @@ Windows 上 `realpath/stat`、杀毒软件扫描和目录 watcher 建立可能�
 18. 云端站点首期可以使用类型封面，不自动抓取不可信网站截图。
 
 PPTX 源内容与最终画面的判定矩阵为：源第一页有内容且画面非空时成功；源第一页有内容但 DOM 为空时按 Renderer 不兼容失败；源模型或 DOM 任一确认有内容、但最终画面空白时按 presentation/画面校验失败；仅当源模型与 DOM 都明确无内容且画面空白时，才按真实空白第一页成功。代次和第二提交帧屏障继续负责拦截上一文件画面，不用“检测到第一页空白就改用第二页”的方式掩盖问题。
+
+2026-09-08 HTML/HTM 补充合同（覆盖上述通用 presentation 的 HTML 部分）：所有平台必须在同一截图中验证当前父代次戳和 iframe 子代次戳，通过后裁剪该图；macOS/Linux 的 capturePage 也须有限采样等待，不能仅凭 iframe load 成功。子戳放在输出范围外，合法纯色内容不因颜色而失败；CSS 有限入场动画等待最多 3 秒，无限动画不阻塞。HTML 使用独立主进程及前端缓存版本使旧白图自然失效，原生 HTML 降级的可疑纯色图不缓存；其他格式不改缓存版本，脚本禁用和空 sandbox 不变。具体布局、时序、兼容边界与测试见 [HTML 子帧呈现修复方案](../../bugfixes/2026-09-08-html-thumbnail-child-presentation-design.md)。
 
 缩略图至少覆盖以下验收矩阵：300 个栅格图片、SVG、Markdown、HTML、PDF、视频、表格、DOCX 与 PPTX 混排并持续快速滚动；同一卡片路径、mtime 或大小变化；冷缓存、热缓存、损坏缓存；瞬态失败自动重试、确定性失败不自动重试、离屏排队任务取消；连续 20 次按“图片 → 文档 → 图片 → 文档”生成时不得出现白图、串图或上一项画面。PPTX 另覆盖单页纯文字、多页纯文字、多页全屏图片、多页图文混排、第一页故意为空白、损坏文件和未安装 Office/WPS。Windows 10/11 分别覆盖 100%、125% 和 150% 系统缩放，并至少验证一次硬件加速关闭场景。多页文件在 Renderer 中只能存在第一页 DOM；失败不得留下可被缓存的白图、错误文件画面或未释放的 frame subscription。快速滚动稳定后，可视卡片应在有限队列内持续收敛为 `ready` 或明确 `failed/unsupported`，不得永久停留在通用图标且无状态。
 

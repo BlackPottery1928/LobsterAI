@@ -276,6 +276,8 @@ interface CoworkConfig {
   memoryUserMemoriesMaxItems: number;
   skipMissedJobs: boolean;
   openClawHeartbeatEnabled: boolean;
+  openClawSkillReviewEnabled: boolean;
+  openClawMemoryFlushEnabled: boolean;
   embeddingEnabled: boolean;
   embeddingProvider: string;
   embeddingModel: string;
@@ -299,6 +301,8 @@ type CoworkConfigUpdate = Partial<
     | 'memoryUserMemoriesMaxItems'
     | 'skipMissedJobs'
     | 'openClawHeartbeatEnabled'
+    | 'openClawSkillReviewEnabled'
+    | 'openClawMemoryFlushEnabled'
     | 'embeddingEnabled'
     | 'embeddingProvider'
     | 'embeddingModel'
@@ -1273,6 +1277,7 @@ interface IElectronAPI {
       callback: (data: { sessionId: string; request: CoworkPermissionRequest }) => void,
     ) => () => void;
     onStreamPermissionDismiss: (callback: (data: { requestId: string }) => void) => () => void;
+    getPendingQuestions?: () => Promise<CoworkPermissionRequest[]>;
     onStreamComplete: (
       callback: (data: { sessionId: string; claudeSessionId: string | null }) => void,
     ) => () => void;

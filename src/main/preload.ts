@@ -648,7 +648,7 @@ contextBridge.exposeInMainWorld('electron', {
 
     // Permission handling
     respondToPermission: (options: { requestId: string; result: any }) =>
-      ipcRenderer.invoke('cowork:permission:respond', options),
+      ipcRenderer.invoke(CoworkIpcChannel.PermissionRespond, options),
 
     // Configuration
     getConfig: () => ipcRenderer.invoke('cowork:config:get'),
@@ -663,6 +663,8 @@ contextBridge.exposeInMainWorld('electron', {
       memoryUserMemoriesMaxItems?: number;
       skipMissedJobs?: boolean;
       openClawHeartbeatEnabled?: boolean;
+      openClawSkillReviewEnabled?: boolean;
+      openClawMemoryFlushEnabled?: boolean;
       embeddingEnabled?: boolean;
       embeddingProvider?: string;
       embeddingModel?: string;
@@ -670,7 +672,7 @@ contextBridge.exposeInMainWorld('electron', {
       embeddingVectorWeight?: number;
       embeddingRemoteBaseUrl?: string;
       embeddingRemoteApiKey?: string;
-    }) => ipcRenderer.invoke('cowork:config:set', config),
+    }) => ipcRenderer.invoke(CoworkIpcChannel.ConfigSet, config),
 
     // Session temp storage (.cowork-temp) maintenance
     getTempStorageUsage: () => ipcRenderer.invoke(CoworkIpcChannel.TempStorageUsage),
@@ -772,10 +774,11 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.on('cowork:stream:permission', handler);
       return () => ipcRenderer.removeListener('cowork:stream:permission', handler);
     },
+    getPendingQuestions: () => ipcRenderer.invoke(CoworkIpcChannel.GetPendingQuestions),
     onStreamPermissionDismiss: (callback: (data: { requestId: string }) => void) => {
       const handler = (_event: any, data: { requestId: string }) => callback(data);
-      ipcRenderer.on('cowork:stream:permissionDismiss', handler);
-      return () => ipcRenderer.removeListener('cowork:stream:permissionDismiss', handler);
+      ipcRenderer.on(CoworkIpcChannel.StreamPermissionDismiss, handler);
+      return () => ipcRenderer.removeListener(CoworkIpcChannel.StreamPermissionDismiss, handler);
     },
     onStreamComplete: (
       callback: (data: { sessionId: string; claudeSessionId: string | null }) => void,

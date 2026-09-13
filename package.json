@@ -12,9 +12,49 @@
     "repo": "https://github.com/openclaw/openclaw.git",
     "plugins": [
       {
+        "id": "qwen",
+        "npm": "@openclaw/qwen-provider",
+        "version": "2026.8.1"
+      },
+      {
+        "id": "deepseek",
+        "npm": "@openclaw/deepseek-provider",
+        "version": "2026.8.1"
+      },
+      {
+        "id": "moonshot",
+        "npm": "@openclaw/moonshot-provider",
+        "version": "2026.8.1"
+      },
+      {
+        "id": "qianfan",
+        "npm": "@openclaw/qianfan-provider",
+        "version": "2026.8.1"
+      },
+      {
+        "id": "stepfun",
+        "npm": "@openclaw/stepfun-provider",
+        "version": "2026.8.1"
+      },
+      {
+        "id": "zai",
+        "npm": "@openclaw/zai-provider",
+        "version": "2026.8.1"
+      },
+      {
+        "id": "xiaomi",
+        "npm": "@openclaw/xiaomi-provider",
+        "version": "2026.8.1"
+      },
+      {
+        "id": "volcengine",
+        "npm": "@openclaw/volcengine-provider",
+        "version": "2026.8.1"
+      },
+      {
         "id": "dingtalk-connector",
         "npm": "@dingtalk-real-ai/dingtalk-connector",
-        "version": "0.8.23"
+        "version": "0.8.26"
       },
       {
         "id": "openclaw-lark",
@@ -23,13 +63,14 @@
       },
       {
         "id": "qqbot",
-        "npm": "@openclaw/qqbot",
-        "version": "2026.7.1"
+        "npm": "@tencent-connect/openclaw-qqbot",
+        "version": "2.0.1"
       },
       {
         "id": "discord",
         "npm": "@openclaw/discord",
-        "version": "2026.8.1"
+        "version": "2026.8.1",
+        "runtimeBundled": true
       },
       {
         "id": "wecom-openclaw-plugin",
@@ -89,22 +130,24 @@
   },
   "main": "dist-electron/main.js",
   "engines": {
-    "node": ">=24.15.0 <25"
+    "node": ">=24.15.0 <25",
+    "npm": ">=11.17.0 <12"
+  },
+  "allowScripts": {
+    "better-sqlite3@13.0.3": false
   },
   "scripts": {
     "dev": "vite",
     "prebuild": "node scripts/generate-keyfrom-build-info.cjs",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && vite build --config vite.thumbnail.config.ts",
     "lint": "eslint src/",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky",
     "test": "vitest run",
-    "pretest": "npm rebuild better-sqlite3",
     "test:sqlite-backup:seed": "node tests/sqlite-backup/generate-large-db.cjs",
     "preview": "vite preview",
     "compile:electron": "tsc --project electron-tsconfig.json",
-    "precompile:electron": "electron-builder install-app-deps",
     "build:skill:web-search": "npm install --prefix SKILLs/web-search && npx tsc -p SKILLs/web-search/tsconfig.json && node -e \"const fs=require('fs');['.connection','.server.log','.server.pid'].forEach(f=>{try{fs.unlinkSync('SKILLs/web-search/'+f)}catch(e){}});\"",
     "build:skill:tech-news": "node scripts/build-skill-tech-news.js",
     "build:skill:email": "cd SKILLs/imap-smtp-email && npm install --production",
@@ -114,7 +157,7 @@
     "electron:dev": "rimraf dist-electron && npm run compile:electron && concurrently \"vite --port 5175 --strictPort\" \"npm run wait:electron:dev && npm run start:electron\"",
     "electron:dev:inspect": "cross-env ELECTRON_OPEN_DEVTOOLS=1 npm run electron:dev",
     "electron:dev:openclaw": "npm run openclaw:runtime:host && npm run electron:dev",
-    "postinstall": "patch-package --error-on-fail && electron-builder install-app-deps",
+    "postinstall": "patch-package --error-on-fail",
     "pack": "npm run setup:python-runtime && npm run build && npm run compile:electron && npm run build:skills && electron-builder --dir --config scripts/electron-builder-config.cjs",
     "dist": "npm run setup:python-runtime && npm run build && npm run compile:electron && npm run build:skills && electron-builder --config scripts/electron-builder-config.cjs",
     "dist:mac": "electron-builder --mac --config scripts/electron-builder-config.cjs",
@@ -137,7 +180,7 @@
     "verify:installer-patches": "node scripts/verify-installer-patches.cjs",
     "openclaw:plugins": "node scripts/ensure-openclaw-plugins.cjs",
     "openclaw:extensions:local": "node scripts/sync-local-openclaw-extensions.cjs",
-    "openclaw:bundle": "node scripts/bundle-openclaw-gateway.cjs",
+    "openclaw:bundle": "node scripts/bundle-openclaw-startup-migration.cjs && node scripts/bundle-openclaw-gateway.cjs",
     "openclaw:precompile": "node scripts/precompile-openclaw-extensions.cjs",
     "openclaw:channel-deps": "node scripts/install-openclaw-channel-deps.cjs",
     "openclaw:prune": "node scripts/prune-openclaw-runtime.cjs",
