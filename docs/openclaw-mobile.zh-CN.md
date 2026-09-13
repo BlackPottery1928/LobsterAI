@@ -42,13 +42,15 @@ OpenClaw 管理 Tailscale Serve，手机连接 `wss://<电脑的 MagicDNS 域名
 
 ## 2. 启动并配对
 
-1. 重新启动 LobsterAI，等待 Gateway 就绪。
+1. 完全退出并重新启动 LobsterAI，等待 Gateway 就绪。若在 OpenClaw 后台修改了 `gateway.bind`，也需要这一步；当前版本的 Gateway 内部重启可能沿用旧监听地址。
 2. 从同一 `state` 目录的 `gateway-port.json` 读取 `port`。端口可能因占用而变化，不要固定假设为 `18789`。
 3. 在电脑浏览器打开 `http://127.0.0.1:<port>/`，进入内置的 OpenClaw Control UI。在连接设置中使用同目录 `gateway-token` 文件的内容完成本机登录。
 4. 在 **Devices → Pair device** 中选择 **Limited access**，生成配对二维码。
 5. 使用官方 OpenClaw 移动端扫码连接。配对码过期时重新生成。
 
 局域网模式下，Gateway 会自动允许本机 Control UI 的来源地址，无需为手机原生连接额外设置 `allowedOrigins`。Bonjour 自动发现仍关闭，使用二维码连接即可。
+
+如果生成二维码时报 `Gateway is only bound to loopback`，检查当前实例的上述配置文件是否已设置 `gateway.bind: "lan"`，然后完全重启 LobsterAI，再重新加载配对页面。代码支持配置不等于已经为现有实例开启局域网接入。
 
 连接期间保持电脑和 LobsterAI 运行。移动端使用已有的 OpenClaw agent、模型和运行能力；LobsterAI 自有的 Cowork 会话展示、SQLite 元数据和产物面板不会因为网络配置而自动同步到原生移动端。
 
