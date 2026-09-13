@@ -12,6 +12,7 @@ import { AppIpcChannel } from '../shared/app/constants';
 import { AppSettingsIpc } from '../shared/appSettings/constants';
 import { AppUpdateIpc } from '../shared/appUpdate/constants';
 import { ArtifactPreviewIpc } from '../shared/artifactPreview/constants';
+import { MarkdownFileIpc, type SaveMarkdownFileRequest } from '../shared/artifactPreview/markdownEditing';
 import {
   AsrIpcChannel,
   type AsrRealtimeSessionRequest,
@@ -1019,6 +1020,11 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke(AsrIpcChannel.CreateRealtimeSession, options),
   },
   artifact: {
+    markdown: {
+      read: (filePath: string) => ipcRenderer.invoke(MarkdownFileIpc.Read, filePath),
+      save: (request: SaveMarkdownFileRequest) => ipcRenderer.invoke(MarkdownFileIpc.Save, request),
+      setHasUnsafeEdits: (hasUnsafeEdits: boolean) => ipcRenderer.send(MarkdownFileIpc.SetUnsafeEdits, hasUnsafeEdits),
+    },
     watchFile: (filePath: string) => ipcRenderer.invoke('artifact:watchFile', filePath),
     unwatchFile: (filePath: string) => ipcRenderer.invoke('artifact:unwatchFile', filePath),
     onFileChanged: (callback: (data: { filePath: string }) => void) => {

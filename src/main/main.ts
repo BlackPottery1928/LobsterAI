@@ -265,6 +265,7 @@ import { registerCoworkSubagentHandlers } from './ipcHandlers/coworkSubagent';
 import { ensureDshEngineReady, registerDshHandlers } from './ipcHandlers/dsh/handlers';
 import { registerEnterpriseAccountHandlers } from './ipcHandlers/enterpriseAccount';
 import { registerKitHandlers } from './ipcHandlers/kits';
+import { hasUnsafeMarkdownEdits, registerMarkdownEditingHandlers } from './ipcHandlers/markdownEditing';
 import { registerMcpHandlers } from './ipcHandlers/mcp';
 import { registerNimQrLoginHandlers } from './ipcHandlers/nimQrLogin';
 import { registerPermissionIpcHandlers } from './ipcHandlers/permissions/handlers';
@@ -13094,6 +13095,8 @@ if (!gotTheLock) {
     getServerApiBaseUrl,
   });
 
+  registerMarkdownEditingHandlers(() => mainWindow);
+
   // ---- artifact file watching ----
   const fileWatchers = new Map<
     string,
@@ -14321,10 +14324,14 @@ if (!gotTheLock) {
 
     // User-initiated quit (Cmd+Q, app menu, Dock, tray): scheduled tasks and
     // IM replies stop with the app, so ask first.
-    void showAppQuitConfirmation()
+    void showAppQuitConfirmation(hasUnsafeMarkdownEdits)
       .then(
         confirmed => confirmed,
         error => {
+          if (hasUnsafeMarkdownEdits()) {
+            console.error('[Main] quit confirmation prompt failed, retaining unsaved Markdown edits:', error);
+            return false;
+          }
           // Honor the quit rather than trap the user in a process that cannot
           // exit because its confirmation prompt is broken.
           console.error('[Main] quit confirmation prompt failed, quitting without it:', error);
@@ -14333,6 +14340,8 @@ if (!gotTheLock) {
       )
       .then(confirmed => {
         if (appQuitConfirmationGate.finishPrompt(confirmed)) {
+          // Cleanup is asynchronous and cannot be cancelled once teardown starts.
+          if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setEnabled(false);
           runAppCleanupAndExit('before-quit');
         } else {
           console.log('[Main] quit cancelled at the confirmation prompt');

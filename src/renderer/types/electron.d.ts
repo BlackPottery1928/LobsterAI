@@ -9,6 +9,7 @@ import type {
   ActivitySlotResponse,
 } from '../../shared/activity/constants';
 import type { AppUpdateActiveWorkloads, AppUpdateCheckResult, AppUpdateRuntimeState } from '../../shared/appUpdate/constants';
+import type { MarkdownFileBridge } from '../../shared/artifactPreview/markdownEditing';
 import type {
   AsrRealtimeSessionRequest,
   AsrRealtimeSessionResult,
@@ -1555,6 +1556,7 @@ interface IElectronAPI {
     createRealtimeSession: (options: AsrRealtimeSessionRequest) => Promise<AsrRealtimeSessionResult>;
   };
   artifact: {
+    markdown: MarkdownFileBridge;
     watchFile: (filePath: string) => Promise<void>;
     unwatchFile: (filePath: string) => Promise<void>;
     onFileChanged: (callback: (data: { filePath: string }) => void) => () => void;
