@@ -42,6 +42,7 @@ import {
   __openClawTokenProxyTestUtils,
   consumeRecentOpenClawTokenProxyQuotaError,
 } from '../openclawTokenProxy';
+import { AgentLifecyclePhase } from './constants';
 import { ContinuityCapsuleSource } from './coworkContinuityCapsule';
 import {
   buildOpenClawChatSendPayloadTooLargeError,
@@ -63,6 +64,7 @@ import {
   resolveOpenClawToolLoopErrorOverride,
   resolveToolEventIsError,
 } from './openclawRuntimeAdapter';
+import { SubagentYield } from './subagent/yield';
 
 test('browser control requests use the embedded gateway RPC', async () => {
   const adapter = new OpenClawRuntimeAdapter({} as never, {} as never);
@@ -7861,6 +7863,566 @@ test('empty tool final shows thinking-only hint only after the follow-up grace w
     ))).toBe(true);
     expect(completeSpy).toHaveBeenCalledWith(session.id, 'run-empty');
     expect(session.status).toBe('completed');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test.each(['chat', 'lifecycle'])('yielded %s completion stays silent while a delayed subagent announce resumes the request', async (source) => {
+  vi.useFakeTimers();
+  try {
+    const { session, store } = createReconcileStore([
+      { id: 'user-publish', type: 'user', content: 'publish through the blog agent', timestamp: 1, metadata: {} },
+      { id: 'tool-yield', type: 'tool_use', content: 'Using sessions_yield', timestamp: 2, metadata: { toolUseId: 'call-yield', toolName: SubagentYield.ToolName } },
+      { id: 'result-yield', type: 'tool_result', content: JSON.stringify({ status: SubagentYield.ResultStatus }), timestamp: 3, metadata: { toolUseId: 'call-yield' } },
+    ]);
+    const adapter = new OpenClawRuntimeAdapter(store, {});
+    const sessionKey = `agent:main:lobsterai:${session.id}`;
+    const runId = 'run-publish-yield';
+    const completeSpy = vi.fn();
+    let historyMessages: Array<Record<string, unknown>> = [
+      { role: 'user', content: 'publish through the blog agent' },
+      { role: 'assistant', content: [{ type: 'toolCall', id: 'call-yield', name: SubagentYield.ToolName, arguments: {} }] },
+      { role: 'toolResult', toolCallId: 'call-yield', toolName: SubagentYield.ToolName, content: JSON.stringify({ status: SubagentYield.ResultStatus }) },
+    ];
+    adapter.gatewayClient = {
+      start: () => {},
+      stop: () => {},
+      request: async (method: string) => method === 'chat.history' ? { messages: historyMessages } : {},
+    };
+    const turn = createActiveTurn(session.id, sessionKey, runId);
+    turn.toolUseMessageIdByToolCallId.set('call-yield', 'tool-yield');
+    turn.toolResultMessageIdByToolCallId.set('call-yield', 'result-yield');
+    adapter.activeTurns.set(session.id, turn);
+    adapter.latestTurnTokenBySession.set(session.id, turn.turnToken);
+    adapter.sessionIdByRunId.set(runId, session.id);
+    adapter.rememberSessionKey(session.id, sessionKey);
+    adapter.on('complete', completeSpy);
+    session.status = 'running';
+
+    if (source === 'chat') {
+      adapter.handleGatewayEvent({
+        event: 'chat',
+        seq: 1,
+        payload: { state: 'final', runId, sessionKey, yielded: true },
+      });
+    } else {
+      adapter.handleGatewayEvent({
+        event: 'agent',
+        seq: 1,
+        payload: {
+          runId,
+          sessionKey,
+          stream: 'lifecycle',
+          data: { phase: AgentLifecyclePhase.End, yielded: true, livenessState: SubagentYield.LivenessState, stopReason: SubagentYield.StopReason },
+        },
+      });
+    }
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(completeSpy).toHaveBeenCalledWith(session.id, runId);
+    expect(adapter.activeTurns.has(session.id)).toBe(false);
+    expect(session.status).toBe('completed');
+
+    await vi.advanceTimersByTimeAsync(330_000);
+    expect(session.messages.some((message) => message.type === 'system')).toBe(false);
+
+    const announceRunId = 'announce:requester-settle:publish-completed';
+    const answer = 'The blog agent published the article and verified the page.';
+    historyMessages = [...historyMessages, { role: 'assistant', content: answer }];
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 1,
+      payload: { runId: announceRunId, sessionKey, stream: 'lifecycle', data: { phase: AgentLifecyclePhase.Start } },
+    });
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 2,
+      payload: { runId: announceRunId, sessionKey, stream: 'assistant', data: { text: answer } },
+    });
+    adapter.handleGatewayEvent({
+      event: 'chat',
+      seq: 1,
+      payload: { state: 'final', runId: announceRunId, sessionKey, message: { role: 'assistant', content: answer } },
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(session.messages.filter((message) => message.type === 'assistant' && message.content === answer)).toHaveLength(1);
+    expect(session.messages.some((message) => message.type === 'system')).toBe(false);
+    expect(completeSpy).toHaveBeenCalledWith(session.id, announceRunId);
+    expect(adapter.activeTurns.has(session.id)).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test.each(['error', 'length'])('yielded chat final does not swallow a terminal %s stop reason', async (stopReason) => {
+  const { session, store } = createReconcileStore([
+    { id: 'user-1', type: 'user', content: 'finish the task', timestamp: 1, metadata: {} },
+  ]);
+  const adapter = new OpenClawRuntimeAdapter(store, {});
+  const sessionKey = `agent:main:lobsterai:${session.id}`;
+  const runId = `run-yielded-${stopReason}`;
+  const turn = createActiveTurn(session.id, sessionKey, runId);
+  const completeSpy = vi.fn();
+  const errorSpy = vi.fn();
+  adapter.on('complete', completeSpy);
+  adapter.on('error', errorSpy);
+  adapter.activeTurns.set(session.id, turn);
+  adapter.latestTurnTokenBySession.set(session.id, turn.turnToken);
+  session.status = 'running';
+
+  await adapter.handleChatFinal(session.id, turn, {
+    state: 'final',
+    runId,
+    sessionKey,
+    yielded: true,
+    stopReason,
+    ...(stopReason === 'error' ? { errorMessage: 'Provider request failed.' } : {}),
+    message: { role: 'assistant', content: 'Partial task result', stopReason },
+  });
+
+  expect(session.status).toBe('error');
+  expect(adapter.activeTurns.has(session.id)).toBe(false);
+  expect(completeSpy).not.toHaveBeenCalled();
+  expect(errorSpy).toHaveBeenCalledTimes(1);
+  const systemMessage = session.messages.find((message) => message.type === 'system');
+  expect(systemMessage).toBeTruthy();
+  expect(systemMessage?.metadata?.kind).not.toBe(CoworkSystemMessageKind.EmptyResponse);
+  if (stopReason === 'length') {
+    expect(systemMessage?.metadata).toMatchObject({ isIncomplete: true, isTruncated: true, stopReason });
+  }
+});
+
+test('a delayed announce retracts only the current user request structured empty-response hint', async () => {
+  vi.useFakeTimers();
+  try {
+    const spawnResult = JSON.stringify({
+      status: 'accepted',
+      runId: 'child-run-1',
+      childSessionKey: 'agent:blog:subagent:child-1',
+    });
+    const { session, store } = createReconcileStore([
+      { id: 'user-previous', type: 'user', content: 'previous request', timestamp: 1, metadata: {} },
+      {
+        id: 'previous-empty-hint',
+        type: 'system',
+        content: t('taskThinkingOnly'),
+        timestamp: 2,
+        metadata: { kind: CoworkSystemMessageKind.EmptyResponse, userMessageId: 'user-previous', runId: 'run-previous' },
+      },
+      { id: 'user-current', type: 'user', content: 'finish this request', timestamp: 3, metadata: {} },
+      { id: 'tool-exec', type: 'tool_use', content: 'Using exec', timestamp: 4, metadata: { toolUseId: 'call-exec', toolName: 'exec' } },
+      { id: 'result-exec', type: 'tool_result', content: 'OK', timestamp: 5, metadata: { toolUseId: 'call-exec' } },
+      { id: 'other-error', type: 'system', content: 'An unrelated tool warning.', timestamp: 6, metadata: { error: 'Tool warning' } },
+      { id: 'tool-spawn', type: 'tool_use', content: 'Using sessions_spawn', timestamp: 7, metadata: { toolUseId: 'call-spawn', toolName: 'sessions_spawn' } },
+      { id: 'result-spawn', type: 'tool_result', content: spawnResult, timestamp: 8, metadata: { toolUseId: 'call-spawn' } },
+    ]);
+    const adapter = new OpenClawRuntimeAdapter(store, {});
+    const sessionKey = `agent:main:lobsterai:${session.id}`;
+    const runId = 'run-empty-current';
+    let historyMessages: Array<Record<string, unknown>> = [
+      { role: 'user', content: 'finish this request' },
+      { role: 'assistant', content: [{ type: 'toolCall', id: 'call-exec', name: 'exec', arguments: {} }] },
+      { role: 'toolResult', toolCallId: 'call-exec', content: 'OK' },
+      { role: 'assistant', content: [{ type: 'toolCall', id: 'call-spawn', name: 'sessions_spawn', arguments: {} }] },
+      { role: 'toolResult', toolCallId: 'call-spawn', toolName: 'sessions_spawn', content: spawnResult },
+      { role: 'assistant', content: [{ type: 'thinking', thinking: 'No visible result yet.' }] },
+    ];
+    adapter.gatewayClient = {
+      start: () => {},
+      stop: () => {},
+      request: async (method: string) => method === 'chat.history' ? { messages: historyMessages } : {},
+    };
+    const turn = createActiveTurn(session.id, sessionKey, runId);
+    turn.toolUseMessageIdByToolCallId.set('call-exec', 'tool-exec');
+    turn.toolResultMessageIdByToolCallId.set('call-exec', 'result-exec');
+    turn.toolUseMessageIdByToolCallId.set('call-spawn', 'tool-spawn');
+    turn.toolResultMessageIdByToolCallId.set('call-spawn', 'result-spawn');
+    adapter.activeTurns.set(session.id, turn);
+    adapter.latestTurnTokenBySession.set(session.id, turn.turnToken);
+    adapter.sessionIdByRunId.set(runId, session.id);
+    adapter.rememberSessionKey(session.id, sessionKey);
+    session.status = 'running';
+
+    adapter.handleGatewayEvent({
+      event: 'chat',
+      seq: 1,
+      payload: {
+        state: 'final',
+        runId,
+        sessionKey,
+        message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'No visible result yet.' }] },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(session.messages.filter((message) => message.metadata?.kind === CoworkSystemMessageKind.EmptyResponse)).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    const hint = session.messages.find((message) => (
+      message.metadata?.kind === CoworkSystemMessageKind.EmptyResponse
+      && message.metadata?.userMessageId === 'user-current'
+    ));
+    expect(hint?.content).toBe(t('taskThinkingOnly'));
+    expect(hint?.metadata).toMatchObject({ userMessageId: 'user-current', runId });
+    expect(adapter.activeTurns.has(session.id)).toBe(false);
+
+    const announceRunId = 'announce:requester-settle:child-run-1:current-result';
+    const answer = 'The requested task is complete.';
+    historyMessages = [...historyMessages, { role: 'assistant', content: answer }];
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 1,
+      payload: { runId: announceRunId, sessionKey, stream: 'lifecycle', data: { phase: AgentLifecyclePhase.Start } },
+    });
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 2,
+      payload: { runId: announceRunId, sessionKey, stream: 'assistant', data: { text: answer } },
+    });
+    adapter.handleGatewayEvent({
+      event: 'chat',
+      seq: 1,
+      payload: { state: 'final', runId: announceRunId, sessionKey, message: { role: 'assistant', content: answer } },
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(session.messages.some((message) => message.id === hint?.id)).toBe(false);
+    expect(session.messages.some((message) => message.id === 'previous-empty-hint')).toBe(true);
+    expect(session.messages.some((message) => message.id === 'other-error')).toBe(true);
+    expect(session.messages.some((message) => message.type === 'assistant' && message.content === answer)).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test.each(['active', 'yielded'])('a late subagent announce cannot resume a manually stopped %s desktop request after the cooldown', async (phase) => {
+  vi.useFakeTimers();
+  try {
+    const { session, store } = createReconcileStore([
+      { id: 'user-stop', type: 'user', content: 'run the task', timestamp: 1, metadata: {} },
+    ]);
+    const adapter = new OpenClawRuntimeAdapter(store, {});
+    const sessionKey = `agent:main:lobsterai:${session.id}`;
+    const turn = createActiveTurn(session.id, sessionKey, 'run-before-stop');
+    const completeSpy = vi.fn();
+    adapter.gatewayClient = { start: () => {}, stop: () => {}, request: async () => ({}) };
+    adapter.activeTurns.set(session.id, turn);
+    adapter.latestTurnTokenBySession.set(session.id, turn.turnToken);
+    adapter.sessionIdByRunId.set(turn.runId, session.id);
+    adapter.rememberSessionKey(session.id, sessionKey);
+    adapter.on('complete', completeSpy);
+    session.status = 'running';
+    if (phase === 'yielded') {
+      adapter.handleGatewayEvent({
+        event: 'chat',
+        seq: 1,
+        payload: { state: 'final', runId: turn.runId, sessionKey, yielded: true },
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(adapter.activeTurns.has(session.id)).toBe(false);
+      completeSpy.mockClear();
+    }
+    adapter.stopSession(session.id);
+
+    await vi.advanceTimersByTimeAsync(330_000);
+    const announceRunId = 'announce:requester-settle:stopped-result';
+    const answer = 'A late task result.';
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 1,
+      payload: { runId: announceRunId, sessionKey, stream: 'lifecycle', data: { phase: AgentLifecyclePhase.Start } },
+    });
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 2,
+      payload: { runId: announceRunId, sessionKey, stream: 'assistant', data: { text: answer } },
+    });
+    adapter.handleGatewayEvent({
+      event: 'chat',
+      seq: 1,
+      payload: { state: 'final', runId: announceRunId, sessionKey, message: { role: 'assistant', content: answer } },
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(session.status).toBe('idle');
+    expect(adapter.activeTurns.has(session.id)).toBe(false);
+    expect(session.messages.some((message) => message.type === 'assistant')).toBe(false);
+    expect(completeSpy).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('an old yielded final cannot close an announce run that starts during history reconciliation', async () => {
+  vi.useFakeTimers();
+  try {
+    const startedAt = Date.now();
+    const { session, store } = createReconcileStore([
+      { id: 'user-race', type: 'user', content: 'publish the article', timestamp: startedAt, metadata: {} },
+    ]);
+    const adapter = new OpenClawRuntimeAdapter(store, {});
+    const sessionKey = `agent:main:lobsterai:${session.id}`;
+    const runId = 'run-yield-before-announce';
+    const answer = 'The article has been published.';
+    const yieldedHistory: Array<Record<string, unknown>> = [
+      { role: 'user', content: 'publish the article', timestamp: startedAt },
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'call-yield-race', name: SubagentYield.ToolName, arguments: {} }],
+        timestamp: startedAt,
+      },
+      { role: 'toolResult', toolCallId: 'call-yield-race', toolName: SubagentYield.ToolName, content: JSON.stringify({ status: SubagentYield.ResultStatus }), timestamp: startedAt },
+    ];
+    let releaseHistory!: (history: { messages: Array<Record<string, unknown>> }) => void;
+    const firstHistory = new Promise<{ messages: Array<Record<string, unknown>> }>((resolve) => {
+      releaseHistory = resolve;
+    });
+    let historyRequested = false;
+    adapter.gatewayClient = {
+      start: () => {},
+      stop: () => {},
+      request: async (method: string) => {
+        if (method !== 'chat.history') return {};
+        if (!historyRequested) {
+          historyRequested = true;
+          return firstHistory;
+        }
+        return { messages: [...yieldedHistory, { role: 'assistant', content: answer, timestamp: Date.now() }] };
+      },
+    };
+    const turn = createActiveTurn(session.id, sessionKey, runId);
+    turn.startedAtMs = startedAt;
+    adapter.activeTurns.set(session.id, turn);
+    adapter.latestTurnTokenBySession.set(session.id, turn.turnToken);
+    adapter.sessionIdByRunId.set(runId, session.id);
+    adapter.rememberSessionKey(session.id, sessionKey);
+    const completeSpy = vi.fn();
+    adapter.on('complete', completeSpy);
+    session.status = 'running';
+
+    const oldFinal = adapter.handleChatFinal(session.id, turn, {
+      state: 'final', runId, sessionKey, yielded: true,
+    });
+    expect(historyRequested).toBe(true);
+    await vi.advanceTimersByTimeAsync(25);
+
+    const announceRunId = 'announce:requester-settle:race-result';
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 1,
+      payload: { runId: announceRunId, sessionKey, stream: 'lifecycle', data: { phase: AgentLifecyclePhase.Start } },
+    });
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 2,
+      payload: { runId: announceRunId, sessionKey, stream: 'assistant', data: { text: answer } },
+    });
+    releaseHistory({ messages: yieldedHistory });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await oldFinal;
+
+    expect(adapter.activeTurns.has(session.id)).toBe(true);
+    expect(session.status).toBe('running');
+    expect(completeSpy).not.toHaveBeenCalled();
+    expect(session.messages.some((message) => message.type === 'assistant' && message.content === answer)).toBe(true);
+    expect(session.messages.some((message) => message.type === 'system')).toBe(false);
+
+    adapter.handleGatewayEvent({
+      event: 'chat',
+      seq: 1,
+      payload: { state: 'final', runId: announceRunId, sessionKey, message: { role: 'assistant', content: answer } },
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(completeSpy).toHaveBeenCalledExactlyOnceWith(session.id, announceRunId);
+    expect(adapter.activeTurns.has(session.id)).toBe(false);
+    expect(session.messages.some((message) => message.type === 'system')).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('a late parent yielded lifecycle end cannot prevent the bound announce from completing', async () => {
+  vi.useFakeTimers();
+  try {
+    const { session, store } = createReconcileStore([
+      { id: 'user-late-end', type: 'user', content: 'publish with the blog agent', timestamp: 1, metadata: {} },
+    ]);
+    const adapter = new OpenClawRuntimeAdapter(store, {});
+    const sessionKey = `agent:main:lobsterai:${session.id}`;
+    const parentRunId = 'parent-before-late-yield';
+    const announceRunId = 'announce:requester-settle:before-parent-end';
+    const answer = 'The blog agent has finished publishing.';
+    adapter.gatewayClient = {
+      start: () => {},
+      stop: () => {},
+      request: async () => ({ messages: [
+        { role: 'user', content: 'publish with the blog agent' },
+        { role: 'assistant', content: answer },
+      ] }),
+    };
+    const turn = createActiveTurn(session.id, sessionKey, parentRunId);
+    adapter.activeTurns.set(session.id, turn);
+    adapter.latestTurnTokenBySession.set(session.id, turn.turnToken);
+    adapter.sessionIdByRunId.set(parentRunId, session.id);
+    adapter.rememberSessionKey(session.id, sessionKey);
+    const completeSpy = vi.fn();
+    adapter.on('complete', completeSpy);
+    session.status = 'running';
+
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 1,
+      payload: { runId: announceRunId, sessionKey, stream: 'lifecycle', data: { phase: AgentLifecyclePhase.Start } },
+    });
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 2,
+      payload: { runId: announceRunId, sessionKey, stream: 'assistant', data: { text: answer } },
+    });
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 10,
+      payload: {
+        runId: parentRunId,
+        sessionKey,
+        stream: 'lifecycle',
+        data: { phase: AgentLifecyclePhase.End, yielded: true, livenessState: SubagentYield.LivenessState, stopReason: SubagentYield.StopReason },
+      },
+    });
+    adapter.handleGatewayEvent({
+      event: 'chat',
+      seq: 1,
+      payload: { state: 'final', runId: announceRunId, sessionKey, message: { role: 'assistant', content: answer } },
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(completeSpy).toHaveBeenCalledExactlyOnceWith(session.id, announceRunId);
+    expect(session.status).toBe('completed');
+    expect(adapter.activeTurns.has(session.id)).toBe(false);
+    expect(session.messages.some((message) => message.type === 'system')).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('yielding to subagents does not consume a queued goal continuation', async () => {
+  vi.useFakeTimers();
+  try {
+    const { session, store } = createReconcileStore([
+      { id: 'user-goal-yield', type: 'user', content: 'publish this article', timestamp: 1, metadata: {} },
+    ]);
+    const adapter = new OpenClawRuntimeAdapter(store, {});
+    const sessionKey = `agent:main:lobsterai:${session.id}`;
+    const runId = 'goal-run-yield';
+    const turn = createActiveTurn(session.id, sessionKey, runId);
+    adapter.gatewayClient = {
+      start: () => {},
+      stop: () => {},
+      request: async () => ({ messages: [{ role: 'user', content: 'publish this article' }] }),
+    };
+    adapter.activeTurns.set(session.id, turn);
+    adapter.latestTurnTokenBySession.set(session.id, turn.turnToken);
+    adapter.sessionIdByRunId.set(runId, session.id);
+    adapter.rememberSessionKey(session.id, sessionKey);
+    const pendingContinuation = { action: 'resume', prompt: 'continue publishing', skipInitialUserMessage: true };
+    adapter.pendingGoalContinuations.set(session.id, pendingContinuation);
+    const continueSpy = vi.spyOn(adapter, 'continueSession').mockResolvedValue(undefined);
+    session.status = 'running';
+
+    adapter.handleGatewayEvent({
+      event: 'chat',
+      seq: 1,
+      payload: { state: 'final', runId, sessionKey, yielded: true },
+    });
+    await vi.advanceTimersByTimeAsync(332_000);
+
+    expect(adapter.activeTurns.has(session.id)).toBe(false);
+    expect(session.status).toBe('completed');
+    expect(continueSpy).not.toHaveBeenCalled();
+    expect(adapter.pendingGoalContinuations.get(session.id)).toEqual(pendingContinuation);
+    expect(session.messages.some((message) => message.type === 'system')).toBe(false);
+    adapter.stopSession(session.id);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(adapter.pendingGoalContinuations.has(session.id)).toBe(false);
+    expect(continueSpy).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('an earlier request announce cannot retract a later request empty-response hint', async () => {
+  vi.useFakeTimers();
+  try {
+    const spawnResult = JSON.stringify({
+      status: 'accepted',
+      runId: 'child-run-a',
+      childSessionKey: 'agent:blog:subagent:child-a',
+    });
+    const { session, store } = createReconcileStore([
+      { id: 'user-a', type: 'user', content: 'request A', timestamp: 1, metadata: {} },
+      { id: 'tool-a', type: 'tool_use', content: 'Using sessions_spawn', timestamp: 2, metadata: { toolUseId: 'call-a', toolName: 'sessions_spawn' } },
+      { id: 'result-a', type: 'tool_result', content: spawnResult, timestamp: 3, metadata: { toolUseId: 'call-a' } },
+      { id: 'user-b', type: 'user', content: 'request B', timestamp: 4, metadata: {} },
+      { id: 'tool-b', type: 'tool_use', content: 'Using exec', timestamp: 5, metadata: { toolUseId: 'call-b', toolName: 'exec' } },
+      { id: 'result-b', type: 'tool_result', content: 'OK', timestamp: 6, metadata: { toolUseId: 'call-b' } },
+    ]);
+    const adapter = new OpenClawRuntimeAdapter(store, {});
+    const sessionKey = `agent:main:lobsterai:${session.id}`;
+    const runId = 'run-b';
+    let historyMessages: Array<Record<string, unknown>> = [
+      { role: 'user', content: 'request B' },
+      { role: 'assistant', content: [{ type: 'toolCall', id: 'call-b', name: 'exec', arguments: {} }] },
+      { role: 'toolResult', toolCallId: 'call-b', content: 'OK' },
+      { role: 'assistant', content: [{ type: 'thinking', thinking: 'No visible response for B.' }] },
+    ];
+    adapter.gatewayClient = {
+      start: () => {},
+      stop: () => {},
+      request: async (method: string) => method === 'chat.history' ? { messages: historyMessages } : {},
+    };
+    const turn = createActiveTurn(session.id, sessionKey, runId);
+    turn.toolUseMessageIdByToolCallId.set('call-b', 'tool-b');
+    turn.toolResultMessageIdByToolCallId.set('call-b', 'result-b');
+    adapter.activeTurns.set(session.id, turn);
+    adapter.latestTurnTokenBySession.set(session.id, turn.turnToken);
+    adapter.sessionIdByRunId.set(runId, session.id);
+    adapter.rememberSessionKey(session.id, sessionKey);
+    session.status = 'running';
+
+    adapter.handleGatewayEvent({
+      event: 'chat',
+      seq: 1,
+      payload: { state: 'final', runId, sessionKey },
+    });
+    await vi.advanceTimersByTimeAsync(62_000);
+    const hint = session.messages.find((message) => message.metadata?.kind === CoworkSystemMessageKind.EmptyResponse);
+    expect(hint?.metadata).toMatchObject({ userMessageId: 'user-b', runId });
+    expect(adapter.activeTurns.has(session.id)).toBe(false);
+
+    const announceRunId = 'announce:requester-settle:child-run-a:request-a-result';
+    const answer = 'Request A has completed.';
+    historyMessages = [...historyMessages, { role: 'assistant', content: answer }];
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 1,
+      payload: { runId: announceRunId, sessionKey, stream: 'lifecycle', data: { phase: AgentLifecyclePhase.Start } },
+    });
+    adapter.handleGatewayEvent({
+      event: 'agent',
+      seq: 2,
+      payload: { runId: announceRunId, sessionKey, stream: 'assistant', data: { text: answer } },
+    });
+    adapter.handleGatewayEvent({
+      event: 'chat',
+      seq: 1,
+      payload: { state: 'final', runId: announceRunId, sessionKey, message: { role: 'assistant', content: answer } },
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(session.messages.some((message) => message.id === hint?.id)).toBe(true);
+    expect(session.messages.some((message) => message.type === 'assistant' && message.content === answer)).toBe(true);
   } finally {
     vi.useRealTimers();
   }
