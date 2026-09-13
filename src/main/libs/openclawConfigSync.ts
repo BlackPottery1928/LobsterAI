@@ -2403,13 +2403,14 @@ export class OpenClawConfigSync {
         // any stale values.
         ...existingGateway,
         mode: 'local',
-        // Explicitly declare auth and tailscale to match the runtime
-        // in-memory state.  The gateway sets auth.mode='token' when
+        // Explicitly declare auth to match the runtime in-memory state.
+        // The gateway sets auth.mode='token' when
         // --token / OPENCLAW_GATEWAY_TOKEN is provided.  Without
         // matching values here, ANY file change triggers
         // "config change requires gateway restart (gateway.auth.token)".
         auth: { mode: 'token', token: '${OPENCLAW_GATEWAY_TOKEN}' },
-        tailscale: { mode: 'off' },
+        // Preserve opt-in mobile access and any native Tailscale options.
+        tailscale: existingGateway.tailscale ?? { mode: 'off' },
         ...(hasAnyChannel
           ? {
               http: {

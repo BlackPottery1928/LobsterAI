@@ -686,6 +686,40 @@ describe('OpenClawConfigSync runtime config output', () => {
     expect(config.gateway.port).toBe(18789);
   });
 
+  test('keeps Tailscale disabled by default', async () => {
+    const sync = await createSync();
+    expect(sync.sync('default-network').ok).toBe(true);
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(config.gateway.bind).toBeUndefined();
+    expect(config.gateway.tailscale).toEqual({ mode: 'off' });
+    expect(config.gateway.auth).toEqual({ mode: 'token', token: '${OPENCLAW_GATEWAY_TOKEN}' });
+  });
+
+  test.each([
+    { bind: 'lan', tailscale: { mode: 'off' } },
+    { bind: 'loopback', tailscale: { mode: 'serve', resetOnExit: true } },
+  ])('preserves mobile access across config sync and restart: $bind / $tailscale.mode', async (network) => {
+    const gateway = {
+      ...network,
+      publicOrigin: 'https://desktop.example.ts.net',
+      trustedProxies: ['127.0.0.1'],
+      controlUi: { allowedOrigins: ['https://desktop.example.ts.net'] },
+    };
+    fs.writeFileSync(configPath, JSON.stringify({ gateway }));
+
+    const sync = await createSync();
+    expect(sync.sync('mobile-access').ok).toBe(true);
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).gateway).toEqual({
+      ...gateway,
+      mode: 'local',
+      auth: { mode: 'token', token: '${OPENCLAW_GATEWAY_TOKEN}' },
+    });
+
+    const restartedSync = await createSync();
+    expect(restartedSync.sync('after-restart')).toMatchObject({ ok: true, changed: false });
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).gateway).toMatchObject(gateway);
+  });
+
   test('defaults memory search to local FTS-only when embeddings are disabled', async () => {
     const sync = await createSync({
       getCoworkConfig: () => ({

@@ -869,10 +869,9 @@ export class OpenClawEngineManager extends EventEmitter {
       // bundled-channel-entry contract.  Third-party plugins (in extensions/)
       // are discovered separately via plugins.load.paths in openclaw.json.
       OPENCLAW_BUNDLED_PLUGINS_DIR: path.join(runtime.root, 'dist', 'extensions'),
-      // Disable Bonjour/mDNS LAN discovery advertising.  LobsterAI is a
-      // desktop app with a loopback-only gateway — LAN service broadcast is
-      // unnecessary and its watchdog can flood stderr with re-advertise
-      // warnings on Windows.  See openclaw/openclaw#33609, #63153.
+      // Keep Bonjour/mDNS discovery disabled; mobile clients can use a setup
+      // code or explicit address. Its watchdog can flood stderr with
+      // re-advertise warnings on Windows. See openclaw/openclaw#33609, #63153.
       OPENCLAW_DISABLE_BONJOUR: '1',
       // Keep diagnostic detail; per-frame WebSocket traces require --verbose separately.
       OPENCLAW_LOG_LEVEL: process.env.OPENCLAW_LOG_LEVEL || 'debug',
@@ -1003,7 +1002,9 @@ export class OpenClawEngineManager extends EventEmitter {
     if (this.shutdownRequested) return this.getStatus();
 
     // Verbose mode logs every streamed WebSocket event, including thinking deltas.
-    const forkArgs = ['gateway', '--bind', 'loopback', '--port', String(port), '--token', token];
+    // Let OpenClaw honor gateway.bind for mobile access (LAN or Tailscale).
+    // Without an explicit bind setting, OpenClaw uses its desktop loopback default.
+    const forkArgs = ['gateway', '--port', String(port), '--token', token];
     const gatewayExecArgv = buildOpenClawGatewayExecArgv(process.env.NODE_OPTIONS);
     if (gatewayExecArgv.length > 0) {
       console.log(`[OpenClaw] gateway V8 old-space limit set to ${OPENCLAW_GATEWAY_MAX_OLD_SPACE_MB}MB`);
