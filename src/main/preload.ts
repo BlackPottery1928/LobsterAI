@@ -12,6 +12,7 @@ import { AppIpcChannel } from '../shared/app/constants';
 import { AppSettingsIpc } from '../shared/appSettings/constants';
 import { AppUpdateIpc } from '../shared/appUpdate/constants';
 import { ArtifactPreviewIpc } from '../shared/artifactPreview/constants';
+import { MarkdownFileIpc, type SaveMarkdownFileRequest } from '../shared/artifactPreview/markdownEditing';
 import {
   AsrIpcChannel,
   type AsrRealtimeSessionRequest,
@@ -31,12 +32,15 @@ import {
 } from '../shared/browserCredentials/constants';
 import {
   type AgentBrowserCredentialSavePromptRequest,
+  type AgentBrowserHostMenuRequest,
+  type AgentBrowserHostMenuResponse,
   type AgentBrowserHostNavigateRequest,
   type AgentBrowserHostPageRequest,
   type AgentBrowserHostRequest,
   type AgentBrowserHostResponse,
   type AgentBrowserHostSetViewRequest,
   type AgentBrowserHostStateEvent,
+  type AgentBrowserHostZoomRequest,
   BrowserIpc,
   type BrowserRuntimeProfile,
 } from '../shared/browserWebAccess/constants';
@@ -84,6 +88,8 @@ import type {
   LibraryFavoriteInput,
   LibraryGetLocalItemsInput,
   LibraryLocalListOptions,
+  LibraryLocalTaskGroupsOptions,
+  LibraryLocalTaskItemsOptions,
 } from '../shared/library/types';
 import {
   type ListLocalWebServicesOptions,
@@ -388,10 +394,26 @@ contextBridge.exposeInMainWorld('electron', {
         ipcRenderer.invoke(BrowserIpc.ReloadHost, request),
       stopHost: (request?: AgentBrowserHostRequest): Promise<AgentBrowserHostResponse> =>
         ipcRenderer.invoke(BrowserIpc.StopHost, request),
+      createHostPage: (request?: AgentBrowserHostRequest): Promise<AgentBrowserHostResponse> =>
+        ipcRenderer.invoke(BrowserIpc.CreateHostPage, request),
       selectHostPage: (request: AgentBrowserHostPageRequest): Promise<AgentBrowserHostResponse> =>
         ipcRenderer.invoke(BrowserIpc.SelectHostPage, request),
       closeHostPage: (request: AgentBrowserHostPageRequest): Promise<AgentBrowserHostResponse> =>
         ipcRenderer.invoke(BrowserIpc.CloseHostPage, request),
+      showHostMenu: (request: AgentBrowserHostMenuRequest): Promise<AgentBrowserHostMenuResponse> =>
+        ipcRenderer.invoke(BrowserIpc.ShowHostMenu, request),
+      captureHostScreenshot: (request?: AgentBrowserHostRequest): Promise<AgentBrowserHostResponse> =>
+        ipcRenderer.invoke(BrowserIpc.CaptureHostScreenshot, request),
+      setHostZoom: (request: AgentBrowserHostZoomRequest): Promise<AgentBrowserHostResponse> =>
+        ipcRenderer.invoke(BrowserIpc.SetHostZoom, request),
+      clearHostCookies: (request?: AgentBrowserHostRequest): Promise<AgentBrowserHostResponse> =>
+        ipcRenderer.invoke(BrowserIpc.ClearHostCookies, request),
+      clearHostCache: (request?: AgentBrowserHostRequest): Promise<AgentBrowserHostResponse> =>
+        ipcRenderer.invoke(BrowserIpc.ClearHostCache, request),
+      dismissCredentialLoginStatus: (
+        request?: AgentBrowserHostRequest,
+      ): Promise<AgentBrowserHostResponse> =>
+        ipcRenderer.invoke(BrowserIpc.DismissCredentialLoginStatus, request),
       resolveCredentialSavePrompt: (
         request: AgentBrowserCredentialSavePromptRequest,
       ): Promise<AgentBrowserHostResponse> =>
@@ -550,9 +572,9 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke(CoworkIpcChannel.GoalCommand, options),
     stopSession: (sessionId: string) =>
       ipcRenderer.invoke(CoworkIpcChannel.StopSession, sessionId),
-    deleteSession: (sessionId: string) => ipcRenderer.invoke('cowork:session:delete', sessionId),
+    deleteSession: (sessionId: string) => ipcRenderer.invoke(CoworkIpcChannel.DeleteSession, sessionId),
     deleteSessions: (sessionIds: string[]) =>
-      ipcRenderer.invoke('cowork:session:deleteBatch', sessionIds),
+      ipcRenderer.invoke(CoworkIpcChannel.DeleteSessions, sessionIds),
     setSessionPinned: (options: { sessionId: string; pinned: boolean }) =>
       ipcRenderer.invoke('cowork:session:pin', options),
     renameSession: (options: { sessionId: string; title: string }) =>
@@ -627,7 +649,7 @@ contextBridge.exposeInMainWorld('electron', {
 
     // Permission handling
     respondToPermission: (options: { requestId: string; result: any }) =>
-      ipcRenderer.invoke('cowork:permission:respond', options),
+      ipcRenderer.invoke(CoworkIpcChannel.PermissionRespond, options),
 
     // Configuration
     getConfig: () => ipcRenderer.invoke('cowork:config:get'),
@@ -642,6 +664,8 @@ contextBridge.exposeInMainWorld('electron', {
       memoryUserMemoriesMaxItems?: number;
       skipMissedJobs?: boolean;
       openClawHeartbeatEnabled?: boolean;
+      openClawSkillReviewEnabled?: boolean;
+      openClawMemoryFlushEnabled?: boolean;
       embeddingEnabled?: boolean;
       embeddingProvider?: string;
       embeddingModel?: string;
@@ -649,7 +673,7 @@ contextBridge.exposeInMainWorld('electron', {
       embeddingVectorWeight?: number;
       embeddingRemoteBaseUrl?: string;
       embeddingRemoteApiKey?: string;
-    }) => ipcRenderer.invoke('cowork:config:set', config),
+    }) => ipcRenderer.invoke(CoworkIpcChannel.ConfigSet, config),
 
     // Session temp storage (.cowork-temp) maintenance
     getTempStorageUsage: () => ipcRenderer.invoke(CoworkIpcChannel.TempStorageUsage),
@@ -751,10 +775,11 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.on('cowork:stream:permission', handler);
       return () => ipcRenderer.removeListener('cowork:stream:permission', handler);
     },
+    getPendingQuestions: () => ipcRenderer.invoke(CoworkIpcChannel.GetPendingQuestions),
     onStreamPermissionDismiss: (callback: (data: { requestId: string }) => void) => {
       const handler = (_event: any, data: { requestId: string }) => callback(data);
-      ipcRenderer.on('cowork:stream:permissionDismiss', handler);
-      return () => ipcRenderer.removeListener('cowork:stream:permissionDismiss', handler);
+      ipcRenderer.on(CoworkIpcChannel.StreamPermissionDismiss, handler);
+      return () => ipcRenderer.removeListener(CoworkIpcChannel.StreamPermissionDismiss, handler);
     },
     onStreamComplete: (
       callback: (data: { sessionId: string; claudeSessionId: string | null }) => void,
@@ -960,6 +985,10 @@ contextBridge.exposeInMainWorld('electron', {
   library: {
     listLocal: (options: LibraryLocalListOptions = {}) =>
       ipcRenderer.invoke(LibraryIpc.ListLocal, options),
+    listLocalTaskGroups: (options: LibraryLocalTaskGroupsOptions = {}) =>
+      ipcRenderer.invoke(LibraryIpc.ListLocalTaskGroups, options),
+    listLocalTaskItems: (options: LibraryLocalTaskItemsOptions) =>
+      ipcRenderer.invoke(LibraryIpc.ListLocalTaskItems, options),
     listCloud: (options: LibraryCloudListOptions = {}) =>
       ipcRenderer.invoke(LibraryIpc.ListCloud, options),
     getLocalItems: (input: LibraryGetLocalItemsInput) =>
@@ -992,6 +1021,11 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke(AsrIpcChannel.CreateRealtimeSession, options),
   },
   artifact: {
+    markdown: {
+      read: (filePath: string) => ipcRenderer.invoke(MarkdownFileIpc.Read, filePath),
+      save: (request: SaveMarkdownFileRequest) => ipcRenderer.invoke(MarkdownFileIpc.Save, request),
+      setHasUnsafeEdits: (hasUnsafeEdits: boolean) => ipcRenderer.send(MarkdownFileIpc.SetUnsafeEdits, hasUnsafeEdits),
+    },
     watchFile: (filePath: string) => ipcRenderer.invoke('artifact:watchFile', filePath),
     unwatchFile: (filePath: string) => ipcRenderer.invoke('artifact:unwatchFile', filePath),
     onFileChanged: (callback: (data: { filePath: string }) => void) => {

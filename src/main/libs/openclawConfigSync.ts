@@ -20,7 +20,7 @@ import {
 import { COWORK_TEMP_DIR_NAME } from '../../shared/cowork/constants';
 import { CoworkErrorModelSource } from '../../shared/cowork/errorDetail';
 import { normalizeMcpServerUrlInput } from '../../shared/mcp/url';
-import { OPENCLAW_PLUGIN_INDEX_MANAGED_KEYS } from '../../shared/openclawEngine/constants';
+import { OPENCLAW_PLUGIN_INDEX_MANAGED_KEYS, OpenClawSkillReviewMode } from '../../shared/openclawEngine/constants';
 import { OpenClawTranscriptSafetyLimit } from '../../shared/openclawTranscript/constants';
 import type {
   ModelRuntimeProfile as ModelRuntimeProfileType,
@@ -46,6 +46,7 @@ import type { ModelThinkingConfig } from '../../shared/providers/modelThinking';
 import type { Agent, CoworkConfig, CoworkExecutionMode } from '../coworkStore';
 import type { DiscordInstanceConfig, IMSettings, TelegramInstanceConfig } from '../im/types';
 import type { DingTalkInstanceConfig, EmailMultiInstanceConfig, FeishuInstanceConfig, NeteaseBeeChanConfig, NimInstanceConfig, PopoInstanceConfig, QQInstanceConfig, WecomInstanceConfig, WeixinOpenClawConfig } from '../im/types';
+import { DiscordDmPolicy } from '../im/types';
 import { OpenClawSessionKeepAlive } from '../openclawSessionPolicy/constants';
 import { buildOpenClawSessionConfig } from '../openclawSessionPolicy/store';
 import { EXCLUDED_SKILL_ENTRY_OVERRIDES } from '../skills/local/skillExclusions';
@@ -64,11 +65,13 @@ import type { LobsterBrowserMcpStdioLaunch } from './lobsterBrowserMcpServer';
 import {
   buildAgentEntry,
   buildManagedAgentEntries,
+  OpenClawAgentOwnership,
   parsePrimaryModelRef,
   resolveManagedSessionModelTarget,
   resolveQualifiedAgentModelRef,
 } from './openclawAgentModels';
 import { parseChannelSessionKey } from './openclawChannelSessionSync';
+import { logOpenClawConfigLockDiagnostics } from './openclawConfigDiagnostics';
 import { OpenClawConfigImpact } from './openclawConfigImpact';
 import type { OpenClawEngineManager } from './openclawEngineManager';
 import { repairHeartbeatFile, stripProactiveHeartbeatSection } from './openclawHeartbeatRepair';
@@ -84,6 +87,8 @@ const gwDiagTs = (): string => {
   return `[GW-RESTART-DIAG] ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}${sign}${p(Math.floor(abs / 60))}:${p(abs % 60)}`;
 };
 import { findBundledExtensionsDir, findThirdPartyExtensionsDir, hasBundledOpenClawExtension, hasRuntimeBundledOpenClawExtension, resolveOpenClawExtensionPluginId } from './openclawLocalExtensions';
+import { buildQQAccountConfig, OpenClawQQPlugin, QQ_APPROVALS_DISABLED } from './openclawQQConfig';
+import { withRequiredOpenClawSessionStoreOwner } from './openclawSessionStoreOwner';
 import { getOpenClawTokenProxyPort } from './openclawTokenProxy';
 import { getActiveSystemProxyUrl, isSystemProxyEnabled } from './systemProxy';
 
@@ -134,6 +139,7 @@ export function omitPluginIndexManagedKeys(plugins: unknown): Record<string, unk
  */
 export const OPENCLAW_AGENT_TIMEOUT_SECONDS = 3600;
 export const OPENCLAW_LOBSTERAI_MODEL_TIMEOUT_SECONDS = 330;
+export const OPENCLAW_MODEL_SELECTION_SCOPE = 'session';
 export const OPENCLAW_HEARTBEAT_EVERY_ENABLED = '1h';
 export const OPENCLAW_HEARTBEAT_EVERY_DISABLED = '0m';
 const DINGTALK_OPENCLAW_CHANNEL = 'dingtalk-connector';
@@ -188,15 +194,6 @@ export const modelCompatConfigChangeRequiresRestart = (
 export const OPENCLAW_BINDING_ANY_ACCOUNT_ID = '*';
 const OPENCLAW_DEFAULT_MODEL_MAX_TOKENS = 8192;
 const CHROME_PROXY_SERVER_ARG_PREFIX = '--proxy-server=';
-
-const OpenClawContextCacheProvider = {
-  DashScope: 'dashscope',
-  AnthropicCompatible: 'anthropic-compatible',
-} as const;
-
-const OpenClawContextCacheMode = {
-  Explicit: 'explicit',
-} as const;
 
 const EXPLICIT_CONTEXT_CACHE_LOG_PREFIX = '********************';
 const CUSTOM_PROVIDER_NAME_PATTERN = /^custom_[0-9]+$/;
@@ -323,27 +320,11 @@ const MANAGED_OWNER_ALLOW_FROM = [
 ];
 
 const MANAGED_TOOL_DENY = ['web_search'] as const;
-// knownPollNoProgress is off: polling a live background process that stays
-// quiet (builds, installs, downloads) legitimately repeats identical calls
-// with identical output, and the detector killed such runs after 10 polls
-// (~5 min). Runaway polling is still bounded by the global circuit breaker,
-// which applies regardless of detector flags. Aborted-tool protection is
-// unaffected: those detectors use their own hardcoded thresholds.
-// historySize must stay comfortably above globalCircuitBreakerThreshold or
-// interleaved tool calls push streak entries out of the window and the
-// breaker becomes unreachable.
+// OpenClaw 2026.8.1 owns detector selection and thresholds. Only the public
+// enable flag remains configurable; emitting the retired tuning keys makes
+// the complete config invalid and prevents gateway hot reloads.
 const MANAGED_TOOL_LOOP_DETECTION = {
   enabled: true,
-  historySize: 48,
-  warningThreshold: 6,
-  unknownToolThreshold: 6,
-  criticalThreshold: 10,
-  globalCircuitBreakerThreshold: 30,
-  detectors: {
-    genericRepeat: true,
-    knownPollNoProgress: false,
-    pingPong: true,
-  },
 } as const;
 const EMAIL_PLUGIN_ID = 'email';
 const NIM_CHANNEL_PLUGIN_ID = 'nimsuite-openclaw-nim-channel';
@@ -670,6 +651,7 @@ type OpenClawThinkingLevelMap = Partial<Record<
 >>;
 
 type OpenClawModelCompat = {
+  cacheControlFormat?: 'anthropic';
   maxTokensField?: 'max_completion_tokens' | 'max_tokens';
   supportsUsageInStreaming?: boolean;
   requiresStringContent?: boolean;
@@ -757,16 +739,12 @@ type OpenClawAgentModelDefault = {
 const DASHSCOPE_EXPLICIT_CONTEXT_CACHE_PARAMS: OpenClawAgentModelDefault = {
   params: {
     cacheRetention: 'short',
-    contextCacheProvider: OpenClawContextCacheProvider.DashScope,
-    contextCacheMode: OpenClawContextCacheMode.Explicit,
   },
 };
 
 const ANTHROPIC_COMPATIBLE_EXPLICIT_CONTEXT_CACHE_PARAMS: OpenClawAgentModelDefault = {
   params: {
     cacheRetention: 'short',
-    contextCacheProvider: OpenClawContextCacheProvider.AnthropicCompatible,
-    contextCacheMode: OpenClawContextCacheMode.Explicit,
   },
 };
 
@@ -1683,6 +1661,13 @@ const addExplicitContextCacheDefault = (
   });
   if (!contextCacheDefault) return;
 
+  if (model.api === OpenClawApiConst.OpenAICompletions) {
+    model.compat = {
+      ...model.compat,
+      cacheControlFormat: 'anthropic',
+    };
+  }
+
   const modelKey = `${selection.providerId}/${selection.sessionModelId}`;
   defaults[modelKey] = mergeAgentModelDefault(defaults[modelKey], contextCacheDefault);
   console.info(
@@ -1955,7 +1940,6 @@ export class OpenClawConfigSync {
       ...config,
       meta: {
         ...(version ? { lastTouchedVersion: version } : {}),
-        lastTouchedAt: new Date().toISOString(),
       },
     };
   }
@@ -2001,7 +1985,6 @@ export class OpenClawConfigSync {
             [BrowserRuntimeProfile.InApp]: {
               driver: 'existing-session',
               attachOnly: true,
-              color: '#D7A514',
               mcpCommand,
               mcpArgs: [`--lobster-bridge-url=${callbackUrl}`],
             },
@@ -2034,10 +2017,8 @@ export class OpenClawConfigSync {
     };
 
     return {
-      deny: [
-        ...MANAGED_TOOL_DENY
-      ],
-loopDetection: MANAGED_TOOL_LOOP_DETECTION,
+      deny: [...MANAGED_TOOL_DENY],
+      loopDetection: MANAGED_TOOL_LOOP_DETECTION,
       web: {
         search: {
           enabled: false,
@@ -2050,6 +2031,12 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
   sync(reason: string): OpenClawConfigSyncResult {
     const configPath = this.engineManager.getConfigPath();
     const coworkConfig = this.getCoworkConfig();
+    // OpenClaw defaults to automatic review; require an explicit user opt-in.
+    const skillReviewMode = coworkConfig.openClawSkillReviewEnabled === true
+      ? OpenClawSkillReviewMode.Auto
+      : OpenClawSkillReviewMode.Off;
+    // Native memory flush is enabled by default and can issue costly background calls.
+    const memoryFlushEnabled = coworkConfig.openClawMemoryFlushEnabled === true;
     const browserWebAccess = normalizeBrowserWebAccessConfig(this.getBrowserWebAccessConfig());
     const serverModels = getAllServerModelMetadata();
     const invalidKimiK3Transports = findInvalidKimiK3ServerTransports(serverModels);
@@ -2076,10 +2063,9 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
           '[OpenClawConfigSync] enterprise mode: no API config resolved, generating full config with empty providers (enterprise merge will supply them)',
         );
       } else {
-        // No API/model configured yet (fresh install).
-        // Write a minimal config so the gateway can start — it just won't have
-        // any model provider until the user configures one.
-        const result = this.writeMinimalConfig(configPath, reason);
+        // This also happens during logout or before server models finish
+        // loading. Keep existing non-provider state so IM stays configured.
+        const result = this.writeMinimalConfig(configPath, reason, skillReviewMode, memoryFlushEnabled);
         // Still sync AGENTS.md even when API is not configured — skills/systemPrompt
         // may already be set and should be available when the user configures a model.
         const mainWorkspacePath = getMainAgentWorkspacePath(this.engineManager.getStateDir());
@@ -2366,9 +2352,11 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
     // See: openclaw/openclaw#58678, #33310, #61613
     let existingGateway: Record<string, unknown> = {};
     let existingPlugins: Record<string, unknown> = {};
+    let existingSessionStoreOwner: unknown;
     try {
       const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       existingGateway = (existing.gateway ?? {}) as Record<string, unknown>;
+      existingSessionStoreOwner = existing.agents?.defaults?.sessionStore;
       // Filtered: plugin-index-managed keys (e.g. `installs`) must never be
       // preserved back into the file — they poison config.set hot delivery.
       existingPlugins = omitPluginIndexManagedKeys(existing.plugins);
@@ -2403,30 +2391,27 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
 
     const hasAnyChannel = hasDingTalkOpenClaw;
 
-    // Pre-compute bindings and detect changes so we can signal a hard restart
-    // when only bindings change (channel plugins don't hot-reload bindings).
+    // Start with explicit bindings; configured channels receive a fallback
+    // below before binding changes are compared.
     this.currentBindingsObj = this.buildBindings();
-    const bindingsJson = JSON.stringify(this.currentBindingsObj);
-    const bindingsChanged = this.previousBindingsJson !== undefined
-      && bindingsJson !== this.previousBindingsJson;
-    this.previousBindingsJson = bindingsJson;
 
     this.canUseMediaGeneration();
 
-    const managedConfig: Record<string, unknown> = {
+    let managedConfig: Record<string, unknown> = {
       gateway: {
         // Preserve ALL existing gateway fields so runtime-seeded values
         // survive config rewrites.  Our managed fields below override
         // any stale values.
         ...existingGateway,
         mode: 'local',
-        // Explicitly declare auth and tailscale to match the runtime
-        // in-memory state.  The gateway sets auth.mode='token' when
+        // Explicitly declare auth to match the runtime in-memory state.
+        // The gateway sets auth.mode='token' when
         // --token / OPENCLAW_GATEWAY_TOKEN is provided.  Without
         // matching values here, ANY file change triggers
         // "config change requires gateway restart (gateway.auth.token)".
         auth: { mode: 'token', token: '${OPENCLAW_GATEWAY_TOKEN}' },
-        tailscale: { mode: 'off' },
+        // Preserve opt-in mobile access and any native Tailscale options.
+        tailscale: existingGateway.tailscale ?? { mode: 'off' },
         ...(hasAnyChannel
           ? {
               http: {
@@ -2439,12 +2424,42 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
       },
       models: {
         mode: 'replace',
-        pricing: { enabled: false },
         providers: allProvidersMap,
       },
+      memory: {
+        search: {
+          enabled: true,
+          provider: coworkConfig.embeddingEnabled
+            ? (['openai', 'gemini', 'voyage', 'mistral', 'ollama'].includes(coworkConfig.embeddingProvider)
+              ? coworkConfig.embeddingProvider
+              : 'openai')
+            : 'none',
+          ...(coworkConfig.embeddingEnabled && coworkConfig.embeddingModel ? { model: coworkConfig.embeddingModel } : {}),
+          ...(coworkConfig.embeddingEnabled ? {
+            remote: {
+              ...(coworkConfig.embeddingRemoteBaseUrl ? { baseUrl: coworkConfig.embeddingRemoteBaseUrl } : {}),
+              ...(coworkConfig.embeddingRemoteApiKey ? { apiKey: coworkConfig.embeddingRemoteApiKey } : {}),
+            },
+          } : {
+            fallback: 'none',
+          }),
+          store: {
+            // Use trigram tokenizer for FTS5 — unicode61 (the OpenClaw default)
+            // cannot tokenize CJK characters, so Chinese/Japanese/Korean memory
+            // content is invisible to keyword search.
+            fts: { tokenizer: 'trigram' },
+            ...(!coworkConfig.embeddingEnabled ? { vector: { enabled: false } } : {}),
+          },
+        },
+      },
       agents: {
+        ownership: OpenClawAgentOwnership.Explicit,
         defaults: {
+          systemAgent: { agentId: AgentId.Main },
+          authInheritance: { agentId: AgentId.Main },
           timeoutSeconds: OPENCLAW_AGENT_TIMEOUT_SECONDS,
+          // Session switches stay local; LobsterAI explicitly syncs agent defaults.
+          modelSelectionScope: OPENCLAW_MODEL_SELECTION_SCOPE,
           model: {
             primary: primaryModel,
           },
@@ -2454,54 +2469,26 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
           workspace: path.resolve(mainWorkspacePath),
           mediaMaxMb: 30,
           compaction: {
-            truncateAfterCompaction: true,
             maxActiveTranscriptBytes: OpenClawTranscriptSafetyLimit.SoftConfigValue,
+            memoryFlush: { enabled: memoryFlushEnabled },
           },
           ...(taskWorkingDirectory ? { cwd: path.resolve(taskWorkingDirectory) } : {}),
-          memorySearch: {
-            enabled: true,
-            provider: coworkConfig.embeddingEnabled
-              ? (['openai', 'gemini', 'voyage', 'mistral', 'ollama'].includes(coworkConfig.embeddingProvider)
-                ? coworkConfig.embeddingProvider
-                : 'openai')
-              : 'none',
-            ...(coworkConfig.embeddingEnabled && coworkConfig.embeddingModel ? { model: coworkConfig.embeddingModel } : {}),
-            ...(coworkConfig.embeddingEnabled ? {
-              remote: {
-                ...(coworkConfig.embeddingRemoteBaseUrl ? { baseUrl: coworkConfig.embeddingRemoteBaseUrl } : {}),
-                ...(coworkConfig.embeddingRemoteApiKey ? { apiKey: coworkConfig.embeddingRemoteApiKey } : {}),
-              },
-              query: {
-                hybrid: {
-                  vectorWeight: coworkConfig.embeddingVectorWeight ?? 0.7,
-                },
-              },
-            } : {
-              fallback: 'none',
-            }),
-            store: {
-              // Use trigram tokenizer for FTS5 — unicode61 (the openclaw default)
-              // cannot tokenize CJK characters, so Chinese/Japanese/Korean memory
-              // content is invisible to keyword search.
-              fts: { tokenizer: 'trigram' },
-              ...(!coworkConfig.embeddingEnabled ? { vector: { enabled: false } } : {}),
-            },
-          },
           heartbeat: {
+            agentId: AgentId.Main,
             every: coworkConfig.openClawHeartbeatEnabled === true
               ? OPENCLAW_HEARTBEAT_EVERY_ENABLED
               : OPENCLAW_HEARTBEAT_EVERY_DISABLED,
             target: 'none',
             lightContext: true,
             isolatedSession: true,
-            skipWhenBusy: true,
           },
           ...(Object.keys(agentModelDefaults).length > 0
             ? { models: agentModelDefaults }
             : {}),
         },
-        ...this.buildAgentsList(primaryModel, this.engineManager.getStateDir(), availableProviders, agents),
+        ...this.buildAgentsConfig(primaryModel, this.engineManager.getStateDir(), availableProviders, agents),
       },
+      talk: { agentId: AgentId.Main },
       ...this.currentBindingsObj,
       session: this.buildSessionConfig(),
       commands: {
@@ -2510,6 +2497,9 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
       tools: this.buildWebToolsConfig(browserWebAccess),
       browser: this.buildBrowserConfig(browserWebAccess),
       skills: {
+        workshop: {
+          autonomous: { mode: skillReviewMode },
+        },
         entries: {
           ...this.buildSkillEntries(),
           ...MANAGED_SKILL_ENTRY_OVERRIDES,
@@ -2523,9 +2513,7 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
       },
       cron: {
         enabled: true,
-        store: path.join(this.engineManager.getStateDir(), 'cron', 'jobs.json'),
         skipMissedJobs: coworkConfig.skipMissedJobs === true,
-        maxConcurrentRuns: 3,
         sessionRetention: '7d',
       },
       ...((() => {
@@ -2541,7 +2529,7 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
           'openclaw-nim-channel',
           'clawemail-email',
           'qwen-portal-auth',
-          'openclaw-qqbot',
+          'qqbot',
           ...packageAliasPluginIds,
         ];
         const transientPluginIds = [
@@ -2563,7 +2551,6 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
           // config rewrites.  Our managed entries below override stale values.
           ...cleanedExistingEntries,
           [BUNDLED_BROWSER_PLUGIN_ID]: { enabled: true },
-          qqbot: { enabled: qqbotPluginEnabled },
           ...Object.fromEntries(
             preinstalledPlugins.map(plugin => {
               // Sync plugin enabled state with the corresponding channel config.
@@ -2573,7 +2560,7 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
                 if (pluginMatches(plugin, DINGTALK_OPENCLAW_CHANNEL, 'dingtalk')) return dingTalkInstances.some(i => i.enabled && i.clientId);
                 if (pluginMatches(plugin, 'openclaw-lark', 'feishu-openclaw-plugin'))
                   return feishuInstances.some(i => i.enabled && i.appId);
-                if (pluginMatches(plugin, 'openclaw-qqbot', 'qqbot')) return qqbotPluginEnabled;
+                if (pluginMatches(plugin, OpenClawQQPlugin.Id, OpenClawQQPlugin.PackageId)) return qqbotPluginEnabled;
                 if (pluginMatches(plugin, 'discord')) return discordPluginEnabled;
                 if (pluginMatches(plugin, 'wecom-openclaw-plugin')) return wecomInstances.some(i => i.enabled && i.botId);
                 if (pluginMatches(plugin, 'moltbot-popo')) return popoInstances.some(i => i.enabled && i.appKey);
@@ -2828,18 +2815,19 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
       for (let idx = 0; idx < enabledDiscordInstances.length; idx++) {
         const inst = enabledDiscordInstances[idx];
         const tokenVar = idx === 0 ? 'LOBSTER_DC_BOT_TOKEN' : `LOBSTER_DC_BOT_TOKEN_${idx}`;
+        const dmPolicy = inst.dmPolicy || DiscordDmPolicy.Open;
         const account: Record<string, unknown> = {
           enabled: true,
           name: inst.instanceName,
           token: `\${${tokenVar}}`,
-          dm: {
-            policy: inst.dmPolicy || 'open',
-            allowFrom: (() => {
-              const ids = inst.allowFrom?.length ? [...inst.allowFrom] : [];
-              if (inst.dmPolicy === 'open' && !ids.includes('*')) ids.push('*');
-              return ids;
-            })(),
-          },
+          // v2026.8.1 validates the published plugin schema before doctor can
+          // normalize legacy dm.policy/dm.allowFrom aliases.
+          dmPolicy,
+          allowFrom: (() => {
+            const ids = inst.allowFrom?.length ? [...inst.allowFrom] : [];
+            if (dmPolicy === DiscordDmPolicy.Open && !ids.includes('*')) ids.push('*');
+            return ids;
+          })(),
           groupPolicy: inst.groupPolicy || 'allowlist',
           guilds: (() => {
             const guilds: Record<string, unknown> = {};
@@ -2969,33 +2957,9 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
       };
     }
 
-    // Sync QQ OpenClaw channel config (via qqbot plugin) — multi-instance via accounts
+    // Tencent QQBot 2.0 separates open chat access from native approvals.
     const enabledQQInstances = qqInstances.filter(i => i.enabled && i.appId);
     if (enabledQQInstances.length > 0) {
-      const buildQQAccountConfig = (
-        inst: (typeof enabledQQInstances)[0],
-        secretEnvVar: string,
-      ): Record<string, unknown> => {
-        const account: Record<string, unknown> = {
-          enabled: true,
-          name: inst.instanceName,
-          appId: inst.appId,
-          clientSecret: `\${${secretEnvVar}}`,
-          // v2026.4.8 schema removed dmPolicy/groupPolicy/groupAllowFrom/historyLimit.
-          // Only allowFrom and markdownSupport remain as valid account properties.
-          allowFrom: (() => {
-            const ids = inst.allowFrom?.length ? [...inst.allowFrom] : [];
-            if (inst.dmPolicy === 'open' && !ids.includes('*')) ids.push('*');
-            return ids;
-          })(),
-          markdownSupport: inst.markdownSupport ?? true,
-        };
-        if (inst.imageServerBaseUrl) {
-          account.imageServerBaseUrl = inst.imageServerBaseUrl;
-        }
-        return account;
-      };
-
       // All instances go into `accounts` dict
       const accounts: Record<string, unknown> = {};
       for (let idx = 0; idx < enabledQQInstances.length; idx++) {
@@ -3005,7 +2969,10 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
         accounts[inst.instanceId.slice(0, 8)] = buildQQAccountConfig(inst, secretVar);
       }
 
-      managedConfig.channels = { ...(managedConfig.channels as Record<string, unknown> || {}), qqbot: { enabled: true, accounts } };
+      managedConfig.channels = {
+        ...(managedConfig.channels as Record<string, unknown> || {}),
+        [OpenClawQQPlugin.Channel]: { enabled: true, allowFrom: [QQ_APPROVALS_DISABLED], accounts },
+      };
     }
 
     // Sync WeCom OpenClaw channel config (via wecom-openclaw-plugin) — multi-instance via accounts
@@ -3229,11 +3196,33 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
       };
     }
 
-    // Binding changes are detected via bindingsChanged (line ~1035) which
+    // Explicit ownership has no global default agent. Preserve the former
+    // main-agent fallback for every configured channel, after specific routes.
+    const bindings = this.currentBindingsObj.bindings ?? [];
+    for (const channel of Object.keys((managedConfig.channels as Record<string, unknown>) ?? {})) {
+      const hasChannelOwner = bindings.some(binding => {
+        const match = binding.match as Record<string, unknown>;
+        return match.channel === channel && match.accountId === OPENCLAW_BINDING_ANY_ACCOUNT_ID;
+      });
+      if (!hasChannelOwner) {
+        bindings.push({ agentId: AgentId.Main, match: { channel, accountId: OPENCLAW_BINDING_ANY_ACCOUNT_ID } });
+      }
+    }
+    if (bindings.length > 0) managedConfig.bindings = bindings;
+    const bindingsJson = JSON.stringify(bindings);
+    const bindingsChanged = this.previousBindingsJson !== undefined
+      && bindingsJson !== this.previousBindingsJson;
+    this.previousBindingsJson = bindingsJson;
+
+    // Binding changes are detected via bindingsChanged which
     // triggers a hard gateway restart in the caller.  We no longer inject
     // _agentBinding into channel configs because OpenClaw plugins using
     // additionalProperties:false reject the extra field and crash.
 
+    managedConfig = withRequiredOpenClawSessionStoreOwner(managedConfig, {
+      stateDir: this.engineManager.getStateDir(),
+      legacyOwner: existingSessionStoreOwner,
+    });
     const nextContent = `${JSON.stringify(managedConfig, null, 2)}\n`;
     console.log('[OpenClawConfigSync] sync() managedConfig key fields:', {
       providers: (managedConfig.models as Record<string, unknown>)?.providers,
@@ -3315,6 +3304,8 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
         ensureDir(path.dirname(configPath));
         const stampedContent = `${JSON.stringify(this.stampConfigMeta(managedConfig), null, 2)}\n`;
         const tmpPath = `${configPath}.tmp-${Date.now()}`;
+        logOpenClawConfigLockDiagnostics(configPath, `managed-config-write:${reason}`, true);
+        console.debug(`[OpenClawConfigSync] Writing managed config: reason=${reason} pid=${process.pid} path=${configPath}`);
         fs.writeFileSync(tmpPath, stampedContent, 'utf8');
         fs.renameSync(tmpPath, configPath);
       } catch (error) {
@@ -3349,7 +3340,9 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
       configPath,
       ...(bindingsChanged ? { bindingsChanged } : {}),
       ...(changedTopLevelKeys.length > 0 ? { changedTopLevelKeys } : {}),
-      ...(changedTopLevelKeys.includes('mcp') || modelCompatRestartRequired
+      // Native MCP config reload disposes affected runtimes; server edits do
+      // not require respawning the gateway. Keep model compatibility restarts.
+      ...(modelCompatRestartRequired
         ? { restartImpact: OpenClawConfigImpact.Restart }
         : {}),
       ...(agentsMdWarning ? { agentsMdWarning } : {}),
@@ -3869,32 +3862,31 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
   }
 
   /**
-   * Build the `agents.list` config array for openclaw.json.
+   * Build keyed `agents.entries` for openclaw.json. Ownership is explicit;
+   * legacy default markers must not be sent back after runtime migration.
    *
-   * The main agent uses the user's configured workspace directory (via
-   * `agents.defaults.workspace`).  Non-main agents omit `workspace` so
-   * OpenClaw falls back to its default: `{STATE_DIR}/workspace-{agentId}/`.
-   * This keeps custom agent workspaces under the openclaw state directory
-   * rather than coupling them to the user's working directory.
+   * Each agent retains its workspace under the OpenClaw state directory.
+   * Explicit paths keep the main workspace independent of entry ordering.
    *
    * Per-agent `identity` (name, emoji) is set from the agent database so
    * OpenClaw picks it up natively.
    */
-  private buildAgentsList(
+  private buildAgentsConfig(
     defaultPrimaryModel: string,
     stateDir?: string,
     availableProviders?: Record<string, { models: Array<{ id: string }> }>,
     agentsOverride?: Agent[],
-  ): { list?: Array<Record<string, unknown>> } {
+  ): { entries: Record<string, Record<string, unknown>> } {
     const agents = agentsOverride ?? this.getAgents?.() ?? [];
     const mainAgent = agents.find(agent => agent.id === AgentId.Main);
+    const workspace = stateDir ? getMainAgentWorkspacePath(stateDir) : undefined;
 
     const list: Array<Record<string, unknown>> = [
       mainAgent
-        ? buildAgentEntry(mainAgent, defaultPrimaryModel, { availableProviders })
+        ? buildAgentEntry(mainAgent, defaultPrimaryModel, { availableProviders, workspace })
         : {
             id: AgentId.Main,
-            default: true,
+            ...(workspace ? { workspace } : {}),
             identity: {
               name: DefaultAgentProfile.Name,
             },
@@ -3910,15 +3902,15 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
       }),
     ];
 
-    return list.length > 0 ? { list } : {};
+    return { entries: Object.fromEntries(list.map(({ id, ...entry }) => [String(id), entry])) };
   }
 
   /**
    * Build the `bindings` config array for openclaw.json.
    *
    * Each IM platform can be independently bound to a different agent via
-   * `IMSettings.platformAgentBindings`.  Only channels with an explicit
-   * non-main binding produce an entry.
+   * `IMSettings.platformAgentBindings`. Account-specific main bindings must
+   * also override a platform binding to a custom agent.
    */
   private buildBindings(): { bindings?: Array<Record<string, unknown>> } {
     const imSettings = this.getIMSettings?.();
@@ -3949,9 +3941,9 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
           // Check for per-instance binding: `platform:instanceId`
           const bindingKey = `${platform}:${inst.instanceId}`;
           const agentId = platformBindings[bindingKey];
-          if (!agentId || agentId === 'main') continue;
+          if (!agentId) continue;
           const targetAgent = agents.find(a => a.id === agentId && a.enabled);
-          if (!targetAgent) continue;
+          if (agentId !== AgentId.Main && !targetAgent) continue;
           const accountId = platform === 'nim'
             ? deriveNimAccountId(inst as NimInstanceConfig)
             : inst.instanceId.slice(0, 8);
@@ -4099,11 +4091,15 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
   }
 
   /**
-   * Write a minimal openclaw.json that lets the gateway start without any
-   * model/provider configured.  The full config will be synced once the
-   * user sets up a model in the UI.
+   * Start fresh installs without a provider, or remove unavailable providers
+   * from an existing config while preserving IM and other runtime state.
    */
-  private writeMinimalConfig(configPath: string, _reason: string): OpenClawConfigSyncResult {
+  private writeMinimalConfig(
+    configPath: string,
+    _reason: string,
+    skillReviewMode: OpenClawSkillReviewMode,
+    memoryFlushEnabled: boolean,
+  ): OpenClawConfigSyncResult {
     const baseMinimalConfig: Record<string, unknown> = {
       gateway: {
         mode: 'local',
@@ -4121,8 +4117,8 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
       currentContent = '';
     }
 
-    // Build the config to write: start from the base minimal config, then
-    // selectively preserve non-provider sections from the existing file.
+    // Preserve all non-provider sections, including channel accounts, agent
+    // bindings, and gateway auth. Losing them on logout tears down live IM.
     // Critically, we do NOT preserve existing.models — it may contain
     // ${LOBSTER_APIKEY_X} placeholders for providers that are no longer
     // configured, causing the gateway to fail to start because those env
@@ -4130,25 +4126,56 @@ loopDetection: MANAGED_TOOL_LOOP_DETECTION,
     let mergedConfig: Record<string, unknown> = { ...baseMinimalConfig };
     if (currentContent) {
       try {
-        const existing = JSON.parse(currentContent);
+        const existing = asConfigRecord(JSON.parse(currentContent));
+        mergedConfig = { ...baseMinimalConfig, ...existing };
+        delete mergedConfig.models;
         // Preserve IM channel plugin entries — these reference their own env
         // vars (${LOBSTER_TG_BOT_TOKEN} etc.) that are still injected when
         // the corresponding IM channels remain enabled. Plugin-index-managed
         // keys (`installs`) are filtered out — see omitPluginIndexManagedKeys.
-        if (existing.plugins) {
+        if (existing?.plugins) {
           mergedConfig.plugins = omitPluginIndexManagedKeys(existing.plugins);
         }
-        // Preserve non-default gateway settings (e.g. custom port).
-        if (existing.gateway && existing.gateway.mode !== 'local') {
-          mergedConfig.gateway = existing.gateway;
-        }
-        // existing.models is intentionally NOT preserved — it references
-        // ${LOBSTER_APIKEY_*} env vars that may no longer be set.
       } catch {
         // Malformed JSON — overwrite with base minimal config.
       }
     }
 
+    // Apply maintenance preferences even before models load or after logout.
+    // Preserve the rest of compaction and memory settings when disabling only flush.
+    const agents = asConfigRecord(mergedConfig.agents);
+    const agentDefaults = asConfigRecord(agents?.defaults);
+    const compaction = asConfigRecord(agentDefaults?.compaction);
+    mergedConfig.agents = {
+      ...agents,
+      defaults: {
+        ...agentDefaults,
+        compaction: {
+          ...compaction,
+          memoryFlush: {
+            ...asConfigRecord(compaction?.memoryFlush),
+            enabled: memoryFlushEnabled,
+          },
+        },
+      },
+    };
+
+    const skills = asConfigRecord(mergedConfig.skills);
+    const workshop = asConfigRecord(skills?.workshop);
+    mergedConfig.skills = {
+      ...skills,
+      workshop: {
+        ...workshop,
+        autonomous: {
+          ...asConfigRecord(workshop?.autonomous),
+          mode: skillReviewMode,
+        },
+      },
+    };
+
+    mergedConfig = withRequiredOpenClawSessionStoreOwner(mergedConfig, {
+      stateDir: this.engineManager.getStateDir(),
+    });
     const nextContent = `${JSON.stringify(mergedConfig, null, 2)}\n`;
 
     // Compare ignoring `meta` timestamps to avoid unnecessary writes.

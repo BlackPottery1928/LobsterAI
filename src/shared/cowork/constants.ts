@@ -57,10 +57,16 @@ export const COWORK_TEMP_DIR_NAME = '.cowork-temp';
 export const COWORK_TEMP_ATTACHMENTS_DIR_NAME = 'attachments';
 
 export const CoworkIpcChannel = {
+  ConfigSet: 'cowork:config:set',
+  PermissionRespond: 'cowork:permission:respond',
+  GetPendingQuestions: 'cowork:question:pending',
+  StreamPermissionDismiss: 'cowork:stream:permissionDismiss',
   CancelMediaTask: 'cowork:media:cancel',
   GetMediaModels: 'media:getModels',
   MediaStatusPollUpdate: 'cowork:media:statusPollUpdate',
   ForkSession: 'cowork:session:fork',
+  DeleteSession: 'cowork:session:delete',
+  DeleteSessions: 'cowork:session:deleteBatch',
   StopSession: 'cowork:session:stop',
   SubTaskHistory: 'cowork:subTask:history',
   SubagentList: 'cowork:subagent:list',

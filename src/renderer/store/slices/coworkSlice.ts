@@ -162,6 +162,8 @@ const initialState: CoworkState = {
     memoryUserMemoriesMaxItems: 12,
     skipMissedJobs: true,
     openClawHeartbeatEnabled: false,
+    openClawSkillReviewEnabled: false,
+    openClawMemoryFlushEnabled: false,
     embeddingEnabled: false,
     embeddingProvider: 'openai',
     embeddingModel: '',
