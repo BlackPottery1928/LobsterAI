@@ -189,7 +189,13 @@ export default defineConfig({
       usePolling: false,
       // Ignore vendor/ to prevent dev reload when plugins are installed into
       // vendor/openclaw-runtime/.../third-party-extensions/
-      ignored: ['**/vendor/**'],
+      // Skip temporary trees (which may contain circular junctions) and Electron output.
+      ignored: [
+        '**/vendor/**',
+        '**/.work/**',
+        '**/artifacts/**',
+        '**/dist-electron/**',
+      ],
     },
   },
   optimizeDeps: {
