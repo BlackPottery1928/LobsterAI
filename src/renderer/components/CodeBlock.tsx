@@ -831,12 +831,6 @@ const lightThemeExt = EditorView.theme({
 const CODE_BLOCK_LINE_LIMIT = 1000;
 const CODE_BLOCK_CHAR_LIMIT = 100000;
 
-/** Prose-like fenced content reads better with word wrap enabled by default. */
-const WRAP_BY_DEFAULT_LANGUAGES = new Set(['markdown', 'md', 'mdx', 'text', 'txt', 'plaintext', 'plain', 'log']);
-
-const shouldWrapByDefault = (lang: string | null): boolean =>
-  !lang || WRAP_BY_DEFAULT_LANGUAGES.has(lang);
-
 /**
  * Maps language identifiers (as they appear in fenced code blocks) to their
  * canonical file extensions. Covers the most common languages; falls back to
@@ -938,7 +932,7 @@ interface CodeFullscreenModalProps {
 }
 
 const CodeFullscreenModal: React.FC<CodeFullscreenModalProps> = ({ code, lang, isDark, onAction, onClose }) => {
-  const [wrap, setWrap] = useState(() => shouldWrapByDefault(lang));
+  const [wrap, setWrap] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const viewRef = useRef<EditorView | null>(null);
@@ -1417,7 +1411,7 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ node, className, children, ...pro
 
   const [isCopied, setIsCopied] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
-  const [wrap, setWrap] = useState(() => shouldWrapByDefault(rawLang));
+  const [wrap, setWrap] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const copyTimeoutRef = useRef<number | null>(null);
