@@ -1,4 +1,4 @@
-import { ArchiveBoxIcon, ArrowPathIcon, ArrowPathRoundedSquareIcon, ChatBubbleLeftIcon, CheckCircleIcon, CpuChipIcon, CubeIcon, EnvelopeIcon, ExclamationTriangleIcon, GlobeAltIcon, InformationCircleIcon, MagnifyingGlassIcon, SignalIcon, SunIcon, TrashIcon, WrenchScrewdriverIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { ArchiveBoxIcon, ArrowPathIcon, ArrowPathRoundedSquareIcon, CheckCircleIcon, CpuChipIcon, CubeIcon, ExclamationTriangleIcon, GlobeAltIcon, InformationCircleIcon, MagnifyingGlassIcon, SignalIcon, SunIcon, TrashIcon, WrenchScrewdriverIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import React, { useCallback,useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
@@ -66,7 +66,7 @@ import ErrorMessage from './ErrorMessage';
 import BrainIcon from './icons/BrainIcon';
 import EditIcon from './icons/EditIcon';
 import MessageCopyIcon from './icons/MessageCopyIcon';
-import PlugIcon from './icons/PlugIcon';
+// import PlugIcon from './icons/PlugIcon';
 import PlusCircleIcon from './icons/PlusCircleIcon';
 import IMSettings from './im/IMSettings';
 import PluginsSettings, { type PluginPendingChanges, type PluginsSettingsHandle } from './plugins/PluginsSettings';
@@ -878,6 +878,7 @@ const SettingsSlidersIcon: React.FC<{ className?: string }> = ({ className }) =>
   </svg>
 );
 
+/*
 const DreamingTabIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg
     width="34"
@@ -894,6 +895,7 @@ const DreamingTabIcon: React.FC<{ className?: string }> = ({ className }) => (
     />
   </svg>
 );
+*/
 
 export type SettingsOpenOptions = {
   initialTab?: TabType;
