@@ -930,6 +930,7 @@ interface IElectronAPI {
       onHostState: (callback: (event: AgentBrowserHostStateEvent) => void) => () => void;
       credentials: {
         getAvailability: () => Promise<BrowserCredentialAvailabilityResponse>;
+        requestAccess: () => Promise<BrowserCredentialAvailabilityResponse>;
         list: () => Promise<BrowserCredentialListResponse>;
         save: (request: BrowserCredentialSaveRequest) => Promise<BrowserCredentialMutationResponse>;
         delete: (request: BrowserCredentialDeleteRequest) => Promise<BrowserCredentialMutationResponse>;

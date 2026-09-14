@@ -2195,6 +2195,8 @@ const getBrowserCredentialService = (): BrowserCredentialService => {
     browserCredentialService = new BrowserCredentialService(
       getStore().getDatabase(),
       safeStorage,
+      process.platform,
+      getStore(),
     );
   }
   return browserCredentialService;
