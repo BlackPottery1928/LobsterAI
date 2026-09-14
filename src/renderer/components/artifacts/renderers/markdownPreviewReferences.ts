@@ -15,7 +15,7 @@ const Syntax = {
 const MarkdownNode = { Definition: 'definition', Link: 'link' } as const;
 const LinkTargetKind = { Reference: 'reference', Explicit: 'explicit' } as const;
 
-const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMath);
+const parser = unified().use(remarkParse).use(remarkGfm, { singleTilde: false }).use(remarkMath);
 // A composite block lets the existing list/quote parsers end the math context
 // correctly. Its content stays opaque, including blank lines and fake references.
 const mathBlocks: MarkdownConfig = {

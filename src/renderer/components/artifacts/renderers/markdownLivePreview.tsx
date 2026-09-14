@@ -7,6 +7,8 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import MarkdownContent, { safeUrlTransform } from '@/components/MarkdownContent';
 import { i18nService } from '@/services/i18n';
+import { normalizeInlineCodeText } from '@/utils/markdownCodeSegments';
+import { isMarkdownHtmlBreak } from '@/utils/remarkMarkdownLayout';
 
 import { markdownPreviewReferences, withMarkdownReferenceDefinitions } from './markdownPreviewReferences';
 
@@ -17,20 +19,37 @@ const Syntax = {
   Url: 'URL', LinkTitle: 'LinkTitle', LinkLabel: 'LinkLabel', Image: 'Image', Quote: 'Blockquote', QuoteMark: 'QuoteMark',
   ListMark: 'ListMark', TaskMarker: 'TaskMarker', Table: 'Table', FencedCode: 'FencedCode',
   CodeBlock: 'CodeBlock', Rule: 'HorizontalRule', Math: 'InlineMath',
+  Escape: 'Escape', Entity: 'Entity', HardBreak: 'HardBreak', HtmlTag: 'HTMLTag',
 } as const;
 
 export const markdownMathSyntax: MarkdownConfig = {
   defineNodes: [Syntax.Math],
   parseInline: [{
     name: Syntax.Math,
+    before: Syntax.Escape,
     parse(context, next, position) {
-      if (next !== 36 || context.char(position + 1) === 36 || /\s/.test(context.slice(position + 1, position + 2))) return -1;
-      for (let end = position + 1; end < context.end; end++) {
-        if (context.char(end) === 10) break;
+      const latex = next === 92 && context.char(position + 1) === 40;
+      if (!latex && next !== 36) return -1;
+      let size = latex ? 2 : 1;
+      if (!latex) while (context.char(position + size) === 36) size++;
+      for (let end = position + size; end < context.end; end++) {
+        if (latex && context.char(end) === 92 && context.char(end + 1) === 41) {
+          return context.slice(position + size, end).trim()
+            ? context.addElement(context.elt(Syntax.Math, position, end + 2)) : -1;
+        }
         if (context.char(end) === 92) { end++; continue; }
-        if (context.char(end) === 36) return context.addElement(context.elt(Syntax.Math, position, end + 1));
+        if (!latex && context.char(end) === 36) {
+          let closingSize = 1;
+          while (context.char(end + closingSize) === 36) closingSize++;
+          if (closingSize === size && context.slice(position + size, end).trim()) {
+            return context.addElement(context.elt(Syntax.Math, position, end + size));
+          }
+          end += closingSize - 1;
+        }
       }
-      return -1;
+      // Consume an unmatched dollar run as a unit so its second dollar cannot
+      // become an opener. An escaped dollar before a valid run stays independent.
+      return latex ? -1 : position + size;
     },
   }],
 };
@@ -119,12 +138,46 @@ class Bullet extends WidgetType {
   }
 }
 
+class InlineCodePreview extends WidgetType {
+  constructor(readonly source: string) { super(); }
+  eq(other: InlineCodePreview): boolean { return this.source === other.source; }
+  toDOM(): HTMLElement {
+    const span = document.createElement('span');
+    const size = /^`+/.exec(this.source)![0].length;
+    span.className = 'md-inline-code';
+    span.textContent = normalizeInlineCodeText(this.source.slice(size, -size));
+    return span;
+  }
+  ignoreEvent(): boolean { return false; }
+}
+
+class EntityPreview extends WidgetType {
+  constructor(readonly source: string) { super(); }
+  eq(other: EntityPreview): boolean { return this.source === other.source; }
+  toDOM(): HTMLElement {
+    // Lezer only supplies a recognized character reference, never HTML markup.
+    const decoder = document.createElement('textarea');
+    decoder.innerHTML = this.source;
+    const span = document.createElement('span');
+    span.textContent = decoder.value;
+    return span;
+  }
+  ignoreEvent(): boolean { return false; }
+}
+
+class HtmlBreakPreview extends WidgetType {
+  eq(): boolean { return true; }
+  toDOM(): HTMLElement { return document.createElement('br'); }
+  ignoreEvent(): boolean { return false; }
+}
+
 class InlineMath extends WidgetType {
   constructor(readonly source: string, readonly from: number) { super(); }
   eq(other: InlineMath): boolean { return this.source === other.source && this.from === other.from; }
   toDOM(view: EditorView): HTMLElement {
     const span = document.createElement('span');
-    katex.render(this.source.slice(1, -1), span, { throwOnError: false, trust: false });
+    const size = this.source.startsWith('\\(') ? 2 : /^\$+/.exec(this.source)![0].length;
+    katex.render(this.source.slice(size, -size), span, { throwOnError: false, trust: false });
     span.addEventListener('mousedown', event => {
       event.preventDefault();
       view.dispatch({ selection: { anchor: this.from + 1 }, effects: focusChanged.of(true) });
@@ -168,6 +221,7 @@ function decorate(state: EditorState, focused: boolean, options: MarkdownPreview
       const block = name === Syntax.Table || name === Syntax.FencedCode || name === Syntax.CodeBlock
         || name === Syntax.Rule || (name === Syntax.Paragraph && (
           /^\$\$[\s\S]*\$\$$/.test(source.trim())
+          || /^\\\[[\s\S]*\\\]$/.test(source.trim())
           || (node.node.firstChild?.name === Syntax.Image && node.node.firstChild.to === to)
         ));
       if (block && !editing && state.doc.lineAt(from).from === from) {
@@ -182,7 +236,27 @@ function decorate(state: EditorState, focused: boolean, options: MarkdownPreview
         case Syntax.Strong: mark(from, to, 'md-strong'); break;
         case Syntax.Emphasis: mark(from, to, 'md-emphasis'); break;
         case Syntax.Strike: mark(from, to, 'md-strike'); break;
-        case Syntax.InlineCode: mark(from, to, 'md-inline-code'); break;
+        case Syntax.InlineCode:
+          if (!editing) {
+            decorations.push(Decoration.replace({ widget: new InlineCodePreview(source) }).range(from, to));
+            return false;
+          }
+          mark(from, to, 'md-inline-code');
+          break;
+        case Syntax.Escape:
+          if (!editing) hide(from, from + 1);
+          break;
+        case Syntax.Entity:
+          if (!editing) decorations.push(Decoration.replace({ widget: new EntityPreview(source) }).range(from, to));
+          break;
+        case Syntax.HardBreak:
+          if (!editing) hide(from, text[to - 1] === '\n' ? to - 1 : to);
+          break;
+        case Syntax.HtmlTag:
+          if (!editing && isMarkdownHtmlBreak(source)) {
+            decorations.push(Decoration.replace({ widget: new HtmlBreakPreview() }).range(from, to));
+          }
+          break;
         case Syntax.Quote: lines(from, to, 'md-quote'); break;
         case Syntax.Table: lines(from, to, 'md-source-block'); break;
         case Syntax.FencedCode:
