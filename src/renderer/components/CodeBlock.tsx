@@ -1376,7 +1376,7 @@ interface CodeBlockProps {
   [key: string]: any;
 }
 
-const CodeBlock: React.FC<CodeBlockProps> = ({ node, className, children, ...props }) => {
+const CodeBlock: React.FC<CodeBlockProps> = ({ node, className, children, inline, ...props }) => {
   const normalizedClassName = Array.isArray(className)
     ? className.join(' ')
     : className || '';
@@ -1384,8 +1384,8 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ node, className, children, ...pro
   const hasPosition =
     node?.position?.start?.line != null && node?.position?.end?.line != null;
   const isInline =
-    typeof props.inline === 'boolean'
-      ? props.inline
+    typeof inline === 'boolean'
+      ? inline
       : hasPosition
         ? node.position.start.line === node.position.end.line
         : !match;
