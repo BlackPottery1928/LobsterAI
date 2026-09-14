@@ -6,6 +6,7 @@ const esbuild = require('esbuild');
 
 const rootDir = path.resolve(__dirname, '..');
 const entryPath = path.join(__dirname, 'openclaw-startup-state-migration.mjs');
+const authStoreEntryPath = path.join(__dirname, 'openclaw-xai-auth-store.mjs');
 
 async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc) {
   const expectedVersion = require(path.join(rootDir, 'package.json')).openclaw.version.replace(/^v/, '');
@@ -23,8 +24,9 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc) {
   // Rebuild even when the gateway cache is current: this entry is maintained by
   // LobsterAI and must match the pinned upstream migration/schema implementation.
   await esbuild.build({
-    entryPoints: [entryPath],
-    outfile: outputPath,
+    entryPoints: [entryPath, authStoreEntryPath],
+    outdir: runtimeDir,
+    outExtension: { '.js': '.mjs' },
     alias: {
       '#openclaw-workspace-migration': path.join(openclawSrc, 'src/infra/state-migrations.workspace-setup.ts'),
       '#openclaw-device-auth-migration': path.join(openclawSrc, 'src/infra/state-migrations.device-auth.ts'),
@@ -37,6 +39,12 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc) {
       '#openclaw-auth-migration-diagnostic': path.join(openclawSrc, 'src/agents/auth-profiles/legacy-source-diagnostic.ts'),
       '#openclaw-auth-profile-persisted': path.join(openclawSrc, 'src/agents/auth-profiles/persisted.ts'),
       '#openclaw-auth-profile-sqlite': path.join(openclawSrc, 'src/agents/auth-profiles/sqlite.ts'),
+      '#openclaw-auth-profile-store': path.join(openclawSrc, 'src/agents/auth-profiles/store.ts'),
+      '#openclaw-auth-profile-references': path.join(openclawSrc, 'src/agents/auth-profiles/runtime-external-profile-references.ts'),
+      '#openclaw-auth-profile-paths': path.join(openclawSrc, 'src/agents/auth-profiles/path-resolve.ts'),
+      '#openclaw-agent-database': path.join(openclawSrc, 'src/state/openclaw-agent-db.ts'),
+      '#openclaw-state-database': path.join(openclawSrc, 'src/state/openclaw-state-db.ts'),
+      '#openclaw-pid-alive': path.join(openclawSrc, 'src/shared/pid-alive.ts'),
       '#openclaw-config-io': path.join(openclawSrc, 'src/config/io.factory.ts'),
       '#openclaw-migration-lock': path.join(openclawSrc, 'src/infra/state-migrations.lock.ts'),
     },

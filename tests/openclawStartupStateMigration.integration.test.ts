@@ -3,6 +3,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,12 +19,19 @@ import {
   type OpenClawStartupMigrationReport,
   OpenClawStartupMigrationStatus,
 } from '../src/shared/openclawEngine/startupMigration';
+import {
+  OPENCLAW_XAI_AUTH_STORE_ENTRY,
+  type OpenClawXaiAuthStore,
+  XAI_AUTH_CREDENTIAL_TYPE,
+  XAI_AUTH_PROVIDER,
+} from '../src/shared/openclawEngine/xaiAuthStore';
 
 const runtimeRoot = process.env.OPENCLAW_STARTUP_MIGRATION_RUNTIME;
 const GatewayProbeMethod = {
   Config: 'config.get', Agents: 'agents.list', ExecApprovals: 'exec.approvals.get',
 } as const;
 const execFileAsync = promisify(execFile);
+const runtimeRequire = createRequire(import.meta.url);
 const seededAt = '2026-09-01T01:02:03.000Z';
 const completedAt = '2026-09-02T04:05:06.000Z';
 const content = JSON.stringify({ version: 1, bootstrapSeededAt: seededAt, onboardingCompletedAt: completedAt });
@@ -245,7 +253,7 @@ describe.skipIf(!runtimeRoot)('bundled OpenClaw startup state migration', () => 
   });
 
   test.runIf(process.env.OPENCLAW_STARTUP_MIGRATION_GATEWAY === '1')(
-    'starts with an unrelated provider key and serves config, agents and exec approvals after migration/restart', async () => {
+    'recovers legacy xAI auth and serves config, agents and exec approvals after migration/restart', async () => {
       const { identity, source } = seedIdentity();
       const token = 'startup-migration-isolated-test-token';
       fs.writeFileSync(configPath, JSON.stringify({
@@ -283,7 +291,20 @@ describe.skipIf(!runtimeRoot)('bundled OpenClaw startup state migration', () => 
       fs.writeFileSync(path.join(stateDir, 'exec-approvals.json'), JSON.stringify({
         version: 1, defaults: { security: 'allowlist', ask: 'on-miss', askFallback: 'deny' },
       }));
+      const authPath = path.join(stateDir, 'agents/main/agent/auth-profiles.json');
+      const credential = {
+        type: XAI_AUTH_CREDENTIAL_TYPE, provider: XAI_AUTH_PROVIDER,
+        access: 'synthetic-xai-access', refresh: 'synthetic-xai-refresh', email: 'migration@example.invalid',
+      };
+      fs.mkdirSync(path.dirname(authPath), { recursive: true });
+      fs.writeFileSync(authPath, JSON.stringify({ version: 1, profiles: { 'xai:fixture': credential } }));
+      fs.writeFileSync(`${authPath}.lock`, '2147483647');
+      const auth = runtimeRequire(path.join(runtimeRoot!, OPENCLAW_XAI_AUTH_STORE_ENTRY)) as OpenClawXaiAuthStore;
+      expect(auth.readStatus(stateDir).email).toBe(credential.email);
       expect((await migrate()).code).toBe(0);
+      expect(fs.existsSync(authPath)).toBe(false);
+      expect(fs.existsSync(`${authPath}.lock`)).toBe(false);
+      expect(auth.readStatus(stateDir).email).toBe(credential.email);
       expect(digest(configPath)).toBe(configBefore);
       await cli(['memory', 'index', '--force']);
 
@@ -314,6 +335,16 @@ describe.skipIf(!runtimeRoot)('bundled OpenClaw startup state migration', () => 
             await new Promise(resolve => setTimeout(resolve, 200));
           }
           expect(started, output.replaceAll(token, '[REDACTED]')).toBe(true);
+          // The desktop must also be able to change login while Gateway owns
+          // this state root; the canonical writer publishes its own mutation.
+          if (attempt === 0) {
+            auth.replaceCredential(stateDir, 'xai:replacement', { ...credential, email: 'replacement@example.invalid' });
+          }
+          expect(auth.readStatus(stateDir).email).toBe('replacement@example.invalid');
+          if (attempt === 1) {
+            auth.logout(stateDir);
+            expect(auth.readStatus(stateDir)).toEqual({ loggedIn: false });
+          }
           const locked = await migrate();
           expect(locked.code).toBe(1);
           expect(locked.report.warnings.join(' ')).toContain('owns this state directory');
