@@ -1523,6 +1523,7 @@ const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
                           type={showApiKey ? 'text' : 'password'}
                           id={`${activeProvider}-apiKey`}
                           value={providers[activeProvider].apiKey}
+                          disabled={isBaseUrlLocked}
                           onChange={(e) => handleProviderConfigChange(activeProvider, 'apiKey', e.target.value)}
                           className="block w-full rounded-xl bg-claude-surfaceInset dark:bg-claude-darkSurfaceInset dark:border-claude-darkBorder border-claude-border border focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30 dark:text-claude-darkText text-claude-text px-3 py-2 pr-16 text-xs"
                           placeholder={i18nService.t('apiKeyPlaceholder')}
