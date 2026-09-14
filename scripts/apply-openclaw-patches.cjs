@@ -804,14 +804,48 @@ const v20260801StrongPatchValidators = {
   ],
   'openclaw-windows-file-path-redaction.patch': [
     {
+      file: 'src/agents/embedded-agent-error-observation.ts',
+      snippets: [
+        'return redactToolPayloadTextWithConfig(text, {',
+      ],
+    },
+    {
       file: 'src/logging/redact-patterns.ts',
       snippets: [
-        'const AWS_SECRET_ACCESS_KEY_VALUE_BOUNDARY = String.raw`(^|[^A-Za-z0-9/+=_])(?<!;base64,[A-Za-z0-9+/=]*)(?<![A-Za-z]:)`;',
+        'export const AWS_SECRET_ACCESS_KEY_VALUE_REDACT_PATTERN',
+      ],
+    },
+    {
+      file: 'src/logging/redact-file-path.ts',
+      snippets: [
+        'export function isAwsSecretFilePathMatch',
+        'const FILE_PATH_CONTEXT_LIMIT = 4096',
+        'const hasFilenameContinuation =',
+        'start >= tokenStart',
+      ],
+    },
+    {
+      file: 'src/logging/redact.ts',
+      snippets: [
+        'const bareAwsSecretPatterns = new WeakSet<RegExp>()',
+        'builtIn && raw === AWS_SECRET_ACCESS_KEY_VALUE_REDACT_PATTERN',
+        'builtInPatternStarts.set(patterns, custom.length)',
+        'builtInPatternStarts.set(patterns, 0)',
+        'isAwsSecretFilePathMatch(',
+        'context?.input ?? ""',
+        'match.index + fullMatch.length - selected.value.length',
       ],
     },
     {
       file: 'src/logging/redact.test.ts',
       snippets: ['const windowsPath = "C:/Users/tester/lobsterai/project/chinajoy-ppt/deck.pptx"'],
+    },
+    {
+      file: 'src/logging/redact-file-path.test.ts',
+      snippets: [
+        'keeps custom and registered secret rules authoritative inside paths',
+        'still masks explicitly labeled path-shaped credentials',
+      ],
     },
   ],
   'zz-openclaw-task-cwd-system-prompt.patch': [
