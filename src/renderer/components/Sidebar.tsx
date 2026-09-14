@@ -735,6 +735,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div className="mt-[5px] space-y-0.5 px-3">
           <button
             type="button"
+            data-onboarding-target="new-task"
             onClick={() => {
               reportSidebarAction('new_task', { activeView, isCollapsed });
               onNewChat();

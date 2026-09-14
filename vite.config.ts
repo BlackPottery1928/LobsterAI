@@ -104,10 +104,8 @@ export default defineConfig({
             },
           },
         },
-        onstart() {
-          // Signal that the main process bundle is ready for electron to load
-          fs.writeFileSync('dist-electron/.electron-ready', '');
-        },
+        // package.json starts Electron after all five output files stabilize.
+        onstart() {},
       },
       {
         // 预加载脚本入口文件
@@ -133,6 +131,30 @@ export default defineConfig({
         },
         onstart() {},
       },
+      {
+        // Sandboxed preload used only by the isolated saved-credential login view.
+        entry: 'src/main/browserCredentials/agentBrowserCredentialPreload.ts',
+        vite: {
+          build: {
+            sourcemap: true,
+            outDir: 'dist-electron',
+            minify: false,
+          },
+        },
+        onstart() {},
+      },
+      {
+        // Sandboxed preload that observes manual login submissions without exposing secrets to pages.
+        entry: 'src/main/browserCredentials/manualCredentialCapturePreload.ts',
+        vite: {
+          build: {
+            sourcemap: true,
+            outDir: 'dist-electron',
+            minify: false,
+          },
+        },
+        onstart() {},
+      },
     ]),
     renderer(),
   ],
@@ -149,9 +171,10 @@ export default defineConfig({
     sourcemap: true,
     minify: false,
     rollupOptions: {
+      // library-thumbnail.html is built by vite.thumbnail.config.ts so the
+      // sandboxed thumbnail page never shares chunks with the app entry.
       input: {
         main: path.resolve(__dirname, 'index.html'),
-        libraryThumbnail: path.resolve(__dirname, 'library-thumbnail.html'),
       },
     },
   },
