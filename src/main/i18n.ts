@@ -16,6 +16,9 @@ export type LanguageType = 'zh' | 'en';
 
 const translations: Record<LanguageType, Record<string, string>> = {
   zh: {
+    openClawStartupMigrationFailed: 'AI 引擎状态升级失败：{error}',
+    openClawPluginVerificationFailed: 'AI 引擎插件校验失败，已停止自动重启。请处理以下插件错误后重试：\n{error}',
+    openClawRuntimeFilesMissing: 'AI 引擎运行文件缺失或无法读取，已停止启动。请退出应用，使用包含修复的最新安装包覆盖安装后重试。',
     // DeepSeek Harness (experimental)
     dshWorkbenchTitle: 'DeepSeek Harness 工作台（实验）',
     dshPlanProviderName: '套餐',
@@ -31,6 +34,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     // Quit confirmation (native dialog shown on user-initiated quit)
     appQuitConfirmTitle: '退出 LobsterAI？',
     appQuitConfirmDetail: 'LobsterAI 关闭期间，定时任务不会运行，也无法回复 IM 消息。',
+    appQuitConfirmUnsafeMarkdown: '有 Markdown 修改尚未保存，且无法备份草稿。退出后这些修改将丢失。请取消退出，返回文档保存或复制修改。',
     appQuitConfirmQuit: '退出',
     appQuitConfirmCancel: '取消',
     taskCompletionNotificationTitle: '任务已完成',
@@ -58,6 +62,18 @@ const translations: Record<LanguageType, Record<string, string>> = {
     contextMenuCopy: '复制',
     contextMenuPaste: '粘贴',
     contextMenuSelectAll: '全选',
+    agentBrowserMenuScreenshot: '截图',
+    agentBrowserMenuNewBlankPage: '空白页',
+    agentBrowserMenuZoom: '缩放',
+    agentBrowserMenuZoomOut: '缩小',
+    agentBrowserMenuResetZoom: '重置为 100%',
+    agentBrowserMenuZoomIn: '放大',
+    agentBrowserMenuClearCookies: '清除 Cookie',
+    agentBrowserMenuClearCache: '清除缓存',
+    agentBrowserMenuUnavailable: '浏览器窗口当前不可用。',
+    agentBrowserRuntimeUnavailable: 'Agent 浏览器暂不可用，请稍后重试。',
+    agentBrowserMenuOpenFailed: '无法打开浏览器菜单。',
+    agentBrowserZoomFailed: '调整浏览器缩放失败。',
 
     // Session titles (created by ChannelSessionSync)
     coworkDefaultSessionTitle: '新对话',
@@ -370,6 +386,9 @@ const translations: Record<LanguageType, Record<string, string>> = {
     'enterprise.updateBlocked': '版本更新由企业统一管理',
   },
   en: {
+    openClawStartupMigrationFailed: 'AI engine state migration failed: {error}',
+    openClawPluginVerificationFailed: 'AI engine plugin verification failed. Automatic restarts stopped. Fix the plugin error and retry:\n{error}',
+    openClawRuntimeFilesMissing: 'AI engine runtime files are missing or unreadable. Startup has stopped. Quit the app and reinstall using the latest installer containing the fix, then try again.',
     // DeepSeek Harness (experimental)
     dshWorkbenchTitle: 'DeepSeek Harness Workbench (Experimental)',
     dshPlanProviderName: 'Plan',
@@ -385,6 +404,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     // Quit confirmation (native dialog shown on user-initiated quit)
     appQuitConfirmTitle: 'Quit LobsterAI?',
     appQuitConfirmDetail: 'While LobsterAI is closed, scheduled tasks will not run and IM messages will not be answered.',
+    appQuitConfirmUnsafeMarkdown: 'Some Markdown changes have not been saved and could not be backed up as drafts. Quitting will lose these changes. Cancel and return to the document to save or copy your changes.',
     appQuitConfirmQuit: 'Quit',
     appQuitConfirmCancel: 'Cancel',
     taskCompletionNotificationTitle: 'Task Complete',
@@ -412,6 +432,18 @@ const translations: Record<LanguageType, Record<string, string>> = {
     contextMenuCopy: 'Copy',
     contextMenuPaste: 'Paste',
     contextMenuSelectAll: 'Select All',
+    agentBrowserMenuScreenshot: 'Screenshot',
+    agentBrowserMenuNewBlankPage: 'Blank page',
+    agentBrowserMenuZoom: 'Zoom',
+    agentBrowserMenuZoomOut: 'Zoom out',
+    agentBrowserMenuResetZoom: 'Reset to 100%',
+    agentBrowserMenuZoomIn: 'Zoom in',
+    agentBrowserMenuClearCookies: 'Clear Cookie',
+    agentBrowserMenuClearCache: 'Clear cache',
+    agentBrowserMenuUnavailable: 'The browser window is unavailable.',
+    agentBrowserRuntimeUnavailable: 'The Agent browser is temporarily unavailable. Try again later.',
+    agentBrowserMenuOpenFailed: 'Failed to open the browser menu.',
+    agentBrowserZoomFailed: 'Failed to adjust browser zoom.',
 
     // Session titles
     coworkDefaultSessionTitle: 'New Chat',

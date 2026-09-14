@@ -904,6 +904,7 @@ describe('Windows installer hardening contracts', () => {
     expect(unpackScript).toContain('missingDirs === 0');
     expect(unpackScript).toContain('required resources missing after extraction');
     expect(unpackScript).toContain("name: 'cfmind-entry'");
+    expect(unpackScript).toContain("name: 'cfmind-bundle-assets'");
     expect(unpackScript).toContain("name: 'skills-content'");
     expect(unpackScript).toContain("name: 'python-entry'");
     expect(unpackScript).toContain('phase=sentinel-written');
@@ -938,19 +939,23 @@ describe('Windows installer hardening contracts', () => {
     expect(branch).toContain('will not commit a partial application');
   });
 
-  test('requires OpenClaw, Skills, and Python before committing an installation', () => {
+  test('requires complete OpenClaw bundle assets, Skills, and Python before committing an installation', () => {
     const extractVerifyStart = installerInclude.indexOf('TarExtractVerify:');
     const extractVerifyEnd = installerInclude.indexOf('TarExtractProcessFailed:', extractVerifyStart);
     const extractVerify = installerInclude.slice(extractVerifyStart, extractVerifyEnd);
+    expect(extractVerify).toContain('TarExtractVerifyBundleAssets:');
+    expect(extractVerify).toContain(String.raw`resources\cfmind\web-tree-sitter.wasm`);
     expect(extractVerify).toContain('TarExtractVerifySkills:');
     expect(extractVerify).toContain(String.raw`resources\SKILLs\*.*`);
     expect(extractVerify).toContain(String.raw`resources\python-win\python.exe`);
     expect(extractVerify).toContain(String.raw`resources\python-win\python3.exe`);
     expect(extractVerify).toContain('TarExtractRequiredResourceMissing:');
 
-    const prevalidateStart = installerInclude.indexOf('NewInstallPrevalidateSkills:');
+    const prevalidateStart = installerInclude.indexOf('NewInstallPrevalidateBundleAssets:');
     const prevalidateEnd = installerInclude.indexOf('NewInstallPrevalidateSucceeded:', prevalidateStart);
     const prevalidate = installerInclude.slice(prevalidateStart, prevalidateEnd);
+    expect(prevalidate).toContain('NewInstallPrevalidateBundleAssets:');
+    expect(prevalidate).toContain(String.raw`resources\cfmind\web-tree-sitter.wasm`);
     expect(prevalidate).toContain(String.raw`resources\SKILLs\*.*`);
     expect(prevalidate).toContain(String.raw`resources\python-win\python.exe`);
     expect(prevalidate).toContain(String.raw`resources\python-win\python3.exe`);
@@ -1220,6 +1225,43 @@ describe('Windows installer hardening contracts', () => {
     expect(header).toContain('ManifestDPIAware true');
     const afterUninstallerGuard = header.slice(header.indexOf('!endif'));
     expect(afterUninstallerGuard).toContain('ManifestDPIAware true');
+  });
+
+  test('replaces the bitmap-strike CJK fonts pinned by the NSIS language files', () => {
+    // NSIS's SimpChinese/TradChinese/Japanese/Korean .nlf files set the dialog
+    // font to SimSun/PMingLiU/MS PGothic/Gulim 9pt. GDI draws those from their
+    // embedded bitmap strikes with no anti-aliasing, so every label on the
+    // Chinese wizard is jagged. SetFont /LANG is a file-scope attribute and
+    // LANG_* only exists once addLangs has run, so the overrides must live in
+    // customHeader (inserted after addLangs) and outside the BUILD_UNINSTALLER
+    // guard so the uninstaller dialogs get them too.
+    const addLangs = rootInstallerTemplate.indexOf('!insertmacro addLangs');
+    expect(addLangs).toBeGreaterThan(-1);
+    expect(rootInstallerTemplate.indexOf('!insertmacro customHeader')).toBeGreaterThan(addLangs);
+
+    const headerStart = installerInclude.indexOf('!macro customHeader');
+    const header = installerInclude.slice(
+      headerStart,
+      installerInclude.indexOf('!macroend', headerStart),
+    );
+    const afterUninstallerGuard = header.slice(header.indexOf('!endif'));
+    const overrides: Array<[string, string]> = [
+      ['SIMPCHINESE', 'Microsoft YaHei UI'],
+      ['TRADCHINESE', 'Microsoft JhengHei UI'],
+      ['JAPANESE', 'Yu Gothic UI'],
+      ['KOREAN', 'Malgun Gothic'],
+    ];
+    for (const [lang, font] of overrides) {
+      expect(afterUninstallerGuard).toMatch(
+        new RegExp(
+          `!ifdef LANG_${lang}\\s+SetFont /LANG=\\$\\{LANG_${lang}\\} "${font}" 9\\s+!endif`,
+        ),
+      );
+    }
+    // Per-language only: a global SetFont would restyle every language and
+    // take precedence over all /LANG overrides.
+    expect(installerInclude.match(/^\s*SetFont\b/gm)?.length).toBe(overrides.length);
+    expect(installerInclude).not.toMatch(/^\s*SetFont\s+"/m);
   });
 
   test('stages the embedded package through a selectable staging directory', () => {

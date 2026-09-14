@@ -1,5 +1,8 @@
+import { randomUUID } from 'crypto';
 import {
   type BrowserWindow,
+  type NativeImage,
+  nativeImage,
   type Session,
   session,
   WebContentsView,
@@ -17,8 +20,10 @@ import {
 import {
   type AgentBrowserHostState,
   type AgentBrowserHostStateEvent,
+  AgentBrowserPageUrl,
   AgentBrowserPartition,
   type AgentBrowserToolEvent,
+  AgentBrowserZoom,
   BrowserDisplayMode,
   type BrowserWebAccessConfig,
   normalizeBrowserHostnamePolicyList,
@@ -42,7 +47,7 @@ import type {
   BrowserToolResponse,
 } from './mcpBridgeServer';
 
-const BrowserMcpTool = {
+export const BrowserMcpTool = {
   ListPages: 'list_pages',
   NewPage: 'new_page',
   SelectPage: 'select_page',
@@ -64,10 +69,28 @@ const BrowserMcpTool = {
   LoginWithSavedCredential: BrowserCredentialLoginTool.Name,
 } as const;
 
-const DEFAULT_PAGE_URL = 'about:blank';
+export const BrowserCdpCommand = {
+  GetFullAXTree: 'Accessibility.getFullAXTree',
+  ResolveNode: 'DOM.resolveNode',
+  Evaluate: 'Runtime.evaluate',
+  CallFunctionOn: 'Runtime.callFunctionOn',
+  ReleaseObjectGroup: 'Runtime.releaseObjectGroup',
+} as const;
+
+const DEFAULT_PAGE_URL = AgentBrowserPageUrl.Blank;
 const DEFAULT_OPERATION_TIMEOUT_MS = 30_000;
+const SCREENSHOT_CAPTURE_TIMEOUT_MS = 10_000;
 const MAX_OPERATION_TIMEOUT_MS = 60_000;
 const MAX_SNAPSHOT_NODES = 2_000;
+const SNAPSHOT_REF_PREFIX = 'ax-';
+
+type BrowserEvaluationResult = {
+  result?: { value?: unknown; description?: string };
+  exceptionDetails?: {
+    text?: string;
+    exception?: { value?: unknown; description?: string };
+  };
+};
 
 type AxValue = {
   value?: unknown;
@@ -241,6 +264,7 @@ export class AgentBrowserHost {
   private credentialLoginView: WebContentsView | null = null;
   private credentialLoginViewAttached = false;
   private credentialLoginState: BrowserCredentialLoginState | undefined;
+  private preserveCredentialLoginStatusForNavigationPageId: number | undefined;
   private readonly credentialLogin: AgentBrowserCredentialLogin;
   private credentialSavePrompt: BrowserCredentialSavePrompt | undefined;
   private readonly manualCredentialCapture: ManualCredentialCaptureService;
@@ -251,6 +275,8 @@ export class AgentBrowserHost {
   private activeSessionId: string | undefined;
   private lastError: string | undefined;
   private proxyReady: Promise<void> = Promise.resolve();
+  private browserToolBootstrapPagePromise: Promise<BrowserPage> | null = null;
+  private reusableBrowserToolBootstrapPageId: number | undefined;
 
   constructor(private readonly deps: AgentBrowserHostDeps) {
     this.windowVisible = Boolean(this.deps.getMainWindow()?.isVisible());
@@ -302,6 +328,7 @@ export class AgentBrowserHost {
         loading: page.loading,
         canGoBack: navigationHistory.canGoBack(),
         canGoForward: navigationHistory.canGoForward(),
+        zoomFactor: webContents.getZoomFactor(),
       };
     });
     return {
@@ -365,12 +392,14 @@ export class AgentBrowserHost {
     this.assertCredentialLoginInactive();
     if (sessionId?.trim()) this.activeSessionId = sessionId.trim();
     const page = this.getSelectedPage() ?? await this.createPage(DEFAULT_PAGE_URL);
+    this.markBrowserToolBootstrapPageUsed(page.pageId);
     await this.navigatePage(page, normalizeAddress(url), DEFAULT_OPERATION_TIMEOUT_MS);
     return this.getState();
   }
 
   goBack(): AgentBrowserHostState {
     this.assertCredentialLoginInactive();
+    this.clearCredentialLoginStatus();
     const page = this.requireSelectedPage();
     if (page.view.webContents.navigationHistory.canGoBack()) {
       page.view.webContents.navigationHistory.goBack();
@@ -380,6 +409,7 @@ export class AgentBrowserHost {
 
   goForward(): AgentBrowserHostState {
     this.assertCredentialLoginInactive();
+    this.clearCredentialLoginStatus();
     const page = this.requireSelectedPage();
     if (page.view.webContents.navigationHistory.canGoForward()) {
       page.view.webContents.navigationHistory.goForward();
@@ -389,6 +419,7 @@ export class AgentBrowserHost {
 
   reload(): AgentBrowserHostState {
     this.assertCredentialLoginInactive();
+    this.clearCredentialLoginStatus();
     this.requireSelectedPage().view.webContents.reload();
     return this.getState();
   }
@@ -399,12 +430,80 @@ export class AgentBrowserHost {
     return this.getState();
   }
 
+  async newPage(sessionId?: string): Promise<AgentBrowserHostState> {
+    this.assertCredentialLoginInactive();
+    if (sessionId?.trim()) this.activeSessionId = sessionId.trim();
+    await this.createPage(DEFAULT_PAGE_URL);
+    return this.getState();
+  }
+
+  async captureScreenshot(sessionId?: string): Promise<NativeImage> {
+    this.assertCredentialLoginInactive();
+    if (sessionId?.trim()) this.activeSessionId = sessionId.trim();
+    const page = this.requireSelectedPage();
+    await this.ensureDebugger(page);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      page.view.webContents.debugger.sendCommand('Page.captureScreenshot', {
+        format: 'png',
+        fromSurface: true,
+        captureBeyondViewport: false,
+      }) as Promise<{ data?: string }>,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`In-app browser screenshot timed out after ${SCREENSHOT_CAPTURE_TIMEOUT_MS}ms.`));
+        }, SCREENSHOT_CAPTURE_TIMEOUT_MS);
+      }),
+    ]).finally(() => {
+      if (timeout) clearTimeout(timeout);
+    });
+    if (!result.data) {
+      throw new Error('The in-app browser screenshot did not contain image data.');
+    }
+    const image = nativeImage.createFromBuffer(Buffer.from(result.data, 'base64'));
+    if (image.isEmpty()) {
+      throw new Error('The in-app browser screenshot is empty.');
+    }
+    return image;
+  }
+
+  setZoomFactor(factor: number, sessionId?: string): AgentBrowserHostState {
+    this.assertCredentialLoginInactive();
+    if (sessionId?.trim()) this.activeSessionId = sessionId.trim();
+    if (!Number.isFinite(factor)) {
+      throw new Error('A valid browser zoom factor is required.');
+    }
+    const normalizedFactor = Math.min(
+      AgentBrowserZoom.Max,
+      Math.max(AgentBrowserZoom.Min, Number(factor.toFixed(2))),
+    );
+    this.requireSelectedPage().view.webContents.setZoomFactor(normalizedFactor);
+    this.emitState();
+    return this.getState();
+  }
+
+  async clearCookies(sessionId?: string): Promise<AgentBrowserHostState> {
+    this.assertCredentialLoginInactive();
+    if (sessionId?.trim()) this.activeSessionId = sessionId.trim();
+    await this.browserSession.clearStorageData({ storages: ['cookies'] });
+    await this.browserSession.cookies.flushStore();
+    return this.getState();
+  }
+
+  async clearCache(sessionId?: string): Promise<AgentBrowserHostState> {
+    this.assertCredentialLoginInactive();
+    if (sessionId?.trim()) this.activeSessionId = sessionId.trim();
+    await this.browserSession.clearCache();
+    return this.getState();
+  }
+
   selectPage(pageId: number, sessionId?: string): AgentBrowserHostState {
     this.assertCredentialLoginInactive();
     if (!this.pages.has(pageId)) {
       throw new Error(`Browser page ${pageId} does not exist.`);
     }
     if (sessionId?.trim()) this.activeSessionId = sessionId.trim();
+    if (pageId !== this.selectedPageId) this.clearCredentialLoginStatus();
     this.selectedPageId = pageId;
     this.syncAttachment();
     this.emitState(sessionId);
@@ -413,18 +512,29 @@ export class AgentBrowserHost {
 
   closePage(pageId: number): AgentBrowserHostState {
     this.assertCredentialLoginInactive();
+    this.clearCredentialLoginStatus();
     const page = this.requirePage(pageId);
+    const fallbackPageId = this.getAdjacentPageId(pageId);
+    this.markBrowserToolBootstrapPageUsed(pageId);
     this.manualCredentialCapture.clearPage(pageId);
     this.detachPage(pageId);
     if (page.view.webContents.debugger.isAttached()) {
       page.view.webContents.debugger.detach();
     }
-    page.view.webContents.close();
     this.pages.delete(pageId);
     if (this.selectedPageId === pageId) {
-      this.selectedPageId = this.pages.keys().next().value as number | undefined;
+      this.selectedPageId = fallbackPageId;
     }
+    page.view.webContents.close();
     this.syncAttachment();
+    this.emitState();
+    return this.getState();
+  }
+
+  dismissCredentialLoginStatus(sessionId?: string): AgentBrowserHostState {
+    this.assertCredentialLoginInactive();
+    if (sessionId?.trim()) this.activeSessionId = sessionId.trim();
+    this.clearCredentialLoginStatus();
     this.emitState();
     return this.getState();
   }
@@ -455,8 +565,8 @@ export class AgentBrowserHost {
       return await this.dispatchTool(request.tool, request.args);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.lastError = message;
-      this.emitState();
+      // Tool failures belong to the tool result, not the page's navigation state.
+      console.warn('[AgentBrowserHost] Browser tool failed:', request.tool, error);
       return errorResult(message);
     }
   }
@@ -489,9 +599,25 @@ export class AgentBrowserHost {
   private async dispatchTool(tool: string, args: Record<string, unknown>): Promise<BrowserToolResponse> {
     switch (tool) {
       case BrowserMcpTool.ListPages:
+        await this.ensureBrowserToolPageBaseline();
         return this.pagesResult();
       case BrowserMcpTool.NewPage: {
-        await this.createPage(normalizeAddress(readString(args.url) || DEFAULT_PAGE_URL), readTimeout(args.timeout));
+        if (this.browserToolBootstrapPagePromise) {
+          await this.browserToolBootstrapPagePromise;
+        }
+        const url = normalizeAddress(readString(args.url) || DEFAULT_PAGE_URL);
+        const timeoutMs = readTimeout(args.timeout);
+        const bootstrapPage = this.takeReusableBrowserToolBootstrapPage();
+        if (bootstrapPage) {
+          this.selectedPageId = bootstrapPage.pageId;
+          if ((bootstrapPage.view.webContents.getURL() || DEFAULT_PAGE_URL) !== url) {
+            await this.navigatePage(bootstrapPage, url, timeoutMs);
+          }
+          this.syncAttachment();
+          this.emitState();
+        } else {
+          await this.createPage(url, timeoutMs);
+        }
         return this.pagesResult();
       }
       case BrowserMcpTool.SelectPage:
@@ -502,6 +628,7 @@ export class AgentBrowserHost {
         return this.pagesResult();
       case BrowserMcpTool.NavigatePage: {
         const page = this.requirePage(this.requirePageId(args.pageId));
+        this.markBrowserToolBootstrapPageUsed(page.pageId);
         await this.navigatePage(page, normalizeAddress(readString(args.url)), readTimeout(args.timeout));
         return textResult('Page navigated.', { message: 'Page navigated.' });
       }
@@ -558,6 +685,7 @@ export class AgentBrowserHost {
           || result.outcome === BrowserCredentialLoginOutcome.NeedsMfa
           || result.outcome === BrowserCredentialLoginOutcome.NeedsCaptcha
         ) {
+          this.preserveCredentialLoginStatusForNavigationPageId = page.pageId;
           page.view.webContents.reload();
         }
         return {
@@ -626,11 +754,25 @@ export class AgentBrowserHost {
     });
     webContents.on('did-stop-loading', () => {
       page.loading = false;
+      if (this.preserveCredentialLoginStatusForNavigationPageId === page.pageId) {
+        this.preserveCredentialLoginStatusForNavigationPageId = undefined;
+      }
       emit();
     });
     webContents.on('page-title-updated', emit);
-    webContents.on('did-navigate', emit);
-    webContents.on('did-navigate-in-page', emit);
+    webContents.on('did-navigate', () => {
+      page.refs.clear();
+      if (this.preserveCredentialLoginStatusForNavigationPageId !== page.pageId) {
+        this.clearCredentialLoginStatus();
+      }
+      emit();
+    });
+    webContents.on('did-navigate-in-page', () => {
+      if (this.preserveCredentialLoginStatusForNavigationPageId !== page.pageId) {
+        this.clearCredentialLoginStatus();
+      }
+      emit();
+    });
     webContents.on('ipc-message', (_event, channel, ...args) => {
       if (channel !== ManualCredentialCaptureChannel.Event) return;
       const captureEvent = parseManualCredentialCaptureEvent(args[0]);
@@ -658,11 +800,21 @@ export class AgentBrowserHost {
       this.lastError = `${errorDescription} (${validatedURL})`;
       emit();
     });
+    webContents.on('render-process-gone', (_event, details) => {
+      console.error('[AgentBrowserHost] Browser renderer exited:', {
+        pageId: page.pageId,
+        reason: details.reason,
+        exitCode: details.exitCode,
+      });
+    });
     webContents.on('destroyed', () => {
+      console.debug('[AgentBrowserHost] Browser page destroyed:', page.pageId);
+      this.markBrowserToolBootstrapPageUsed(page.pageId);
       this.manualCredentialCapture.clearPage(page.pageId);
+      const fallbackPageId = this.getAdjacentPageId(page.pageId);
       this.pages.delete(page.pageId);
       if (this.selectedPageId === page.pageId) {
-        this.selectedPageId = this.pages.keys().next().value as number | undefined;
+        this.selectedPageId = fallbackPageId;
       }
       if (this.attachedPageId === page.pageId) this.attachedPageId = undefined;
       this.syncAttachment();
@@ -691,6 +843,7 @@ export class AgentBrowserHost {
     if (!this.isAllowedUrl(url)) {
       throw new Error('Navigation was blocked by the LobsterAI browser access policy.');
     }
+    this.clearCredentialLoginStatus();
     this.lastError = undefined;
     await this.proxyReady;
     const loadPromise = page.view.webContents.loadURL(url);
@@ -722,6 +875,59 @@ export class AgentBrowserHost {
       });
   }
 
+  /**
+   * OpenClaw 2026.8.1 refuses to create the first page for an existing-session
+   * profile without a CDP endpoint. LobsterAI intentionally uses its authenticated
+   * MCP bridge instead of exposing Electron CDP, so provide one blank baseline page
+   * before list_pages returns. Concurrent probes share the same initialization.
+   */
+  private async ensureBrowserToolPageBaseline(): Promise<void> {
+    if (this.browserToolBootstrapPagePromise) {
+      await this.browserToolBootstrapPagePromise;
+      return;
+    }
+    if (this.pages.size > 0) return;
+
+    const pendingPage = this.createPage(DEFAULT_PAGE_URL);
+    this.browserToolBootstrapPagePromise = pendingPage;
+    try {
+      const page = await pendingPage;
+      if (
+        this.pages.get(page.pageId) === page
+        && !page.view.webContents.isDestroyed()
+        && (page.view.webContents.getURL() || DEFAULT_PAGE_URL) === DEFAULT_PAGE_URL
+      ) {
+        this.reusableBrowserToolBootstrapPageId = page.pageId;
+      }
+    } finally {
+      if (this.browserToolBootstrapPagePromise === pendingPage) {
+        this.browserToolBootstrapPagePromise = null;
+      }
+    }
+  }
+
+  private takeReusableBrowserToolBootstrapPage(): BrowserPage | undefined {
+    const pageId = this.reusableBrowserToolBootstrapPageId;
+    this.reusableBrowserToolBootstrapPageId = undefined;
+    if (!pageId) return undefined;
+
+    const page = this.pages.get(pageId);
+    if (
+      !page
+      || page.view.webContents.isDestroyed()
+      || (page.view.webContents.getURL() || DEFAULT_PAGE_URL) !== DEFAULT_PAGE_URL
+    ) {
+      return undefined;
+    }
+    return page;
+  }
+
+  private markBrowserToolBootstrapPageUsed(pageId: number): void {
+    if (this.reusableBrowserToolBootstrapPageId === pageId) {
+      this.reusableBrowserToolBootstrapPageId = undefined;
+    }
+  }
+
   private pagesResult(): BrowserToolResponse {
     const pages = Array.from(this.pages.values()).map(page => ({
       id: page.pageId,
@@ -733,7 +939,7 @@ export class AgentBrowserHost {
 
   private async takeSnapshot(page: BrowserPage): Promise<BrowserToolResponse> {
     await this.ensureDebugger(page);
-    const result = await page.view.webContents.debugger.sendCommand('Accessibility.getFullAXTree') as {
+    const result = await page.view.webContents.debugger.sendCommand(BrowserCdpCommand.GetFullAXTree) as {
       nodes?: AxNode[];
     };
     const nodes = (result.nodes ?? [])
@@ -745,7 +951,7 @@ export class AgentBrowserHost {
     const buildNode = (node: AxNode, ancestors: Set<string>): SnapshotNode | null => {
       if (ancestors.has(node.nodeId)) return null;
       const nextAncestors = new Set(ancestors).add(node.nodeId);
-      const ref = `ax-${page.pageId}-${node.nodeId}`;
+      const ref = `${SNAPSHOT_REF_PREFIX}${page.pageId}-${node.nodeId}`;
       if (typeof node.backendDOMNodeId === 'number') {
         page.refs.set(ref, node.backendDOMNodeId);
       }
@@ -804,7 +1010,7 @@ export class AgentBrowserHost {
     page.view.webContents.focus();
     const debuggerApi = page.view.webContents.debugger;
     const objectId = await this.resolveObjectId(page, backendNodeId);
-    await debuggerApi.sendCommand('Runtime.callFunctionOn', {
+    await debuggerApi.sendCommand(BrowserCdpCommand.CallFunctionOn, {
       objectId,
       functionDeclaration: `function(shouldDoubleClick) {
         this.focus();
@@ -830,7 +1036,7 @@ export class AgentBrowserHost {
     const debuggerApi = page.view.webContents.debugger;
     page.view.webContents.focus();
     const objectId = await this.resolveObjectId(page, backendNodeId);
-    await debuggerApi.sendCommand('Runtime.callFunctionOn', {
+    await debuggerApi.sendCommand(BrowserCdpCommand.CallFunctionOn, {
       objectId,
       functionDeclaration: `function(nextValue) {
         this.focus();
@@ -939,21 +1145,51 @@ export class AgentBrowserHost {
     if (!source) throw new Error('Browser evaluation function is missing.');
     const functionArgs = Array.isArray(rawArgs) ? rawArgs : [];
     await this.ensureDebugger(page);
-    const expression = `Promise.resolve((${source})(...${JSON.stringify(functionArgs)}))`;
-    const result = await page.view.webContents.debugger.sendCommand('Runtime.evaluate', {
-      expression,
-      awaitPromise: true,
-      returnByValue: true,
-      userGesture: true,
-    }) as {
-      result?: { value?: unknown; description?: string };
-      exceptionDetails?: { text?: string };
-    };
-    if (result.exceptionDetails) {
-      throw new Error(result.exceptionDetails.text || result.result?.description || 'Browser evaluation failed.');
+    const debuggerApi = page.view.webContents.debugger;
+    const objectGroup = `lobster-browser-evaluation-${randomUUID()}`;
+    try {
+      const callArgs: Array<{ objectId?: string; value?: unknown }> = [];
+      for (const value of functionArgs) {
+        if (typeof value === 'string' && value.startsWith(SNAPSHOT_REF_PREFIX)) {
+          const backendNodeId = this.requireBackendNodeId(page, value);
+          callArgs.push({ objectId: await this.resolveObjectId(page, backendNodeId, objectGroup) });
+        } else {
+          callArgs.push({ value });
+        }
+      }
+      const receiver = callArgs.find(arg => arg.objectId);
+      const result = await debuggerApi.sendCommand(
+        receiver ? BrowserCdpCommand.CallFunctionOn : BrowserCdpCommand.Evaluate,
+        {
+          ...(receiver
+            ? {
+                objectId: receiver.objectId,
+                functionDeclaration: `function(...args) { return (${source})(...args); }`,
+                arguments: callArgs,
+              }
+            : { expression: `Promise.resolve((${source})(...${JSON.stringify(functionArgs)}))` }),
+          objectGroup,
+          awaitPromise: true,
+          returnByValue: true,
+          userGesture: true,
+        },
+      ) as BrowserEvaluationResult;
+      if (result.exceptionDetails) {
+        const exception = result.exceptionDetails.exception;
+        throw new Error(
+          exception?.description
+          || result.result?.description
+          || (exception?.value !== undefined ? String(exception.value) : '')
+          || result.exceptionDetails.text
+          || 'Browser evaluation failed.',
+        );
+      }
+      const message = JSON.stringify(result.result?.value ?? null);
+      return textResult(message, { message });
+    } finally {
+      // Navigation can destroy the execution context before cleanup runs.
+      await debuggerApi.sendCommand(BrowserCdpCommand.ReleaseObjectGroup, { objectGroup }).catch(() => {});
     }
-    const message = JSON.stringify(result.result?.value ?? null);
-    return textResult(message, { message });
   }
 
   private async waitForText(page: BrowserPage, text: string, timeoutMs: number): Promise<void> {
@@ -1017,9 +1253,10 @@ export class AgentBrowserHost {
     return backendNodeId;
   }
 
-  private async resolveObjectId(page: BrowserPage, backendNodeId: number): Promise<string> {
-    const resolved = await page.view.webContents.debugger.sendCommand('DOM.resolveNode', {
+  private async resolveObjectId(page: BrowserPage, backendNodeId: number, objectGroup?: string): Promise<string> {
+    const resolved = await page.view.webContents.debugger.sendCommand(BrowserCdpCommand.ResolveNode, {
       backendNodeId,
+      ...(objectGroup ? { objectGroup } : {}),
     }) as { object?: { objectId?: string } };
     const objectId = resolved.object?.objectId;
     if (!objectId) throw new Error('Browser element could not be resolved.');
@@ -1104,6 +1341,7 @@ export class AgentBrowserHost {
       const page = this.requirePage(this.selectedPageId!);
       mainWindow.contentView.addChildView(page.view);
       this.attachedPageId = page.pageId;
+      console.debug('[AgentBrowserHost] Browser view attached:', page.pageId);
     }
     this.pages.get(this.attachedPageId!)?.view.setBounds(this.normalizeBounds(this.bounds));
   }
@@ -1119,7 +1357,15 @@ export class AgentBrowserHost {
         // The view may already have been detached while the window was closing.
       }
     }
-    if (this.attachedPageId === pageId) this.attachedPageId = undefined;
+    if (this.attachedPageId === pageId) {
+      this.attachedPageId = undefined;
+      console.debug('[AgentBrowserHost] Browser view detached:', {
+        pageId,
+        desiredVisible: this.desiredVisible,
+        windowVisible: this.windowVisible,
+        selectedPageId: this.selectedPageId,
+      });
+    }
   }
 
   private setCredentialLoginView(view: WebContentsView | null): void {
@@ -1146,6 +1392,19 @@ export class AgentBrowserHost {
     if (this.credentialLogin.isActive) {
       throw new Error('A secure saved-credential sign-in is in progress.');
     }
+  }
+
+  private getAdjacentPageId(pageId: number): number | undefined {
+    const pageIds = Array.from(this.pages.keys());
+    const pageIndex = pageIds.indexOf(pageId);
+    if (pageIndex < 0) return undefined;
+    return pageIds[pageIndex + 1] ?? pageIds[pageIndex - 1];
+  }
+
+  private clearCredentialLoginStatus(): void {
+    if (!this.credentialLoginState || this.credentialLogin.isActive) return;
+    this.credentialLoginState = undefined;
+    this.preserveCredentialLoginStatusForNavigationPageId = undefined;
   }
 
   private emitState(sessionId = this.activeSessionId): void {
