@@ -55,7 +55,7 @@ const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
       aria-disabled={buttonDisabled}
       aria-label={title}
       title={title}
-      className={`${buttonClassName} ${stateClass} !rounded-full transition-colors`}
+      className={`${buttonClassName} ${stateClass} !hidden !rounded-full transition-colors`}
     >
       {showsStopIcon ? (
         <span className="h-[34%] w-[34%] rounded-[3px] bg-current" aria-hidden="true" />
