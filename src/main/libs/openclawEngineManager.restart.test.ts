@@ -1,8 +1,11 @@
 import { type ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
+import path from 'path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { OpenClawEnginePhase } from '../../shared/openclawEngine/constants';
+import { OpenClawEngineErrorCode, OpenClawEnginePhase } from '../../shared/openclawEngine/constants';
+import { OpenClawStartupCompatibilityMode } from '../../shared/openclawEngine/startupCompatibility';
+import { OpenClawStartupMigrationStatus } from '../../shared/openclawEngine/startupMigration';
 
 vi.mock('electron', () => ({
   app: { getAppPath: () => process.cwd(), isPackaged: false },
@@ -16,6 +19,8 @@ vi.mock('./openclawLocalExtensions', () => ({
 import { OpenClawEngineManager, type OpenClawEngineStatus } from './openclawEngineManager';
 
 interface SupervisorInternals {
+  stateDir: string;
+  startupCompatibilityRunner: ((mode: OpenClawStartupCompatibilityMode) => Promise<{ status: OpenClawStartupMigrationStatus; error?: string }>) | null;
   gatewayProcess: ChildProcess | null;
   gatewayRecentOutput: WeakMap<ChildProcess, string[]>;
   gatewayRestartAttempt: number;
@@ -45,6 +50,7 @@ function makeSupervisor() {
   const manager = Object.assign(Object.create(OpenClawEngineManager.prototype), {
     status: { phase: OpenClawEnginePhase.Running, version: '2026.8.1', canRetry: false },
     desiredVersion: '2026.8.1',
+    stateDir: path.join(process.cwd(), 'fixtures', 'state'),
     gatewayProcess: null,
     gatewayRecentOutput: new WeakMap(),
     gatewayGenerationByProcess: new WeakMap(),
@@ -79,6 +85,115 @@ beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+
+describe('failure-triggered binding recovery', () => {
+  function failureHarness() {
+    const context = makeSupervisor();
+    context.internals.gatewayProcess = null;
+    const error: OpenClawEngineStatus = {
+      phase: OpenClawEnginePhase.Error, version: '2026.8.1', canRetry: true,
+      errorCode: OpenClawEngineErrorCode.StartupCompatibilityFailed,
+      message: `SQLite schema is incomplete or noncanonical for ${path.join(context.internals.stateDir, 'state', 'openclaw.sqlite')}: column definitions differ for current_conversation_bindings`,
+    };
+    const recover = vi.fn(async () => ({ status: OpenClawStartupMigrationStatus.Migrated }));
+    const start = vi.spyOn(context.internals, 'doStartGateway').mockImplementation(async () => {
+      context.internals.startupCompatibilityRunner = recover;
+      context.internals.setStatus(error);
+      return context.manager.getStatus();
+    });
+    return { ...context, error, start, recover };
+  }
+
+  test('healthy startup performs no compatibility helper call', async () => {
+    const { manager, internals, start, recover } = failureHarness();
+    start.mockImplementation(async () => {
+      internals.startupCompatibilityRunner = recover;
+      internals.setStatus({ phase: OpenClawEnginePhase.Running, version: '2026.8.1' });
+      return manager.getStatus();
+    });
+    expect((await manager.startGateway('healthy')).phase).toBe(OpenClawEnginePhase.Running);
+    expect(recover).not.toHaveBeenCalled();
+  });
+
+  test('repairs a matching failure once and waits for the replacement startup', async () => {
+    const { manager, internals, start, recover, error } = failureHarness();
+    start.mockImplementation(async () => {
+      internals.startupCompatibilityRunner = recover;
+      internals.setStatus(recover.mock.calls.length ? { phase: OpenClawEnginePhase.Running, version: '2026.8.1' } : error);
+      return manager.getStatus();
+    });
+    expect((await manager.startGateway('upgrade')).phase).toBe(OpenClawEnginePhase.Running);
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(recover).toHaveBeenCalledExactlyOnceWith(OpenClawStartupCompatibilityMode.RepairBindings);
+  });
+
+  test('a repeated failure consumes no second recovery within the same request', async () => {
+    const { manager, start, recover } = failureHarness();
+    expect((await manager.startGateway('first')).phase).toBe(OpenClawEnginePhase.Error);
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(recover).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+    await manager.startGateway('explicit-retry');
+    expect(recover).toHaveBeenCalledTimes(2);
+  });
+
+  test('failed recovery preserves a specific error and does not restart again', async () => {
+    const { manager, internals, start } = failureHarness();
+    const recover = vi.fn(async () => ({ status: OpenClawStartupMigrationStatus.Failed, error: 'Unknown binding schema; original state retained.' }));
+    const original = start.getMockImplementation()!;
+    start.mockImplementation(async () => {
+      const status = await original();
+      internals.startupCompatibilityRunner = recover;
+      return status;
+    });
+    expect(await manager.startGateway('unknown-schema')).toMatchObject({
+      phase: OpenClawEnginePhase.Error, errorCode: OpenClawEngineErrorCode.StartupCompatibilityFailed,
+      message: 'Unknown binding schema; original state retained.',
+    });
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  test('cancelling while recovery runs prevents a replacement process', async () => {
+    const { manager, internals, start } = failureHarness();
+    let finish!: (result: { status: OpenClawStartupMigrationStatus }) => void;
+    const recover = vi.fn(() => new Promise<{ status: OpenClawStartupMigrationStatus }>(resolve => { finish = resolve; }));
+    const original = start.getMockImplementation()!;
+    start.mockImplementation(async () => {
+      const status = await original();
+      internals.startupCompatibilityRunner = recover;
+      return status;
+    });
+    const startup = manager.startGateway('cancelled');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recover).toHaveBeenCalledOnce();
+    const stopping = manager.stopGateway();
+    finish({ status: OpenClawStartupMigrationStatus.Migrated });
+    await Promise.all([startup, stopping]);
+    expect(start).toHaveBeenCalledOnce();
+    expect(manager.getStatus().phase).toBe(OpenClawEnginePhase.Ready);
+  });
+
+  test('a gateway process schema failure preserves the true cause and bypasses generic crash retries', () => {
+    const { manager, internals, child } = makeSupervisor();
+    const cause = `SQLite schema is incomplete or noncanonical for ${path.join(internals.stateDir, 'state', 'openclaw.sqlite')}: column definitions differ for current_conversation_bindings`;
+    internals.gatewayRecentOutput.set(child, ['[stderr] Config warnings: plugins.entries.acpx: not installed', `[stderr] [openclaw] Reason: ${cause}`]);
+    child.exitCode = 1;
+    child.emit('exit', 1);
+    expect(manager.getStatus()).toMatchObject({ phase: OpenClawEnginePhase.Error, message: cause, errorCode: OpenClawEngineErrorCode.StartupCompatibilityFailed });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test('a nonfatal health-state schema warning does not trigger recovery for an unrelated exit', () => {
+    const { manager, internals, child } = makeSupervisor();
+    const warning = `Config health-state write failed: SQLite schema is incomplete or noncanonical for ${path.join(internals.stateDir, 'state', 'openclaw.sqlite')}: column definitions differ for current_conversation_bindings`;
+    internals.gatewayRecentOutput.set(child, [`[stderr] ${warning}`, '[stderr] Error: unrelated startup failure']);
+    child.exitCode = 1;
+    child.emit('exit', 1);
+    expect(manager.getStatus().errorCode).toBeUndefined();
+    expect(internals.gatewayRestartAttempt).toBe(1);
+    expect(vi.getTimerCount()).toBe(1);
+  });
 });
 
 afterEach(() => {

@@ -19,7 +19,7 @@ export type StartupMigrationRunner = (
   options: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number },
 ) => Promise<{ code: number | null; stdout: string; stderr: string }>;
 
-const runStartupMigration: StartupMigrationRunner = (command, args, options) => new Promise((resolve, reject) => {
+export const runStartupMigration: StartupMigrationRunner = (command, args, options) => new Promise((resolve, reject) => {
   execFile(command, args, {
     cwd: options.cwd,
     env: options.env,

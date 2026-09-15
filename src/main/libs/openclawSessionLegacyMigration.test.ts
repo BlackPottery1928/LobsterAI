@@ -50,6 +50,23 @@ function archiveWarningFixture(fixture: ReturnType<typeof createWarningImportFix
 }
 
 describe('openclawSessionLegacyMigration', () => {
+  test('surfaces the incident SQLite cli_error instead of duplicate-plugin warnings', async () => {
+    writeFile(path.join(stateDir, 'agents', 'main', 'sessions', 'sessions.json'));
+    const cause = `SQLite schema is incomplete or noncanonical for ${path.join(stateDir, 'state', 'openclaw.sqlite')}: column definitions differ for current_conversation_bindings`;
+    const runner = vi.fn<LegacySessionMigrationRunner>().mockResolvedValue({
+      code: 1,
+      stderr: 'Config warnings: plugins.entries.openclaw-weixin: duplicate plugin id\nplugins.entries.acpx: plugin not installed\n[openclaw] Could not start the CLI.\n[openclaw] Reason: ' + cause,
+      stdout: JSON.stringify({ ok: false, error: { type: 'cli_error', message: cause } }),
+    });
+    const result = await migrateLegacySessionStorageWithDoctor({
+      stateDir, configPath, runtimeRoot, electronNodeRuntimePath: process.execPath, env: {}, runner,
+    });
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error).toContain(cause);
+      expect(result.error).not.toContain('Config warnings');
+    }
+  });
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lobsterai-openclaw-session-migration-'));
     stateDir = path.join(tempDir, 'openclaw', 'state');

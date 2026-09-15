@@ -5,6 +5,7 @@ import { stripVTControlCharacters } from 'util';
 import { z } from 'zod';
 
 import { inspectOpenClawPath, logOpenClawConfigLockDiagnostics } from './openclawConfigDiagnostics';
+import { extractOpenClawCliFailure } from './openclawStartupCompatibility';
 
 const LEGACY_SESSION_DOCTOR_TIMEOUT_MS = 300_000;
 const LOG_TAIL_LIMIT = 4_000;
@@ -119,6 +120,8 @@ function cleanDoctorLines(text: string): string[] {
 }
 
 function summarizeDoctorFailure(stderr: string, stdout: string, report?: DoctorReport): string | undefined {
+  const cliFailure = extractOpenClawCliFailure(stdout, stderr);
+  if (cliFailure) return cliFailure;
   const stderrLines = cleanDoctorLines(stderr);
   const lines = [...stderrLines, ...cleanDoctorLines(stdout)];
   // Doctor writes boxed, wrapped validation errors to stdout. Prefer those
@@ -142,7 +145,7 @@ function summarizeDoctorFailure(stderr: string, stdout: string, report?: DoctorR
     return issue.join(' ').slice(0, 1_000);
   }
   return lines.find(line => /^Doctor could not apply config fixes|^Doctor finished, but config fixes were not applied/i.test(line))
-    ?? stderrLines.find(line => line && !/^(?:\[config\] warnings:|Config clobber snapshot cap reached|at\s)/.test(line));
+    ?? stderrLines.find(line => line && !/^(?:\[config\] warnings:|Config warnings:|Config clobber snapshot cap reached|at\s)/i.test(line));
 }
 
 export function runLegacySessionMigrationProcess(
@@ -256,6 +259,7 @@ export async function migrateLegacySessionStorageWithDoctor(params: {
     // A fresh scan also catches a legacy store created after the initial discovery.
     const remainingPaths = listLegacySessionStorePaths(params.stateDir);
     const completedWithWarnings = result.code === 1 && remainingPaths.length === 0
+      && !extractOpenClawCliFailure(result.stdout, result.stderr)
       && !cleanDoctorLines(result.stderr).some(line => DOCTOR_EXCEPTION_LINE.test(line))
       && hasArchivedWarningOnlyImport(report, legacyPaths);
     if (report) {

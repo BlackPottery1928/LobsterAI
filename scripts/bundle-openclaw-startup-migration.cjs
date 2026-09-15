@@ -7,6 +7,7 @@ const esbuild = require('esbuild');
 const rootDir = path.resolve(__dirname, '..');
 const entryPath = path.join(__dirname, 'openclaw-startup-state-migration.mjs');
 const authStoreEntryPath = path.join(__dirname, 'openclaw-xai-auth-store.mjs');
+const compatibilityEntryPath = path.join(__dirname, 'openclaw-startup-compat.mjs');
 
 async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc) {
   const expectedVersion = require(path.join(rootDir, 'package.json')).openclaw.version.replace(/^v/, '');
@@ -24,7 +25,7 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc) {
   // Rebuild even when the gateway cache is current: this entry is maintained by
   // LobsterAI and must match the pinned upstream migration/schema implementation.
   await esbuild.build({
-    entryPoints: [entryPath, authStoreEntryPath],
+    entryPoints: [entryPath, authStoreEntryPath, compatibilityEntryPath],
     outdir: runtimeDir,
     outExtension: { '.js': '.mjs' },
     alias: {
@@ -47,6 +48,14 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc) {
       '#openclaw-pid-alive': path.join(openclawSrc, 'src/shared/pid-alive.ts'),
       '#openclaw-config-io': path.join(openclawSrc, 'src/config/io.factory.ts'),
       '#openclaw-migration-lock': path.join(openclawSrc, 'src/infra/state-migrations.lock.ts'),
+      '#openclaw-config-machine-state': path.join(openclawSrc, 'src/state/config-machine-state.ts'),
+      '#openclaw-state-db': path.join(openclawSrc, 'src/state/openclaw-state-db.ts'),
+      '#openclaw-state-schema': path.join(openclawSrc, 'src/state/openclaw-state-schema.ts'),
+      '#openclaw-state-schema-validation': path.join(openclawSrc, 'src/state/openclaw-state-db-fast-path.ts'),
+      '#openclaw-state-schema-compatibility': path.join(openclawSrc, 'src/state/openclaw-state-schema-compatibility.ts'),
+      '#openclaw-schema-contract': path.join(openclawSrc, 'src/infra/sqlite-schema-contract.ts'),
+      '#openclaw-state-ownership': path.join(openclawSrc, 'src/state/openclaw-state-ownership.ts'),
+      '#openclaw-state-coordinator': path.join(openclawSrc, 'src/infra/state-database-coordinator.ts'),
     },
     tsconfig: path.join(openclawSrc, 'tsconfig.json'),
     bundle: true,
