@@ -466,6 +466,7 @@ import { OpenClawEngineManager, type OpenClawEngineStatus } from './libs/opencla
 import {
   backupOpenClawConfig,
   getOpenClawGatewayRepairBusyError,
+  preserveOpenClawConfigForStartupRecovery,
 } from './libs/openclawGatewayRepair';
 import { OpenClawImConfigRestartTracker } from './libs/openclawImConfigRestart';
 import {
@@ -3307,6 +3308,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         openClawRuntimeAdapter.disconnectGatewayClient();
       }
 
+      const preserveConfig = preserveOpenClawConfigForStartupRecovery(originalPath, manager.getStatus().errorCode);
       await manager.withGatewayStoppedForRepair(async () => {
         await manager.prepareRuntimeForStartupConfigSync('manual-repair');
         const ensured = await manager.ensureReady();
@@ -3329,7 +3331,9 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         await runOpenClawCompatibilityRepair({ ...repairOptions, phase: OpenClawRepairPhase.Snapshot });
         await runOpenClawDoctorRepair(repairOptions);
         await runOpenClawCompatibilityRepair({ ...repairOptions, phase: OpenClawRepairPhase.Recovery });
-        backupOpenClawConfig(originalPath, backupPath);
+        // The snapshot already backs up config. Retain compatibility sources
+        // through migration and config sync instead of regenerating from scratch.
+        if (!preserveConfig) backupOpenClawConfig(originalPath, backupPath);
         await startAskUserServer();
         const sync = await syncOpenClawConfig({ reason: 'manual-repair', restartGatewayIfRunning: false, manualRepair: true });
         if (!sync.success) throw new Error(sync.error || 'OpenClaw config regeneration failed.');

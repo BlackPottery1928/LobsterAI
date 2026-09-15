@@ -6,6 +6,8 @@ const esbuild = require('esbuild');
 
 const rootDir = path.resolve(__dirname, '..');
 const entryPath = path.join(__dirname, 'openclaw-startup-state-migration.mjs');
+const authStoreEntryPath = path.join(__dirname, 'openclaw-xai-auth-store.mjs');
+const compatibilityEntryPath = path.join(__dirname, 'openclaw-startup-compat.mjs');
 
 async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedEntry = entryPath) {
   const expectedVersion = require(path.join(rootDir, 'package.json')).openclaw.version.replace(/^v/, '');
@@ -37,6 +39,12 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedE
       '#openclaw-auth-migration-diagnostic': path.join(openclawSrc, 'src/agents/auth-profiles/legacy-source-diagnostic.ts'),
       '#openclaw-auth-profile-persisted': path.join(openclawSrc, 'src/agents/auth-profiles/persisted.ts'),
       '#openclaw-auth-profile-sqlite': path.join(openclawSrc, 'src/agents/auth-profiles/sqlite.ts'),
+      '#openclaw-auth-profile-store': path.join(openclawSrc, 'src/agents/auth-profiles/store.ts'),
+      '#openclaw-auth-profile-references': path.join(openclawSrc, 'src/agents/auth-profiles/runtime-external-profile-references.ts'),
+      '#openclaw-auth-profile-paths': path.join(openclawSrc, 'src/agents/auth-profiles/path-resolve.ts'),
+      '#openclaw-agent-database': path.join(openclawSrc, 'src/state/openclaw-agent-db.ts'),
+      '#openclaw-state-database': path.join(openclawSrc, 'src/state/openclaw-state-db.ts'),
+      '#openclaw-pid-alive': path.join(openclawSrc, 'src/shared/pid-alive.ts'),
       '#openclaw-config-io': path.join(openclawSrc, 'src/config/io.factory.ts'),
       '#openclaw-migration-lock': path.join(openclawSrc, 'src/infra/state-migrations.lock.ts'),
       '#openclaw-repair-lock': path.join(openclawSrc, 'src/commands/doctor-sqlite-maintenance-lock.ts'),
@@ -47,6 +55,14 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedE
       '#openclaw-repair-plugin-records': path.join(openclawSrc, 'src/plugins/installed-plugin-index-records.ts'),
       '#openclaw-repair-plugin-payload': path.join(openclawSrc, 'src/cli/update-cli/plugin-payload-validation.ts'),
       '#openclaw-repair-plugin-consent': path.join(openclawSrc, 'src/plugins/capability-consent.ts'),
+      '#openclaw-config-machine-state': path.join(openclawSrc, 'src/state/config-machine-state.ts'),
+      '#openclaw-state-db': path.join(openclawSrc, 'src/state/openclaw-state-db.ts'),
+      '#openclaw-state-schema': path.join(openclawSrc, 'src/state/openclaw-state-schema.ts'),
+      '#openclaw-state-schema-validation': path.join(openclawSrc, 'src/state/openclaw-state-db-fast-path.ts'),
+      '#openclaw-state-schema-compatibility': path.join(openclawSrc, 'src/state/openclaw-state-schema-compatibility.ts'),
+      '#openclaw-schema-contract': path.join(openclawSrc, 'src/infra/sqlite-schema-contract.ts'),
+      '#openclaw-state-ownership': path.join(openclawSrc, 'src/state/openclaw-state-ownership.ts'),
+      '#openclaw-state-coordinator': path.join(openclawSrc, 'src/infra/state-database-coordinator.ts'),
     },
     tsconfig: path.join(openclawSrc, 'tsconfig.json'),
     bundle: true,
@@ -88,6 +104,8 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedE
   });
   console.log(`[OpenClaw] Built ${path.basename(outputPath)} (${fs.statSync(outputPath).size} bytes).`);
   if (selectedEntry === entryPath) {
+    await bundleOpenClawStartupMigration(runtimeDir, openclawSrc, authStoreEntryPath);
+    await bundleOpenClawStartupMigration(runtimeDir, openclawSrc, compatibilityEntryPath);
     await bundleOpenClawStartupMigration(runtimeDir, openclawSrc, path.join(__dirname, 'openclaw-gateway-repair.mjs'));
     const pinned = require(path.join(rootDir, 'package.json')).openclaw;
     fs.writeFileSync(path.join(runtimeDir, 'lobsterai-repair-plugins.json'), JSON.stringify({

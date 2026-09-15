@@ -5540,6 +5540,85 @@ test('chat error replaces generic LLM failure using safe OpenClaw metadata', () 
   expect(persistedError?.content).toContain('OAuth 授权已失效');
 });
 
+test.each([
+  { withChatMetadata: false, remapRun: false },
+  { withChatMetadata: true, remapRun: false },
+  { withChatMetadata: false, remapRun: true },
+])('chat error preserves lifecycle error previews: $withChatMetadata, remapped: $remapRun', ({ withChatMetadata, remapRun }) => {
+  const { session, store } = createReconcileStore([
+    { id: 'msg-1', type: 'user', content: 'hello', timestamp: 1, metadata: {} },
+  ]);
+  const adapter = new OpenClawRuntimeAdapter(store, {});
+  const sessionKey = `agent:main:lobsterai:${session.id}`;
+  const runId = 'run-error-detail';
+  const rawErrorPreview = "Cannot read properties of undefined (reading 'trim')";
+  adapter.on('error', () => {});
+  const turn = createActiveTurn(session.id, sessionKey, runId);
+  const lifecycleRunId = remapRun ? 'run-internal-error-detail' : runId;
+  turn.knownRunIds.add(lifecycleRunId);
+  adapter.activeTurns.set(session.id, turn);
+
+  adapter.handleAgentLifecycleEvent(session.id, {
+    phase: AgentLifecyclePhase.Error,
+    error: 'LLM request failed.',
+    provider: 'lobsterai-server',
+    model: 'deepseek-v4-pro',
+    providerRuntimeFailureKind: 'unclassified',
+    rawErrorPreview,
+  }, lifecycleRunId);
+  adapter.handleChatEvent({
+    state: OpenClawChatState.Error,
+    runId,
+    sessionKey,
+    errorMessage: 'LLM request failed.',
+    ...(withChatMetadata ? { rawErrorPreview: 'final provider detail', httpCode: '500' } : {}),
+  }, 1);
+
+  const detail = session.messages.find((message) => message.type === 'system')?.metadata?.errorDetail;
+  expect(detail).toMatchObject({
+    provider: 'lobsterai-server',
+    model: 'deepseek-v4-pro',
+    rawErrorPreview: withChatMetadata ? 'final provider detail' : rawErrorPreview,
+  });
+  if (withChatMetadata) expect(detail?.httpCode).toBe('500');
+  expect(adapter.activeTurns.has(session.id)).toBe(false);
+});
+
+test.each(['retry', 'different-run', 'different-error'])('chat error does not reuse lifecycle details from %s', (scenario) => {
+  const { session, store } = createReconcileStore([
+    { id: 'msg-1', type: 'user', content: 'hello', timestamp: 1, metadata: {} },
+  ]);
+  const adapter = new OpenClawRuntimeAdapter(store, {});
+  const sessionKey = `agent:main:lobsterai:${session.id}`;
+  const turn = createActiveTurn(session.id, sessionKey, 'run-old-error');
+  adapter.on('error', () => {});
+  adapter.activeTurns.set(session.id, turn);
+  adapter.handleAgentLifecycleEvent(session.id, {
+    phase: AgentLifecyclePhase.Error,
+    error: 'LLM request failed.',
+    rawErrorPreview: '401 Unauthorized',
+    providerRuntimeFailureKind: 'auth_invalid_token',
+  }, turn.runId);
+
+  if (scenario === 'retry') {
+    adapter.handleAgentLifecycleEvent(session.id, { phase: AgentLifecyclePhase.Start }, turn.runId);
+  } else if (scenario === 'different-run') {
+    turn.runId = 'run-new-error';
+    turn.knownRunIds.add(turn.runId);
+  }
+  const errorMessage = scenario === 'different-error' ? 'Dispatch failed' : 'LLM request failed.';
+  adapter.handleChatEvent({
+    state: OpenClawChatState.Error,
+    runId: turn.runId,
+    sessionKey,
+    errorMessage,
+  }, 1);
+
+  const persistedError = session.messages.find((message) => message.type === 'system');
+  expect(persistedError?.content).toBe(errorMessage);
+  expect(persistedError?.metadata?.errorDetail?.rawErrorPreview).toBeUndefined();
+});
+
 test('chat error can consume quota signal after lifecycle error schedules fallback', () => {
   vi.useFakeTimers();
   try {

@@ -1,6 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 
+import { OpenClawEngineErrorCode } from '../../shared/openclawEngine/constants';
+import { hasLegacyOpenClawDiscovery } from './openclawStartupCompatibility';
+
 export interface OpenClawConfigBackupResult {
   originalPath: string;
   backupPath?: string;
@@ -69,4 +72,14 @@ export function backupOpenClawConfig(configPath: string, backupDirectory?: strin
     originalPath: configPath,
     backupPath,
   };
+}
+
+/** Quick Repair must retain compatibility migration sources until verified. */
+export function preserveOpenClawConfigForStartupRecovery(configPath: string, errorCode?: OpenClawEngineErrorCode): boolean {
+  if (errorCode === OpenClawEngineErrorCode.StartupCompatibilityFailed) return true;
+  try {
+    return hasLegacyOpenClawDiscovery(JSON.parse(fs.readFileSync(configPath, 'utf8')));
+  } catch {
+    return false;
+  }
 }

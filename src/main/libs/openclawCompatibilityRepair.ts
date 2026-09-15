@@ -8,6 +8,10 @@ import {
   type OpenClawCompatibilityRepairReport,
   OpenClawRepairPhase,
 } from '../../shared/openclawEngine/repair';
+import { OpenClawStartupCompatibilityMode } from '../../shared/openclawEngine/startupCompatibility';
+import { OpenClawStartupMigrationStatus } from '../../shared/openclawEngine/startupMigration';
+import { preserveOpenClawConfigForStartupRecovery } from './openclawGatewayRepair';
+import { isOpenClawBindingSchemaFailure, runOpenClawStartupCompatibility } from './openclawStartupCompatibility';
 import type { StartupMigrationRunner } from './openclawStartupStateMigration';
 
 const REPAIR_TIMEOUT_MS = 300_000;
@@ -40,7 +44,41 @@ export function createOpenClawRepairBackupDirectory(baseDir: string): string {
   return fs.mkdtempSync(path.join(root, `${new Date().toISOString().replace(/[:.]/g, '-')}-`));
 }
 
-export async function runOpenClawCompatibilityRepair(params: {
+type StartupCompatibilityRepairOptions = Omit<Parameters<typeof runOpenClawStartupCompatibility>[0], 'mode'>;
+
+async function runStartupCompatibilityRepair(
+  params: StartupCompatibilityRepairOptions, mode: OpenClawStartupCompatibilityMode,
+): Promise<void> {
+  const result = await runOpenClawStartupCompatibility({
+    ...params, mode, env: repairEnvironment(params.env, params.stateDir, params.configPath),
+    runner: params.runner ?? runRepair,
+  });
+  if (result.status === OpenClawStartupMigrationStatus.Failed) {
+    throw new Error(result.error || 'OpenClaw startup compatibility repair failed.');
+  }
+}
+
+async function withBindingRecovery<T>(params: StartupCompatibilityRepairOptions, repair: () => Promise<T>): Promise<T> {
+  try {
+    return await repair();
+  } catch (error) {
+    if (!isOpenClawBindingSchemaFailure(error instanceof Error ? error.message : String(error), params.stateDir)) throw error;
+    // The full repair also verifies schemas before gateway startup can perform
+    // its recovery. Reuse that scoped helper and retry this stage only once.
+    await runStartupCompatibilityRepair(params, OpenClawStartupCompatibilityMode.RepairBindings);
+    return repair();
+  }
+}
+
+export async function runOpenClawCompatibilityRepair(
+  params: Parameters<typeof runCompatibilityRepairPhase>[0],
+): Promise<OpenClawCompatibilityRepairReport> {
+  return params.phase === OpenClawRepairPhase.Recovery
+    ? withBindingRecovery(params, () => runCompatibilityRepairPhase(params))
+    : runCompatibilityRepairPhase(params);
+}
+
+async function runCompatibilityRepairPhase(params: {
   stateDir: string;
   configPath: string;
   runtimeRoot: string;
@@ -82,6 +120,11 @@ export async function runOpenClawDoctorRepair(params: {
   runtimeRoot: string; stateDir: string; configPath: string; backupDir: string;
   electronNodeRuntimePath: string; env: NodeJS.ProcessEnv; runner?: StartupMigrationRunner;
 }): Promise<{ code: number | null }> {
+  // Doctor removes retired JSON fields. Verify the canonical discovery value
+  // first, while the pre-Doctor snapshot and its source are still available.
+  if (preserveOpenClawConfigForStartupRecovery(params.configPath)) {
+    await withBindingRecovery(params, () => runStartupCompatibilityRepair(params, OpenClawStartupCompatibilityMode.MigrateConfig));
+  }
   const result = await (params.runner ?? runRepair)(params.electronNodeRuntimePath, [
     path.join(params.runtimeRoot, 'openclaw.mjs'), ...OPENCLAW_DOCTOR_REPAIR_ARGS,
   ], {
