@@ -56,12 +56,14 @@ export function resolveOpenClawConfigBackupPath(
   throw new Error('Unable to allocate an OpenClaw config backup path.');
 }
 
-export function backupOpenClawConfig(configPath: string): OpenClawConfigBackupResult {
+export function backupOpenClawConfig(configPath: string, backupDirectory?: string): OpenClawConfigBackupResult {
   if (!fs.existsSync(configPath)) {
     return { originalPath: configPath };
   }
 
-  const backupPath = resolveOpenClawConfigBackupPath(configPath);
+  const backupPath = backupDirectory
+    ? path.join(backupDirectory, 'openclaw.json') : resolveOpenClawConfigBackupPath(configPath);
+  if (fs.existsSync(backupPath)) throw new Error(`OpenClaw config backup already exists: ${backupPath}`);
   fs.renameSync(configPath, backupPath);
   return {
     originalPath: configPath,

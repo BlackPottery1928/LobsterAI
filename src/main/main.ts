@@ -184,6 +184,7 @@ import {
   OpenClawEnginePhase,
   OpenClawGatewayRepairErrorCode,
 } from '../shared/openclawEngine/constants';
+import { OpenClawRepairPhase } from '../shared/openclawEngine/repair';
 import { PlatformRegistry } from '../shared/platform';
 import type { ProviderConfig } from '../shared/providers';
 import {
@@ -348,6 +349,7 @@ import {
   findCoworkTempRoot,
 } from './libs/coworkTempJanitor';
 import {
+  ensureElectronNodeShim,
   generateSessionTitle,
   getElectronNodeRuntimePath,
   probeCoworkModelReadiness,
@@ -441,6 +443,7 @@ import {
   DEFAULT_MANAGED_AGENT_ID,
   OpenClawChannelSessionSync,
 } from './libs/openclawChannelSessionSync';
+import { createOpenClawRepairBackupDirectory, runOpenClawCompatibilityRepair, runOpenClawDoctorRepair } from './libs/openclawCompatibilityRepair';
 import {
   CONFIG_DELIVERY_FALLBACK_REASON_PREFIX,
   DEFERRED_SYNC_REASON_PREFIX,
@@ -2316,6 +2319,7 @@ const getEngineNotReadyResponse = (status: OpenClawEngineStatus) => {
 const bootstrapOpenClawEngine = async (
   options: { forceReinstall?: boolean; reason?: string } = {},
 ) => {
+  if (openClawManualRepairActive) return getOpenClawEngineManager().getStatus();
   if (openClawBootstrapPromise) {
     return openClawBootstrapPromise;
   }
@@ -2686,6 +2690,7 @@ const clearDeferredRestart = () => {
 
 type SyncOpenClawConfigOptions = {
   reason: string;
+  manualRepair?: boolean;
   restartGatewayIfRunning?: boolean;
   expectedImpact?: OpenClawConfigImpact;
   /** Only ordinary IM saves can reuse a completed restart of this exact config. */
@@ -3129,6 +3134,9 @@ const _syncOpenClawConfigImpl = async (
 const syncOpenClawConfig = async (
   options: SyncOpenClawConfigOptions = { reason: 'unknown' },
 ): Promise<SyncOpenClawConfigResult> => {
+  // Wait before enqueueing, so a background sync cannot block the repair's
+  // own regeneration behind a promise that is waiting for repair completion.
+  if (openClawManualRepairActive && !options.manualRepair) await openClawManualRepairBarrier;
   const generation = ++openClawConfigApplyGeneration;
   const startAfterPrevious = openClawConfigApplyQueue.catch(() => {});
   const restartRequired =
@@ -3211,9 +3219,11 @@ type OpenClawGatewayRepairResult = {
 };
 
 let openClawGatewayRepairPromise: Promise<OpenClawGatewayRepairResult> | null = null;
+let openClawManualRepairActive = false;
+let openClawManualRepairBarrier: Promise<void> | null = null;
 
 const isOpenClawGatewayRepairSuccess = (status: OpenClawEngineStatus): boolean => {
-  return status.phase === 'running' || status.phase === 'ready';
+  return status.phase === OpenClawEnginePhase.Running;
 };
 
 const buildOpenClawRepairBusyResult = (
@@ -3284,24 +3294,60 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
       return postBootstrapBusyResult;
     }
 
+    let backupPath: string | undefined;
+    let releaseConfigMaintenance: (() => void) | undefined;
     try {
+      openClawManualRepairActive = true;
+      openClawManualRepairBarrier = new Promise<void>(resolve => { releaseConfigMaintenance = resolve; });
+      await openClawConfigApplyQueue;
+      const pendingWork = buildOpenClawRepairBusyResult(originalPath, manager.getStatus());
+      if (pendingWork) return pendingWork;
       console.log('[OpenClawRepair] starting gateway state repair.');
       if (openClawRuntimeAdapter) {
         openClawRuntimeAdapter.disconnectGatewayClient();
       }
 
-      await manager.stopGateway({ restarting: true });
-      const backupResult = backupOpenClawConfig(originalPath);
-      if (backupResult.backupPath) {
-        console.log(`[OpenClawRepair] backed up OpenClaw config to ${backupResult.backupPath}.`);
-      } else {
-        console.log('[OpenClawRepair] no OpenClaw config file was present, continuing with regeneration.');
-      }
-
-      const status = await bootstrapOpenClawEngine({
-        forceReinstall: false,
-        reason: 'manual-repair',
+      await manager.withGatewayStoppedForRepair(async () => {
+        await manager.prepareRuntimeForStartupConfigSync('manual-repair');
+        const ensured = await manager.ensureReady();
+        if (ensured.phase !== OpenClawEnginePhase.Ready) throw new Error(ensured.message || 'OpenClaw runtime is unavailable.');
+        backupPath = createOpenClawRepairBackupDirectory(manager.getBaseDir());
+        const electronNodeRuntimePath = getElectronNodeRuntimePath();
+        const npmBinDir = app.isPackaged
+          ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'npm', 'bin')
+          : path.join(app.getAppPath(), 'node_modules', 'npm', 'bin');
+        const nodeShimDir = ensureElectronNodeShim(electronNodeRuntimePath, npmBinDir);
+        const repairOptions = {
+          stateDir: manager.getStateDir(), configPath: originalPath,
+          runtimeRoot: manager.getRuntimeRoot(), electronNodeRuntimePath,
+          backupDir: backupPath, env: {
+            ...process.env, ...manager.getSecretEnvVars(), ...getOpenClawConfigSync().collectSecretEnvVars(),
+            PATH: [nodeShimDir, process.env.PATH || process.env.Path].filter(Boolean).join(path.delimiter),
+            LOBSTERAI_NPM_BIN_DIR: npmBinDir,
+          },
+        };
+        await runOpenClawCompatibilityRepair({ ...repairOptions, phase: OpenClawRepairPhase.Snapshot });
+        await runOpenClawDoctorRepair(repairOptions);
+        await runOpenClawCompatibilityRepair({ ...repairOptions, phase: OpenClawRepairPhase.Recovery });
+        backupOpenClawConfig(originalPath, backupPath);
+        await startAskUserServer();
+        const sync = await syncOpenClawConfig({ reason: 'manual-repair', restartGatewayIfRunning: false, manualRepair: true });
+        if (!sync.success) throw new Error(sync.error || 'OpenClaw config regeneration failed.');
+        await runOpenClawCompatibilityRepair({
+          ...repairOptions, phase: OpenClawRepairPhase.Plugins,
+          env: { ...repairOptions.env, ...manager.getSecretEnvVars() },
+          legacyConfigPath: path.join(backupPath, 'original', 'openclaw.json'),
+        });
       });
+      const started = await manager.startGateway('manual-repair');
+      // Reconnection can await a token refresh that itself needs config sync.
+      // Release config writers after repair/startup, before awaiting the client.
+      openClawManualRepairActive = false;
+      releaseConfigMaintenance?.();
+      if (isOpenClawGatewayRepairSuccess(started)) {
+        await openClawRuntimeAdapter?.connectGatewayIfNeeded();
+      }
+      const status = manager.getStatus();
       const success = isOpenClawGatewayRepairSuccess(status);
       if (success) {
         console.log('[OpenClawRepair] gateway state repair completed successfully.');
@@ -3312,8 +3358,8 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
       return {
         success,
         status,
-        originalPath: backupResult.originalPath,
-        backupPath: backupResult.backupPath,
+        originalPath,
+        backupPath,
         error: success ? undefined : status.message || 'Failed to restart OpenClaw gateway after repair.',
       };
     } catch (error) {
@@ -3323,8 +3369,13 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         success: false,
         status: manager.setExternalError(message),
         originalPath,
+        backupPath,
         error: message,
       };
+    } finally {
+      openClawManualRepairActive = false;
+      releaseConfigMaintenance?.();
+      openClawManualRepairBarrier = null;
     }
   })().finally(() => {
     if (openClawGatewayRepairPromise === promise) {

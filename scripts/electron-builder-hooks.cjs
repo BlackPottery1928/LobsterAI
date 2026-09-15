@@ -257,6 +257,8 @@ function ensureBundledOpenClawRuntime(context) {
   const requiredExternalPaths = [
     path.join(runtimeRoot, 'node_modules'),
     path.join(runtimeRoot, 'openclaw-startup-state-migration.mjs'),
+    path.join(runtimeRoot, 'openclaw-gateway-repair.mjs'),
+    path.join(runtimeRoot, 'lobsterai-repair-plugins.json'),
   ];
   const missingExternal = requiredExternalPaths.filter((candidate) => !existsSync(candidate));
   if (missingExternal.length > 0) {
