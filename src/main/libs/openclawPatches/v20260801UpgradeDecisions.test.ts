@@ -39,6 +39,7 @@ const RETAINED_PATCHES = [
   'openclaw-skip-disabled-web-search-discovery.patch',
   'openclaw-skip-derive-prompt-segments-deadloop.patch',
   'openclaw-subagent-cleanup-finalize-best-effort.patch',
+  'openclaw-transcript-replay-validation.patch',
   'openclaw-view-image-task-cwd.patch',
   'openclaw-windows-file-path-redaction.patch',
   'openclaw-windows-process-identity.patch',
