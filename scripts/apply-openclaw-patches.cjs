@@ -413,6 +413,35 @@ const legacyStrongPatchValidators = {
 };
 
 const v20260801StrongPatchValidators = {
+  'openclaw-transcript-replay-validation.patch': [
+    {
+      file: 'packages/ai/src/transcript-replay-validation.ts',
+      snippets: [
+        'export function sanitizeReplayMessages(',
+        'export function prepareReplayMessages(',
+        'typeof value === "string" && value.trim().length > 0',
+        'preserveLegacyToolResults',
+        'locations.length < 8',
+        '[transcript-replay] Invalid historical fields omitted:',
+      ],
+    },
+    {
+      file: 'packages/ai/src/transcript-transform.ts',
+      snippets: ['prepareReplayMessages(messages).map(', 'if (block.type !== "toolCall")'],
+    },
+    {
+      file: 'packages/ai/src/internal/shared.ts',
+      snippets: ['export * from "../transcript-replay-validation.js";'],
+    },
+    {
+      file: 'src/agents/transport-message-transform.ts',
+      snippets: [
+        'const validated = prepareReplayMessages(messages,',
+        'preserveLegacyToolResults: allowSyntheticToolResults',
+        'const original = validated[index];',
+      ],
+    },
+  ],
   'openclaw-compaction-summary-format.patch': [
     {
       file: 'packages/agent-core/src/harness/compaction/compaction.ts',
