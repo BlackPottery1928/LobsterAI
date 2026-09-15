@@ -48,6 +48,7 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc) {
       '#openclaw-pid-alive': path.join(openclawSrc, 'src/shared/pid-alive.ts'),
       '#openclaw-config-io': path.join(openclawSrc, 'src/config/io.factory.ts'),
       '#openclaw-migration-lock': path.join(openclawSrc, 'src/infra/state-migrations.lock.ts'),
+      '#openclaw-dreaming-workspaces': path.join(openclawSrc, 'src/memory-host-sdk/dreaming.ts'),
       '#openclaw-config-machine-state': path.join(openclawSrc, 'src/state/config-machine-state.ts'),
       '#openclaw-state-db': path.join(openclawSrc, 'src/state/openclaw-state-db.ts'),
       '#openclaw-state-schema': path.join(openclawSrc, 'src/state/openclaw-state-schema.ts'),

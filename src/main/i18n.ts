@@ -21,6 +21,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     openClawStartupMigrationFailed: 'AI 引擎状态升级失败：{error}',
     openClawPluginVerificationFailed: 'AI 引擎插件校验失败，已停止自动重启。请处理以下插件错误后重试：\n{error}',
     openClawStartupCompatibilityRepairing: '正在备份并修复旧版网关状态…',
+    openClawDreamingStateRepairing: '正在备份并处理旧版记忆状态…',
     openClawRuntimeFilesMissing: 'AI 引擎运行文件缺失或无法读取，已停止启动。请退出应用，使用包含修复的最新安装包覆盖安装后重试。',
     // DeepSeek Harness (experimental)
     dshWorkbenchTitle: 'DeepSeek Harness 工作台（实验）',
@@ -394,6 +395,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     openClawStartupMigrationFailed: 'AI engine state migration failed: {error}',
     openClawPluginVerificationFailed: 'AI engine plugin verification failed. Automatic restarts stopped. Fix the plugin error and retry:\n{error}',
     openClawStartupCompatibilityRepairing: 'Backing up and repairing legacy gateway state…',
+    openClawDreamingStateRepairing: 'Backing up and handling legacy memory state…',
     openClawRuntimeFilesMissing: 'AI engine runtime files are missing or unreadable. Startup has stopped. Quit the app and reinstall using the latest installer containing the fix, then try again.',
     // DeepSeek Harness (experimental)
     dshWorkbenchTitle: 'DeepSeek Harness Workbench (Experimental)',
