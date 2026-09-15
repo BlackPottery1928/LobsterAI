@@ -413,6 +413,70 @@ const legacyStrongPatchValidators = {
 };
 
 const v20260801StrongPatchValidators = {
+  'openclaw-compaction-summary-format.patch': [
+    {
+      file: 'packages/agent-core/src/harness/compaction/compaction.ts',
+      snippets: [
+        'export type CompactionSummaryPrompt =',
+        'summaryPrompt?: CompactionSummaryPrompt',
+        'const selectedPrompt =',
+        'summaryPrompt?.kind === "turn-prefix" ? 0.5 : 0.8',
+      ],
+      forbiddenSnippets: ['const prompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;'],
+    },
+    {
+      file: 'src/agents/agent-hooks/compaction-safeguard.ts',
+      snippets: ['customInstructions: correctiveInstructions,'],
+      orderedSnippets: [
+        'messages: pruned.droppedMessagesList,',
+        'summaryPrompt: { kind: "custom", instructions: structuredInstructions },',
+        'messages: messagesToSummarize,',
+        'summaryPrompt: { kind: "custom", instructions: structuredInstructions },',
+        'customInstructions: correctiveInstructions,',
+        'summaryPrompt: { kind: "turn-prefix" },',
+      ],
+      forbiddenSnippets: ['TURN_PREFIX_SUMMARIZATION_PROMPT,'],
+    },
+    {
+      file: 'src/agents/compaction.ts',
+      snippets: ['summaryPrompt?: CompactionSummaryPrompt;', 'params.summaryPrompt,'],
+    },
+    {
+      file: 'src/agents/sessions/compaction/compaction.ts',
+      snippets: ['summaryPrompt?: CompactionSummaryPrompt,', '      summaryPrompt,'],
+    },
+    ...[
+      'packages/agent-core/src/index.ts',
+      'src/agents/runtime/index.ts',
+      'src/plugin-sdk/agent-core.ts',
+    ].map((file) => ({ file, snippets: ['CompactionSummaryPrompt,'] })),
+    {
+      file: 'src/agents/compaction.summary-format.test.ts',
+      snippets: [
+        'retains $kind format through chunk updates and stage merge',
+        'retains caller format and previous summary when oversized history needs fallback',
+      ],
+    },
+    {
+      file: 'src/agents/agent-hooks/compaction-safeguard.test.ts',
+      snippets: ['sends one authoritative safeguard summary format (prefix=%s)'],
+    },
+  ],
+  'openclaw-compaction-summary-section-order.patch': [
+    {
+      file: 'src/agents/agent-hooks/compaction-safeguard-quality.ts',
+      snippets: [
+        'const seenSections = new Set<number>()',
+        'if (seenSections.has(nextSectionIndex))',
+        'if (seenSections.size !== REQUIRED_SUMMARY_SECTIONS.length)',
+      ],
+      forbiddenSnippets: ['const nextHeading = REQUIRED_SUMMARY_SECTIONS[sectionIndex + 1]'],
+    },
+    {
+      file: 'src/agents/agent-hooks/compaction-safeguard.test.ts',
+      snippets: ['retains audit facts under suffix pressure for every ordering of complete summary sections'],
+    },
+  ],
   'openclaw-lobsterai-startup-recovery.patch': [
     {
       file: 'src/agents/main-session-recovery/main-session-restart-recovery-marking.ts',

@@ -14,6 +14,8 @@ const RETAINED_PATCHES = [
   'openclaw-browser-blocked-hostnames.patch',
   'openclaw-chat-send-cwd-decoupling.patch',
   'openclaw-cli-startup-metadata-windows-timeout.patch',
+  'openclaw-compaction-summary-format.patch',
+  'openclaw-compaction-summary-section-order.patch',
   'openclaw-cron-preparation-failure-state.patch',
   'openclaw-cron-skip-missed-jobs.patch',
   'openclaw-im-bound-agent-run-cwd.patch',
