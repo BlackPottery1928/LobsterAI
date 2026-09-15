@@ -680,6 +680,30 @@ const v20260801StrongPatchValidators = {
       snippets: ['adds Anthropic cache-control markers for opted-in compatible providers'],
     },
   ],
+  'openclaw-openai-completions-output-budget.patch': [
+    {
+      file: 'packages/ai/src/transports/openai-completions-params.ts',
+      snippets: ['const MIN_USEFUL_OUTPUT_TOKENS = 16'],
+      orderedSnippets: [
+        'clampedMaxTokens >= effectiveContextTokens',
+        'const remainingBudget = Math.floor(effectiveContextTokens - estimatedInputTokens - 1)',
+        'remainingBudget < MIN_USEFUL_OUTPUT_TOKENS',
+        'Context overflow: insufficient estimated output budget',
+      ],
+      forbiddenSnippets: ['Math.max(1, effectiveContextTokens - estimatedInputTokens - 1)'],
+    },
+    {
+      file: 'packages/ai/src/transports/openai-completions-output-budget.test.ts',
+      snippets: [
+        'preserves the ordinary requested output budget',
+        'uses a strict HTTP endpoint to distinguish an estimate from actual prompt usage',
+      ],
+    },
+    {
+      file: 'src/agents/embedded-agent-runner/run.overflow-context-recovery.test.ts',
+      snippets: ['bounds compaction recovery for an output budget rejection'],
+    },
+  ],
   'openclaw-plugin-archive-windows-timeout.patch': [
     {
       file: 'src/plugins/install-package.ts',

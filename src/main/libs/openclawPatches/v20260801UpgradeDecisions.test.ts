@@ -27,6 +27,7 @@ const RETAINED_PATCHES = [
   'openclaw-memory-sidecar-archive-generations.patch',
   'openclaw-omit-default-model-from-system-prompt.patch',
   'openclaw-openai-compatible-cache-control.patch',
+  'openclaw-openai-completions-output-budget.patch',
   'openclaw-plugin-archive-windows-timeout.patch',
   'openclaw-project-memory-negative-probe.patch',
   'openclaw-provider-auth-warm-cooperative-exit.patch',
