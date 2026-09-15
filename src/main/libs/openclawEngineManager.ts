@@ -14,6 +14,7 @@ import {
   OpenClawGatewayFailureKind,
   type OpenClawGatewayFailureSnapshot,
 } from '../../shared/openclawEngine/constants';
+import { type OpenClawDreamingRecoverySummary } from '../../shared/openclawEngine/dreamingRecovery';
 import { OpenClawStartupCompatibilityMode } from '../../shared/openclawEngine/startupCompatibility';
 import { OpenClawStartupMigrationStatus } from '../../shared/openclawEngine/startupMigration';
 import { t } from '../i18n';
@@ -29,6 +30,8 @@ import { recoverInstallerResourcesFromTar } from './installerResourceRecovery';
 import { mergeNoProxyValue } from './noProxyEnv';
 import { getCodexHomeDir } from './openaiCodexAuth';
 import { migrateLegacyCronStorageWithDoctor } from './openclawCronLegacyMigration';
+import { readDreamingRecoverySummary } from './openclawDreamingRecovery';
+import { createDreamingStartupFailureCollector } from './openclawDreamingStartupFailure';
 import { cleanupStaleGatewayLocks, GatewayLockCleanupAction } from './openclawGatewayLock';
 import { buildOpenClawGatewayShutdownBridge, spawnOpenClawGatewayProcess, stopOpenClawGatewayProcess } from './openclawGatewayProcess';
 import { cleanupStaleThirdPartyPluginsFromBundledDir, listLocalOpenClawExtensionIds,syncLocalOpenClawExtensionsIntoRuntime } from './openclawLocalExtensions';
@@ -98,6 +101,7 @@ export interface OpenClawEngineStatus {
   progressPercent?: number;
   message?: string;
   errorCode?: OpenClawEngineErrorCode;
+  dreamingRecovery?: OpenClawDreamingRecoverySummary;
   gatewayPort?: number | null;
   gatewayHttpUrl?: string | null;
   canRetry: boolean;
@@ -333,6 +337,8 @@ export class OpenClawEngineManager extends EventEmitter {
   private readonly gatewayGenerationByProcess = new WeakMap<GatewayProcess, number>();
   private readonly gatewayFailureByProcess = new WeakMap<GatewayProcess, OpenClawGatewayFailureSnapshot>();
   private readonly expectedGatewayExits = new WeakSet<object>();
+  private readonly gatewayReadyProcesses = new WeakSet<GatewayProcess>();
+  private dreamingRecoverySummary?: OpenClawDreamingRecoverySummary;
   private gatewayGeneration = 0;
   private lastGatewayFailure: OpenClawGatewayFailureSnapshot | null = null;
   private gatewayRestartTimer: NodeJS.Timeout | null = null;
@@ -365,6 +371,7 @@ export class OpenClawEngineManager extends EventEmitter {
     ensureDir(this.baseDir);
     ensureDir(this.logsDir);
     ensureDir(this.stateDir);
+    this.dreamingRecoverySummary = readDreamingRecoverySummary(this.stateDir);
     this.pruneGatewayLogsIfNeeded();
 
     const runtime = this.resolveRuntimeMetadata();
@@ -413,7 +420,7 @@ export class OpenClawEngineManager extends EventEmitter {
   }
 
   getStatus(): OpenClawEngineStatus {
-    return this.withGatewayStatusFields(this.status);
+    return this.withGatewayStatusFields({ ...this.status, dreamingRecovery: this.dreamingRecoverySummary });
   }
 
   setExternalError(message: string): OpenClawEngineStatus {
@@ -673,7 +680,7 @@ export class OpenClawEngineManager extends EventEmitter {
 
   private async startGatewayUntilSettled(generation: number): Promise<OpenClawEngineStatus> {
     // This budget belongs to the whole request, including scheduled process retries.
-    let bindingRecoveryAttempted = false;
+    const recoveryAttempts = new Set<OpenClawStartupCompatibilityMode>();
     do {
       const retryWait = this.gatewayRestartWait;
       if (retryWait) {
@@ -684,21 +691,29 @@ export class OpenClawEngineManager extends EventEmitter {
       if (this.shutdownRequested || generation !== this.gatewayLifecycleGeneration) return this.getStatus();
       const status = await this.doStartGateway();
       if (this.shutdownRequested || generation !== this.gatewayLifecycleGeneration) return this.getStatus();
-      if (status.phase === OpenClawEnginePhase.Error
-        && isOpenClawBindingSchemaFailure(status.message, this.stateDir)
-        && this.startupCompatibilityRunner && !isGatewayProcessAlive(this.gatewayProcess)) {
-        if (bindingRecoveryAttempted) return status;
-        bindingRecoveryAttempted = true;
+      const recoveryMode = status.errorCode === OpenClawEngineErrorCode.MemoryDreamingMigrationFailed
+        ? OpenClawStartupCompatibilityMode.RepairDreamingState
+        : isOpenClawBindingSchemaFailure(status.message, this.stateDir)
+          ? OpenClawStartupCompatibilityMode.RepairBindings : undefined;
+      if (status.phase === OpenClawEnginePhase.Error && recoveryMode
+        && this.startupCompatibilityRunner && !this.gatewayProcess) {
+        if (recoveryAttempts.has(recoveryMode)) return status;
+        recoveryAttempts.add(recoveryMode);
         this.setStatus({
           phase: OpenClawEnginePhase.Starting, version: status.version, canRetry: false,
-          message: t('openClawStartupCompatibilityRepairing'),
+          message: t(recoveryMode === OpenClawStartupCompatibilityMode.RepairDreamingState
+            ? 'openClawDreamingStateRepairing' : 'openClawStartupCompatibilityRepairing'),
         });
-        const recovery = await this.startupCompatibilityRunner(OpenClawStartupCompatibilityMode.RepairBindings);
+        const recovery = await this.startupCompatibilityRunner(recoveryMode);
+        if (recovery.dreamingRecovery) this.dreamingRecoverySummary = recovery.dreamingRecovery;
         if (this.shutdownRequested || generation !== this.gatewayLifecycleGeneration) return this.getStatus();
-        if (recovery.status !== OpenClawStartupMigrationStatus.Failed) continue;
+        if (recovery.status === OpenClawStartupMigrationStatus.Migrated
+          || (recoveryMode === OpenClawStartupCompatibilityMode.RepairBindings
+            && recovery.status === OpenClawStartupMigrationStatus.Skipped)) continue;
         this.setStatus({
           ...status,
-          errorCode: OpenClawEngineErrorCode.StartupCompatibilityFailed,
+          errorCode: recoveryMode === OpenClawStartupCompatibilityMode.RepairDreamingState
+            ? OpenClawEngineErrorCode.MemoryDreamingMigrationFailed : OpenClawEngineErrorCode.StartupCompatibilityFailed,
           message: recovery.error || status.message,
         });
         return this.getStatus();
@@ -1001,8 +1016,8 @@ export class OpenClawEngineManager extends EventEmitter {
         phase: 'error',
         version: runtime.version,
         message: legacySessionMigration.error,
-        errorCode: isOpenClawBindingSchemaFailure(legacySessionMigration.error, this.stateDir)
-          ? OpenClawEngineErrorCode.StartupCompatibilityFailed : undefined,
+        errorCode: legacySessionMigration.errorCode ?? (isOpenClawBindingSchemaFailure(legacySessionMigration.error, this.stateDir)
+          ? OpenClawEngineErrorCode.StartupCompatibilityFailed : undefined),
         canRetry: true,
       });
       return this.getStatus();
@@ -1032,8 +1047,8 @@ export class OpenClawEngineManager extends EventEmitter {
         phase: OpenClawEnginePhase.Error,
         version: runtime.version,
         message: t('openClawStartupMigrationFailed', { error: startupMigration.error ?? '' }),
-        errorCode: isOpenClawBindingSchemaFailure(startupMigration.error, this.stateDir)
-          ? OpenClawEngineErrorCode.StartupCompatibilityFailed : undefined,
+        errorCode: startupMigration.errorCode ?? (isOpenClawBindingSchemaFailure(startupMigration.error, this.stateDir)
+          ? OpenClawEngineErrorCode.StartupCompatibilityFailed : undefined),
         canRetry: true,
       });
       return this.getStatus();
@@ -1912,7 +1927,8 @@ export class OpenClawEngineManager extends EventEmitter {
           resolve(false);
           return;
         }
-        if (ready) {
+        if (ready && isGatewayProcessAlive(child)) {
+          this.gatewayReadyProcesses.add(child);
           console.log(`[OpenClaw] waitForGatewayReady: gateway startup complete after ${elapsedMs}ms (${pollCount} polls)`);
           resolve(true);
           return;
@@ -2062,6 +2078,8 @@ export class OpenClawEngineManager extends EventEmitter {
   }
 
   private attachGatewayExitHandlers(child: GatewayProcess): void {
+    const dreamingFailureCollector = createDreamingStartupFailureCollector();
+    child.stderr?.on('data', chunk => dreamingFailureCollector.write(chunk));
     child.once('error', (...args: unknown[]) => {
       const errorMsg = args[0] instanceof Error
         ? args[0].message
@@ -2076,10 +2094,12 @@ export class OpenClawEngineManager extends EventEmitter {
       this.scheduleGatewayRestart();
     });
 
-    (child as NodeJS.EventEmitter).once('exit', (code: number | null, signal?: string) => {
+    // close follows exit AND the final stderr chunk. Recovery must wait for both.
+    (child as NodeJS.EventEmitter).once('close', (code: number | null, signal?: string) => {
       console.log(`${gwDiagTs()} gateway process exited with code=${code}, signal=${signal ?? 'none'}`);
       const recentOutput = (this.gatewayRecentOutput.get(child) ?? []).join('\n');
       this.gatewayRecentOutput.delete(child);
+      const dreamingFailure = dreamingFailureCollector.finish();
       const wasCurrentProcess = this.gatewayProcess === child;
       if (wasCurrentProcess) {
         this.gatewayProcess = null;
@@ -2093,6 +2113,16 @@ export class OpenClawEngineManager extends EventEmitter {
       }
       if (this.shutdownRequested) return;
       if (!wasCurrentProcess) return;
+
+      if (code !== null && code !== 0 && !this.gatewayReadyProcesses.has(child) && dreamingFailure) {
+        this.clearScheduledGatewayRestart();
+        this.setStatus({
+          phase: OpenClawEnginePhase.Error, version: this.status.version, canRetry: true,
+          errorCode: OpenClawEngineErrorCode.MemoryDreamingMigrationFailed,
+          message: dreamingFailure,
+        });
+        return;
+      }
 
       let tail = recentOutput;
       try {

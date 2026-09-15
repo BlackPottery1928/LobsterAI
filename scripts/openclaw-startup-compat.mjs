@@ -8,6 +8,9 @@ import { createConfigIO } from '#openclaw-config-io';
 import { closeOpenClawStateDatabase } from '#openclaw-state-db';
 import { withLegacyMigrationStateLock } from '#openclaw-migration-lock';
 import { recoverRetiredBindingColumns } from './openclaw-binding-schema-recovery.mjs';
+import { resolveMemoryDreamingWorkspaces } from '#openclaw-dreaming-workspaces';
+import { recoverLegacyDreamingState } from './openclaw-dreaming-state-recovery.mjs';
+import { DREAMING_RECOVERY_REPORT_VERSION, OpenClawDreamingRecoveryOutcome } from '../src/shared/openclawEngine/dreamingRecovery.ts';
 import {
   OPENCLAW_LEGACY_DISCOVERY_KEY,
   OPENCLAW_STARTUP_COMPATIBILITY_RESULT_PREFIX,
@@ -17,7 +20,12 @@ import {
 } from '../src/shared/openclawEngine/startupCompatibility.ts';
 import { OpenClawStartupMigrationStatus } from '../src/shared/openclawEngine/startupMigration.ts';
 
-const report = { status: OpenClawStartupMigrationStatus.Skipped, changes: [], backups: [] };
+const report = {
+  reportVersion: DREAMING_RECOVERY_REPORT_VERSION,
+  runtimeVersion: OPENCLAW_STARTUP_COMPATIBILITY_VERSION,
+  operation: process.argv[2],
+  status: OpenClawStartupMigrationStatus.Skipped, changes: [], backups: [],
+};
 const machineStateKey = `plugins.${OPENCLAW_LEGACY_DISCOVERY_KEY}`;
 const isDiscoveryMode = value => Object.values(OpenClawBundledDiscoveryMode).includes(value);
 
@@ -74,6 +82,18 @@ try {
       if (mode === OpenClawStartupCompatibilityMode.RepairBindings) {
         const change = await recoverRetiredBindingColumns({ stateDir, env, backups: report.backups });
         if (change) report.changes.push(change);
+      } else if (mode === OpenClawStartupCompatibilityMode.RepairDreamingState) {
+        const configRaw = fs.readFileSync(configPath);
+        const config = JSON.parse(configRaw.toString('utf8'));
+        const workspaces = resolveMemoryDreamingWorkspaces(config, { env });
+        report.dreaming = await recoverLegacyDreamingState({ stateDir, configPath, configRaw, workspaces });
+        report.backups.push(...report.dreaming.files.map(file => file.backupPath));
+        if (report.dreaming.outcome === OpenClawDreamingRecoveryOutcome.Blocked) {
+          throw new Error(report.dreaming.blockers.join('\n'));
+        }
+        if (report.dreaming.outcome === OpenClawDreamingRecoveryOutcome.Recovered) {
+          report.changes.push(`Backed up and isolated ${report.dreaming.files.length} invalid legacy Memory Core JSON files.`);
+        }
       } else {
         report.changes.push(...await migrateConfig({ stateDir, configPath, env }));
       }

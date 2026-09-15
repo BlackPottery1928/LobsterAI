@@ -1,11 +1,14 @@
 import { type ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import path from 'path';
+import { PassThrough } from 'stream';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { OpenClawEngineErrorCode, OpenClawEnginePhase } from '../../shared/openclawEngine/constants';
+import type { OpenClawDreamingRecoverySummary } from '../../shared/openclawEngine/dreamingRecovery';
 import { OpenClawStartupCompatibilityMode } from '../../shared/openclawEngine/startupCompatibility';
 import { OpenClawStartupMigrationStatus } from '../../shared/openclawEngine/startupMigration';
+import { OPENCLAW_STARTUP_MIGRATION_REFUSAL } from './openclawDreamingStartupFailure';
 
 vi.mock('electron', () => ({
   app: { getAppPath: () => process.cwd(), isPackaged: false },
@@ -20,7 +23,8 @@ import { OpenClawEngineManager, type OpenClawEngineStatus } from './openclawEngi
 
 interface SupervisorInternals {
   stateDir: string;
-  startupCompatibilityRunner: ((mode: OpenClawStartupCompatibilityMode) => Promise<{ status: OpenClawStartupMigrationStatus; error?: string }>) | null;
+  startupCompatibilityRunner: ((mode: OpenClawStartupCompatibilityMode) => Promise<{ status: OpenClawStartupMigrationStatus; error?: string; dreamingRecovery?: OpenClawDreamingRecoverySummary }>) | null;
+  gatewayReadyProcesses: WeakSet<ChildProcess>;
   gatewayProcess: ChildProcess | null;
   gatewayRecentOutput: WeakMap<ChildProcess, string[]>;
   gatewayRestartAttempt: number;
@@ -42,7 +46,14 @@ const makeChild = (): ChildProcess => Object.assign(new EventEmitter(), {
   exitCode: null as number | null,
   signalCode: null as NodeJS.Signals | null,
   kill: vi.fn(() => true),
+  stderr: new PassThrough(),
 }) as unknown as ChildProcess;
+
+function closeChild(child: ChildProcess, code: number | null) {
+  child.exitCode = code;
+  child.emit('exit', code);
+  child.emit('close', code);
+}
 
 function makeSupervisor() {
   // Avoid the constructor's user-data/runtime setup. These tests exercise the
@@ -56,6 +67,7 @@ function makeSupervisor() {
     gatewayGenerationByProcess: new WeakMap(),
     gatewayFailureByProcess: new WeakMap(),
     expectedGatewayExits: new WeakSet(),
+    gatewayReadyProcesses: new WeakSet(),
     gatewayRestartTimer: null,
     gatewayRestartWait: null,
     gatewayRestartAttempt: 0,
@@ -179,7 +191,7 @@ describe('failure-triggered binding recovery', () => {
     const cause = `SQLite schema is incomplete or noncanonical for ${path.join(internals.stateDir, 'state', 'openclaw.sqlite')}: column definitions differ for current_conversation_bindings`;
     internals.gatewayRecentOutput.set(child, ['[stderr] Config warnings: plugins.entries.acpx: not installed', `[stderr] [openclaw] Reason: ${cause}`]);
     child.exitCode = 1;
-    child.emit('exit', 1);
+    closeChild(child, 1);
     expect(manager.getStatus()).toMatchObject({ phase: OpenClawEnginePhase.Error, message: cause, errorCode: OpenClawEngineErrorCode.StartupCompatibilityFailed });
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -189,7 +201,7 @@ describe('failure-triggered binding recovery', () => {
     const warning = `Config health-state write failed: SQLite schema is incomplete or noncanonical for ${path.join(internals.stateDir, 'state', 'openclaw.sqlite')}: column definitions differ for current_conversation_bindings`;
     internals.gatewayRecentOutput.set(child, [`[stderr] ${warning}`, '[stderr] Error: unrelated startup failure']);
     child.exitCode = 1;
-    child.emit('exit', 1);
+    closeChild(child, 1);
     expect(manager.getStatus().errorCode).toBeUndefined();
     expect(internals.gatewayRestartAttempt).toBe(1);
     expect(vi.getTimerCount()).toBe(1);
@@ -199,6 +211,110 @@ describe('failure-triggered binding recovery', () => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe('failure-triggered dreaming recovery', () => {
+  const terminal = `${OPENCLAW_STARTUP_MIGRATION_REFUSAL}\n- Skipped Memory Core daily ingestion import for workspace because the legacy source could not be imported: SyntaxError: invalid JSON\n`;
+  const summary: OpenClawDreamingRecoverySummary = {
+    manifestPath: path.join(process.cwd(), 'fixture-manifest.json'), affectedWorkspaceCount: 5,
+    quarantinedFileCount: 15, pendingFileCount: 0, recordedAt: '2026-09-15T00:00:00.000Z',
+  };
+  const fault: OpenClawEngineStatus = { phase: OpenClawEnginePhase.Error, version: '2026.8.1', canRetry: true,
+    errorCode: OpenClawEngineErrorCode.MemoryDreamingMigrationFailed, message: 'Legacy Memory Core JSON could not be parsed.' };
+  function fixture(statuses: OpenClawEngineStatus[] = [fault]) {
+    const context = makeSupervisor();
+    context.internals.gatewayProcess = null;
+    const recover = vi.fn(async () => ({ status: OpenClawStartupMigrationStatus.Migrated, dreamingRecovery: summary }));
+    let index = 0;
+    const start = vi.spyOn(context.internals, 'doStartGateway').mockImplementation(async () => {
+      context.internals.startupCompatibilityRunner = recover;
+      context.internals.setStatus(statuses[Math.min(index++, statuses.length - 1)]);
+      return context.manager.getStatus();
+    });
+    return { ...context, recover, start };
+  }
+
+  test('waits for close and trailing stderr rather than classifying at exit or from the 80-line tail', () => {
+    const { manager, internals, child } = makeSupervisor();
+    child.exitCode = 1;
+    child.emit('exit', 1);
+    expect(internals.gatewayProcess).toBe(child);
+    child.stderr!.emit('data', Buffer.from(terminal + '- notice\n'.repeat(100)));
+    closeChild(child, 1);
+    expect(manager.getStatus().errorCode).toBe(OpenClawEngineErrorCode.MemoryDreamingMigrationFailed);
+    expect(internals.gatewayProcess).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test.each([0, null])('does not authorize file repair after exit code %s', code => {
+    const { manager, child } = makeSupervisor();
+    child.stderr!.emit('data', terminal);
+    closeChild(child, code);
+    expect(manager.getStatus().errorCode).not.toBe(OpenClawEngineErrorCode.MemoryDreamingMigrationFailed);
+  });
+
+  test('ignores matching output after readiness, and stale child events', () => {
+    const { manager, internals, child } = makeSupervisor();
+    internals.gatewayReadyProcesses.add(child);
+    child.stderr!.emit('data', terminal);
+    closeChild(child, 1);
+    expect(manager.getStatus().errorCode).not.toBe(OpenClawEngineErrorCode.MemoryDreamingMigrationFailed);
+    const next = makeChild();
+    internals.attachGatewayExitHandlers(next);
+    next.stderr!.emit('data', terminal);
+    closeChild(next, 1);
+    expect(manager.getStatus().errorCode).not.toBe(OpenClawEngineErrorCode.MemoryDreamingMigrationFailed);
+  });
+
+  test('recovers once, retains the summary after readiness, and skips repair on a later healthy start', async () => {
+    const healthy = { ...fault, phase: OpenClawEnginePhase.Running, errorCode: undefined, message: 'Running' };
+    const { manager, recover, start } = fixture([fault, healthy]);
+    expect(await manager.startGateway('cold-start')).toMatchObject({ phase: OpenClawEnginePhase.Running, dreamingRecovery: summary });
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(recover).toHaveBeenCalledExactlyOnceWith(OpenClawStartupCompatibilityMode.RepairDreamingState);
+    await manager.startGateway('healthy-again');
+    expect(recover).toHaveBeenCalledOnce();
+  });
+
+  test('a persistent failure uses only one recovery per request, including when recovery reports skipped', async () => {
+    const { manager, recover, start } = fixture();
+    expect((await manager.startGateway('failed')).errorCode).toBe(fault.errorCode);
+    expect(recover).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledTimes(2);
+    recover.mockResolvedValue({ status: OpenClawStartupMigrationStatus.Skipped, dreamingRecovery: summary });
+    await manager.startGateway('explicit-retry');
+    expect(recover).toHaveBeenCalledTimes(2);
+    expect(start).toHaveBeenCalledTimes(3);
+  });
+
+  test('binding and dreaming budgets are independent and never reset by an internal restart', async () => {
+    const binding = { ...fault, errorCode: OpenClawEngineErrorCode.StartupCompatibilityFailed,
+      message: `SQLite schema is incomplete or noncanonical for ${path.join(process.cwd(), 'fixtures', 'state', 'state', 'openclaw.sqlite')}: column definitions differ for current_conversation_bindings` };
+    const { manager, recover, start } = fixture([fault, binding, fault]);
+    expect((await manager.startGateway('two-faults')).errorCode).toBe(fault.errorCode);
+    expect(recover.mock.calls.map(call => call[0])).toEqual([
+      OpenClawStartupCompatibilityMode.RepairDreamingState, OpenClawStartupCompatibilityMode.RepairBindings,
+    ]);
+    expect(start).toHaveBeenCalledTimes(3);
+  });
+
+  test('cancellation waits for recovery, retains its summary and prevents a replacement', async () => {
+    const { manager, internals, start } = fixture();
+    let finish!: (value: { status: OpenClawStartupMigrationStatus; dreamingRecovery: OpenClawDreamingRecoverySummary }) => void;
+    const recovery = new Promise<{ status: OpenClawStartupMigrationStatus; dreamingRecovery: OpenClawDreamingRecoverySummary }>(resolve => { finish = resolve; });
+    start.mockImplementation(async () => {
+      internals.startupCompatibilityRunner = () => recovery;
+      internals.setStatus(fault);
+      return manager.getStatus();
+    });
+    const startup = manager.startGateway('cancel');
+    await vi.advanceTimersByTimeAsync(0);
+    const stopping = manager.stopGateway();
+    finish({ status: OpenClawStartupMigrationStatus.Migrated, dreamingRecovery: summary });
+    await Promise.all([startup, stopping]);
+    expect(start).toHaveBeenCalledOnce();
+    expect(manager.getStatus()).toMatchObject({ phase: OpenClawEnginePhase.Ready, dreamingRecovery: summary });
+  });
 });
 
 describe('OpenClaw gateway restart supervision', () => {
@@ -285,7 +401,7 @@ describe('OpenClaw gateway restart supervision', () => {
     expect(start).not.toHaveBeenCalled();
     expect(phases).toEqual([OpenClawEnginePhase.Starting]);
     child.exitCode = 0;
-    child.emit('exit', 0);
+    closeChild(child, 0);
     await Promise.all([first, concurrent]);
 
     expect(start).toHaveBeenCalledOnce();
@@ -314,7 +430,7 @@ describe('OpenClaw gateway restart supervision', () => {
       return manager.getStatus();
     });
     child.exitCode = 1;
-    child.emit('exit', 1);
+    closeChild(child, 1);
 
     expect(phases).toEqual([OpenClawEnginePhase.Starting]);
     await vi.advanceTimersByTimeAsync(3_000);
@@ -326,7 +442,7 @@ describe('OpenClaw gateway restart supervision', () => {
     const { manager, internals, child, phases } = makeSupervisor();
     internals.gatewayRestartAttempt = 5;
     child.exitCode = 1;
-    child.emit('exit', 1);
+    closeChild(child, 1);
 
     expect(phases).toEqual([OpenClawEnginePhase.Error]);
     expect(manager.getStatus().canRetry).toBe(true);
@@ -338,7 +454,7 @@ describe('OpenClaw gateway restart supervision', () => {
     child.emit('error', new Error('gateway error'));
     internals.gatewayRecentOutput.set(child, ['Invalid config at openclaw.json.']);
     child.exitCode = 1;
-    child.emit('exit', 1);
+    closeChild(child, 1);
 
     expect(phases).toEqual([OpenClawEnginePhase.Starting, OpenClawEnginePhase.Error]);
     expect(vi.getTimerCount()).toBe(0);
@@ -362,7 +478,7 @@ describe('OpenClaw gateway restart supervision', () => {
     }));
     const ready = internals.waitForGatewayReady(18789, 300_000);
     child.exitCode = 1;
-    child.emit('exit', 1);
+    closeChild(child, 1);
     resolveProbe(true);
 
     await expect(ready).resolves.toBe(false);
@@ -376,7 +492,7 @@ describe('OpenClaw gateway restart supervision', () => {
     const stopped = vi.fn();
     const pending = manager.stopGateway({ restarting: true }).then(stopped);
     child.exitCode = 0;
-    child.emit('exit', 0);
+    closeChild(child, 0);
     await vi.advanceTimersByTimeAsync(1);
     expect(stopped).not.toHaveBeenCalled();
     resolveStartup(manager.getStatus());
@@ -389,7 +505,7 @@ describe('OpenClaw gateway restart supervision', () => {
     const attempt = vi.spyOn(internals, 'doStartGateway')
       .mockImplementationOnce(async () => {
         child.exitCode = 1;
-        child.emit('exit', 1);
+        closeChild(child, 1);
         return manager.getStatus();
       })
       .mockImplementationOnce(async () => {
@@ -412,7 +528,7 @@ describe('OpenClaw gateway restart supervision', () => {
     const attempt = vi.spyOn(internals, 'doStartGateway')
       .mockImplementationOnce(() => {
         child.exitCode = 1;
-        child.emit('exit', 1);
+        closeChild(child, 1);
         return new Promise((resolve) => { finishAttempt = resolve; });
       })
       .mockImplementationOnce(async () => {
@@ -432,7 +548,7 @@ describe('OpenClaw gateway restart supervision', () => {
     const { manager, internals, child } = makeSupervisor();
     const attempt = vi.spyOn(internals, 'doStartGateway').mockImplementationOnce(async () => {
       child.exitCode = 1;
-      child.emit('exit', 1);
+      closeChild(child, 1);
       return manager.getStatus();
     });
     const starting = manager.startGateway('initial-start');
@@ -452,7 +568,7 @@ describe('OpenClaw gateway restart supervision', () => {
     const restarting = manager.restartGateway('mcp-change');
     const stopping = manager.stopGateway();
     child.exitCode = 0;
-    child.emit('exit', 0);
+    closeChild(child, 0);
     await Promise.all([restarting, stopping]);
 
     expect(start).not.toHaveBeenCalled();
@@ -469,7 +585,7 @@ describe('OpenClaw gateway restart supervision', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     internals.gatewayRecentOutput.set(child, ['Invalid config at openclaw.json.']);
     child.exitCode = 1;
-    child.emit('exit', 1);
+    closeChild(child, 1);
 
     await expect(starting).resolves.toMatchObject({ phase: OpenClawEnginePhase.Error });
     expect(attempt).toHaveBeenCalledOnce();
@@ -489,7 +605,7 @@ describe('OpenClaw gateway restart supervision', () => {
     const stopping = manager.stopGateway();
     const backgroundStart = manager.startGateway('channel-sync-ensure-ready');
     child.exitCode = 0;
-    child.emit('exit', 0);
+    closeChild(child, 0);
     await stopping;
 
     await expect(backgroundStart).resolves.toMatchObject({ phase: OpenClawEnginePhase.Ready });
@@ -504,7 +620,7 @@ describe('OpenClaw gateway restart supervision', () => {
       internals.gatewayRecentOutput.set(nextChild, ['startup worker failed']);
       internals.attachGatewayExitHandlers(nextChild);
       nextChild.exitCode = 1;
-      nextChild.emit('exit', 1);
+      closeChild(nextChild, 1);
       return manager.getStatus();
     });
     const starting = manager.startGateway('initial-start');

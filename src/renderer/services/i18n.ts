@@ -1378,6 +1378,11 @@ const translations: Record<LanguageType, Record<string, string>> = {
     openClawRepairSuccess: '修复已完成，网关已重新启动。',
     openClawRepairSuccessNoBackup: '网关已重新启动。',
     openClawRepairBackupPath: '备份文件',
+    openClawDreamingRecoveryTitle: '旧版记忆状态处理记录',
+    openClawDreamingRecoverySummary: '涉及 {workspaces} 个工作区：已备份并隔离 {files} 个异常文件。',
+    openClawDreamingRecoveryImpact: '部分记忆处理进度、召回状态和阶段信号需要重新积累。原始文件已保存在备份中。',
+    openClawDreamingRecoveryPending: '还有 {files} 个文件未完成隔离，请查看当前启动错误。',
+    openClawDreamingRecoveryBackup: '查看备份与处理记录',
     openClawRepairFailed: '修复启动问题失败，请重试或手动重启网关。',
     openClawRepairBusyError: '当前仍有 Agent 任务或定时任务在运行，请停止后再修复。',
     openClawRepairConfigApplyPendingError: 'OpenClaw 正在应用配置变更，请稍后再修复。',
@@ -5330,6 +5335,11 @@ const translations: Record<LanguageType, Record<string, string>> = {
     openClawRepairSuccessNoBackup:
       'The gateway has restarted.',
     openClawRepairBackupPath: 'Backup file',
+    openClawDreamingRecoveryTitle: 'Legacy memory recovery record',
+    openClawDreamingRecoverySummary: '{workspaces} workspace(s) involved: {files} invalid file(s) backed up and quarantined.',
+    openClawDreamingRecoveryImpact: 'Some memory processing progress, recall state, and phase signals need to accumulate again. Original files are preserved in backups.',
+    openClawDreamingRecoveryPending: '{files} file(s) still await quarantine. Check the current startup error.',
+    openClawDreamingRecoveryBackup: 'View backups and recovery record',
     openClawRepairFailed: 'Failed to repair startup. Try again or restart the gateway manually.',
     openClawRepairBusyError:
       'Agent tasks or scheduled tasks are still running. Stop them before repairing.',

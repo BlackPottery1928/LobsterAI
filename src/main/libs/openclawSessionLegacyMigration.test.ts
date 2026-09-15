@@ -3,6 +3,8 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
+import { OpenClawEngineErrorCode } from '../../shared/openclawEngine/constants';
+import { OPENCLAW_STARTUP_MIGRATION_REFUSAL } from './openclawDreamingStartupFailure';
 import {
   LEGACY_SESSION_SQLITE_IMPORT_MODE,
   type LegacySessionMigrationRunner,
@@ -50,6 +52,17 @@ function archiveWarningFixture(fixture: ReturnType<typeof createWarningImportFix
 }
 
 describe('openclawSessionLegacyMigration', () => {
+  test('preserves dreaming failure classification from a long structured CLI error', async () => {
+    writeFile(path.join(stateDir, 'agents', 'main', 'sessions', 'sessions.json'));
+    const message = `${OPENCLAW_STARTUP_MIGRATION_REFUSAL}\n- Skipped Memory Core session ingestion import for fixture because the legacy source could not be imported: SyntaxError: invalid JSON\n`
+      + '- another migration warning\n'.repeat(200);
+    const result = await migrateLegacySessionStorageWithDoctor({
+      stateDir, configPath, runtimeRoot, electronNodeRuntimePath: process.execPath, env: {},
+      runner: async () => ({ code: 1, stdout: JSON.stringify({ ok: false, error: { type: 'cli_error', message } }), stderr: '' }),
+    });
+    expect(result).toMatchObject({ status: 'failed', errorCode: OpenClawEngineErrorCode.MemoryDreamingMigrationFailed });
+    if (result.status === 'failed') expect(result.error).toContain('session ingestion');
+  });
   test('surfaces the incident SQLite cli_error instead of duplicate-plugin warnings', async () => {
     writeFile(path.join(stateDir, 'agents', 'main', 'sessions', 'sessions.json'));
     const cause = `SQLite schema is incomplete or noncanonical for ${path.join(stateDir, 'state', 'openclaw.sqlite')}: column definitions differ for current_conversation_bindings`;
