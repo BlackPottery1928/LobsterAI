@@ -69,8 +69,7 @@ const EngineFailureOverlay: React.FC<EngineFailureOverlayProps> = ({
     }
   };
 
-  // Same repair flow as Settings > Agent Engine > Repair Startup: back up
-  // affected config/state and restart through the targeted recovery path.
+  // Same backed-up Doctor and compatibility repair flow as Settings.
   const handleQuickRepairGateway = async () => {
     if (isRepairingGateway || isRestartingGateway) return;
     setIsRepairingGateway(true);
@@ -103,7 +102,7 @@ const EngineFailureOverlay: React.FC<EngineFailureOverlayProps> = ({
     }
   };
 
-  if (suspended || status?.phase !== OpenClawEnginePhase.Error) {
+  if (suspended || !status || (status.phase !== OpenClawEnginePhase.Error && !isRepairingGateway)) {
     return null;
   }
 
@@ -112,7 +111,7 @@ const EngineFailureOverlay: React.FC<EngineFailureOverlayProps> = ({
   // installer resources, but the honest fix is allowlist + reinstall.
   const isRuntimeMissing = status.errorCode === OpenClawEngineErrorCode.RuntimeEntryMissing;
   const isRuntimeDamaged = status.errorCode === OpenClawEngineErrorCode.RuntimeFilesMissing;
-  const titleKey = isRuntimeDamaged ? 'coworkOpenClawRuntimeDamagedError'
+  const titleKey = isRepairingGateway ? 'openClawRepairRunning' : isRuntimeDamaged ? 'coworkOpenClawRuntimeDamagedError'
     : isRuntimeMissing ? 'coworkOpenClawRuntimeMissingError' : 'coworkOpenClawError';
   const hintKey = isRuntimeDamaged ? 'coworkOpenClawRuntimeDamagedRepairHint'
     : isRuntimeMissing ? 'coworkOpenClawRuntimeMissingRepairHint' : 'coworkOpenClawErrorRepairHint';
@@ -166,7 +165,7 @@ const EngineFailureOverlay: React.FC<EngineFailureOverlayProps> = ({
           <p className="mt-2 text-[13px] leading-5 text-secondary">
             {i18nService.t(hintKey)}
           </p>
-          {(gatewayRepairError || status.message) && (
+          {!isRepairingGateway && (gatewayRepairError || status.message) && (
             <p className="mt-2 max-h-36 max-w-full overflow-y-auto whitespace-pre-wrap break-words text-left text-xs leading-5 text-red-600 dark:text-red-400 [overflow-wrap:anywhere]">
               {gatewayRepairError || status.message}
             </p>

@@ -345,6 +345,7 @@ export class OpenClawEngineManager extends EventEmitter {
   private gatewayRestartWait: { promise: Promise<boolean>; resolve: (retry: boolean) => void } | null = null;
   private gatewayRestartAttempt = 0;
   private gatewayLifecycleGeneration = 0;
+  private gatewayMaintenanceActive = false;
   private shutdownRequested = false;
   private gatewayPort: number | null = null;
   private startGatewayPromise: Promise<OpenClawEngineStatus> | null = null;
@@ -654,7 +655,20 @@ export class OpenClawEngineManager extends EventEmitter {
     return this.getStatus();
   }
 
+  async withGatewayStoppedForRepair<T>(repair: () => Promise<T>): Promise<T> {
+    if (this.gatewayMaintenanceActive) throw new Error('OpenClaw gateway maintenance is already running.');
+    this.gatewayMaintenanceActive = true;
+    try {
+      // Invalidate in-flight restarts as well as stopping the current child.
+      await this.stopGateway();
+      return await repair();
+    } finally {
+      this.gatewayMaintenanceActive = false;
+    }
+  }
+
   async startGateway(reason = 'unknown'): Promise<OpenClawEngineStatus> {
+    if (this.gatewayMaintenanceActive) return this.getStatus();
     const generation = this.gatewayLifecycleGeneration;
     if (this.stopGatewayPromise) {
       await this.stopGatewayPromise;
@@ -1182,6 +1196,7 @@ export class OpenClawEngineManager extends EventEmitter {
   }
 
   async restartGateway(reason = 'unknown'): Promise<OpenClawEngineStatus> {
+    if (this.gatewayMaintenanceActive) return this.getStatus();
     if (this.restartGatewayPromise) return this.restartGatewayPromise;
     this.restartGatewayPromise = this.doRestartGateway(reason).finally(() => {
       this.restartGatewayPromise = null;

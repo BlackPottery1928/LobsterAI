@@ -9,7 +9,7 @@ const entryPath = path.join(__dirname, 'openclaw-startup-state-migration.mjs');
 const authStoreEntryPath = path.join(__dirname, 'openclaw-xai-auth-store.mjs');
 const compatibilityEntryPath = path.join(__dirname, 'openclaw-startup-compat.mjs');
 
-async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc) {
+async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedEntry = entryPath) {
   const expectedVersion = require(path.join(rootDir, 'package.json')).openclaw.version.replace(/^v/, '');
   for (const directory of [openclawSrc, runtimeDir]) {
     const version = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8')).version;
@@ -21,13 +21,12 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc) {
   if (!authOwner.includes('await params.persistConfig?.(params.cfg)')) {
     throw new Error('Startup auth migration requires openclaw-auth-migration-config-commit.patch; run openclaw:patch first.');
   }
-  const outputPath = path.join(runtimeDir, path.basename(entryPath));
+  const outputPath = path.join(runtimeDir, path.basename(selectedEntry));
   // Rebuild even when the gateway cache is current: this entry is maintained by
   // LobsterAI and must match the pinned upstream migration/schema implementation.
   await esbuild.build({
-    entryPoints: [entryPath, authStoreEntryPath, compatibilityEntryPath],
-    outdir: runtimeDir,
-    outExtension: { '.js': '.mjs' },
+    entryPoints: [selectedEntry],
+    outfile: outputPath,
     alias: {
       '#openclaw-workspace-migration': path.join(openclawSrc, 'src/infra/state-migrations.workspace-setup.ts'),
       '#openclaw-device-auth-migration': path.join(openclawSrc, 'src/infra/state-migrations.device-auth.ts'),
@@ -48,6 +47,14 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc) {
       '#openclaw-pid-alive': path.join(openclawSrc, 'src/shared/pid-alive.ts'),
       '#openclaw-config-io': path.join(openclawSrc, 'src/config/io.factory.ts'),
       '#openclaw-migration-lock': path.join(openclawSrc, 'src/infra/state-migrations.lock.ts'),
+      '#openclaw-repair-lock': path.join(openclawSrc, 'src/commands/doctor-sqlite-maintenance-lock.ts'),
+      '#openclaw-repair-schema-check': path.join(openclawSrc, 'src/state/openclaw-database-preflight.ts'),
+      '#openclaw-repair-state-check': path.join(openclawSrc, 'src/state/openclaw-state-db-maintenance.ts'),
+      '#openclaw-repair-agent-targets': path.join(openclawSrc, 'src/config/sessions/targets.ts'),
+      '#openclaw-repair-vectors': path.join(openclawSrc, 'packages/memory-host-sdk/src/host/sqlite-vec.ts'),
+      '#openclaw-repair-plugin-records': path.join(openclawSrc, 'src/plugins/installed-plugin-index-records.ts'),
+      '#openclaw-repair-plugin-payload': path.join(openclawSrc, 'src/cli/update-cli/plugin-payload-validation.ts'),
+      '#openclaw-repair-plugin-consent': path.join(openclawSrc, 'src/plugins/capability-consent.ts'),
       '#openclaw-dreaming-workspaces': path.join(openclawSrc, 'src/memory-host-sdk/dreaming.ts'),
       '#openclaw-config-machine-state': path.join(openclawSrc, 'src/state/config-machine-state.ts'),
       '#openclaw-state-db': path.join(openclawSrc, 'src/state/openclaw-state-db.ts'),
@@ -96,7 +103,20 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc) {
     banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" },
     logLevel: 'warning',
   });
-  console.log(`[OpenClaw] Built startup state migration helper (${fs.statSync(outputPath).size} bytes).`);
+  console.log(`[OpenClaw] Built ${path.basename(outputPath)} (${fs.statSync(outputPath).size} bytes).`);
+  if (selectedEntry === entryPath) {
+    await bundleOpenClawStartupMigration(runtimeDir, openclawSrc, authStoreEntryPath);
+    await bundleOpenClawStartupMigration(runtimeDir, openclawSrc, compatibilityEntryPath);
+    await bundleOpenClawStartupMigration(runtimeDir, openclawSrc, path.join(__dirname, 'openclaw-gateway-repair.mjs'));
+    const pinned = require(path.join(rootDir, 'package.json')).openclaw;
+    fs.writeFileSync(path.join(runtimeDir, 'lobsterai-repair-plugins.json'), JSON.stringify({
+      openclawVersion: expectedVersion,
+      plugins: pinned.plugins.filter(plugin => plugin.version && plugin.npm).map(plugin => ({
+        id: plugin.id, packageName: plugin.npm, version: plugin.version,
+        relativePath: `${plugin.runtimeBundled ? 'dist/extensions' : 'third-party-extensions'}/${plugin.id}`,
+      })),
+    }, null, 2));
+  }
   return outputPath;
 }
 

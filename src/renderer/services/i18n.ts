@@ -1358,7 +1358,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkOpenClawError: 'AI 引擎网关启动失败。',
     coworkOpenClawQuickRepair: '一键修复',
     coworkOpenClawErrorRepairHint:
-      '一键修复会备份相关配置或状态，修复已识别的启动问题并重新启动网关；不会删除聊天记录、模型配置、技能或工作区文件。',
+      '一键修复会先备份引擎数据，再修复升级后的配置、数据库和内置插件问题，并重新启动网关。聊天记录、记忆内容、模型配置和工作区文件会保留。数据较多时可能需要几分钟。',
     coworkOpenClawRuntimeMissingError: 'AI 引擎运行时文件缺失，安装未完成。',
     coworkOpenClawRuntimeDamagedError: 'AI 引擎运行文件损坏，无法启动。',
     coworkOpenClawRuntimeDamagedRepairHint:
@@ -1369,15 +1369,15 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkOpenClawErrorDefer: '稍后处理',
     openClawMaintenanceTitle: '运行维护',
     openClawRepairGatewayStateTitle: '修复启动问题',
-    openClawRepairGatewayStateDesc: '备份相关配置或状态，修复启动问题并重新启动网关。',
+    openClawRepairGatewayStateDesc: '备份引擎数据，修复配置、数据库和内置插件，再重新启动网关。',
     openClawRepairConfirmTitle: '修复 OpenClaw 启动问题？',
-    openClawRepairConfirmDesc: '应用会停止当前网关，备份需要修复的配置或状态，完成修复后重新启动网关。',
+    openClawRepairConfirmDesc: '应用会停止网关并备份引擎数据，运行官方诊断修复、恢复升级后异常的记忆索引和内置插件，重新生成配置并启动网关。数据较多时可能需要几分钟。',
     openClawRepairConfirmSafeDesc: '不会删除聊天记录、模型配置、技能或工作区文件。',
     openClawRepairConfirmAction: '开始修复',
     openClawRepairRunning: '正在修复...',
-    openClawRepairSuccess: '修复已完成，网关已重新启动。',
-    openClawRepairSuccessNoBackup: '网关已重新启动。',
-    openClawRepairBackupPath: '备份文件',
+    openClawRepairSuccess: '修复已完成，网关已启动。备份目录中保留了原始数据和修复报告。',
+    openClawRepairSuccessNoBackup: '修复已完成，网关已启动。',
+    openClawRepairBackupPath: '备份位置',
     openClawDreamingRecoveryTitle: '旧版记忆状态处理记录',
     openClawDreamingRecoverySummary: '涉及 {workspaces} 个工作区：已备份并隔离 {files} 个异常文件。',
     openClawDreamingRecoveryImpact: '部分记忆处理进度、召回状态和阶段信号需要重新积累。原始文件已保存在备份中。',
@@ -5310,7 +5310,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkOpenClawError: 'The AI engine gateway failed to start.',
     coworkOpenClawQuickRepair: 'Quick Repair',
     coworkOpenClawErrorRepairHint:
-      'Quick Repair backs up affected config or state, repairs recognized startup issues, and restarts the gateway. Chats, model settings, skills, and workspace files are preserved.',
+      'Quick Repair backs up engine data, repairs configuration, databases, and bundled plugins after an upgrade, then restarts the gateway. Chats, memory content, model settings, and workspace files are retained. Large backups may take a few minutes.',
     coworkOpenClawRuntimeMissingError:
       'AI engine runtime files are missing — the installation did not complete.',
     coworkOpenClawRuntimeDamagedError: 'AI engine runtime files are damaged. Startup has stopped.',
@@ -5323,18 +5323,18 @@ const translations: Record<LanguageType, Record<string, string>> = {
     openClawMaintenanceTitle: 'Run Maintenance',
     openClawRepairGatewayStateTitle: 'Repair Startup',
     openClawRepairGatewayStateDesc:
-      'Back up affected config or state, repair startup issues, and restart the gateway.',
+      'Back up engine data, repair configuration, databases, and bundled plugins, then restart the gateway.',
     openClawRepairConfirmTitle: 'Repair OpenClaw startup?',
     openClawRepairConfirmDesc:
-      'The app will stop the gateway, back up the config or state being repaired, and restart the gateway after repair.',
+      'The app will stop the gateway, back up engine data, run the official repair, recover broken memory indexes and bundled plugins, regenerate configuration, and restart the gateway. Large backups may take a few minutes.',
     openClawRepairConfirmSafeDesc:
       'Chat history, model settings, skills, and workspace files will not be deleted.',
     openClawRepairConfirmAction: 'Start Repair',
     openClawRepairRunning: 'Repairing...',
-    openClawRepairSuccess: 'Repair completed. The gateway has restarted.',
+    openClawRepairSuccess: 'Repair completed and the gateway started. Original data and repair reports are in the backup folder.',
     openClawRepairSuccessNoBackup:
-      'The gateway has restarted.',
-    openClawRepairBackupPath: 'Backup file',
+      'Repair completed and the gateway started.',
+    openClawRepairBackupPath: 'Backup location',
     openClawDreamingRecoveryTitle: 'Legacy memory recovery record',
     openClawDreamingRecoverySummary: '{workspaces} workspace(s) involved: {files} invalid file(s) backed up and quarantined.',
     openClawDreamingRecoveryImpact: 'Some memory processing progress, recall state, and phase signals need to accumulate again. Original files are preserved in backups.',

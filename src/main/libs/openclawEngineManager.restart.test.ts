@@ -318,6 +318,36 @@ describe('failure-triggered dreaming recovery', () => {
 });
 
 describe('OpenClaw gateway restart supervision', () => {
+  test('manual repair fences background starts and restarts until the repair child has finished', async () => {
+    const { manager, internals, child } = makeSupervisor();
+    let finishRepair!: () => void;
+    const repairWork = vi.fn(() => new Promise<void>(resolve => { finishRepair = resolve; }));
+    const start = vi.spyOn(internals, 'doStartGateway').mockImplementation(async () => manager.getStatus());
+    const repairing = manager.withGatewayStoppedForRepair(repairWork);
+    child.exitCode = 0;
+    child.emit('exit', 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(repairWork).toHaveBeenCalledOnce();
+    await Promise.all([manager.startGateway('auto-reconnect'), manager.restartGateway('background-config')]);
+    expect(start).not.toHaveBeenCalled();
+    finishRepair();
+    await repairing;
+    await manager.startGateway('manual-repair');
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  test('manual repair releases its start guard after a failure', async () => {
+    const { manager, internals, child } = makeSupervisor();
+    const start = vi.spyOn(internals, 'doStartGateway').mockImplementation(async () => manager.getStatus());
+    const repairing = manager.withGatewayStoppedForRepair(async () => { throw new Error('backup failed'); });
+    const rejected = expect(repairing).rejects.toThrow('backup failed');
+    child.exitCode = 0;
+    child.emit('exit', 0);
+    await rejected;
+    await manager.startGateway('user-retry');
+    expect(start).toHaveBeenCalledOnce();
+  });
+
   test('waits through transient readiness failures without showing startup for a running process', async () => {
     const { manager, internals, child, phases } = makeSupervisor();
     let ready = false;

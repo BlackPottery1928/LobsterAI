@@ -7,6 +7,8 @@ import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
+import { runOpenClawCompatibilityRepair, runOpenClawDoctorRepair } from '../src/main/libs/openclawCompatibilityRepair';
+import { OpenClawRepairPhase } from '../src/shared/openclawEngine/repair';
 import {
   OPENCLAW_STARTUP_COMPATIBILITY_ENTRY,
   OPENCLAW_STARTUP_COMPATIBILITY_RESULT_PREFIX,
@@ -152,6 +154,45 @@ describe.skipIf(!runtimeRoot || !sourceRoot)('bundled on-demand startup compatib
     expect((await run(OpenClawStartupCompatibilityMode.RepairBindings)).report.status).toBe(OpenClawStartupMigrationStatus.Migrated);
     expect((await run(OpenClawStartupCompatibilityMode.MigrateConfig)).report.status).toBe(OpenClawStartupMigrationStatus.Migrated);
   });
+
+  test.each([false, true])('manual repair combines binding recovery with legacy discovery=%s and preserves its snapshot', async (legacyDiscovery) => {
+    const db = seedDatabase();
+    const record = driftBindings(db);
+    db.close();
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (!legacyDiscovery) delete config.plugins.bundledDiscovery;
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const configBefore = fs.readFileSync(configPath, 'utf8');
+    const backupDir = path.join(tempDir, 'manual-repair-backup');
+    fs.mkdirSync(backupDir);
+    const params = {
+      stateDir, configPath, runtimeRoot: runtimeRoot!, backupDir, electronNodeRuntimePath: process.execPath,
+      env: {
+        PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR,
+        HOME: tempDir, USERPROFILE: tempDir, APPDATA: path.join(tempDir, 'appdata'),
+        XDG_CONFIG_HOME: path.join(tempDir, 'config'), XDG_CACHE_HOME: path.join(tempDir, 'cache'),
+        TEMP: tempDir, TMP: tempDir, TMPDIR: tempDir,
+      },
+    };
+    await runOpenClawCompatibilityRepair({ ...params, phase: OpenClawRepairPhase.Snapshot });
+    await runOpenClawDoctorRepair(params);
+    await expect(runOpenClawCompatibilityRepair({ ...params, phase: OpenClawRepairPhase.Recovery }))
+      .resolves.toMatchObject({ success: true });
+
+    const repaired = connect();
+    expect(repaired.prepare(`PRAGMA table_xinfo(${TABLE})`).all().map(row => row.name)).not.toContain('target_agent_id');
+    const retained = repaired.prepare(`SELECT record_json,updated_at FROM ${TABLE}`);
+    retained.setReadBigInts(true);
+    expect(retained.get()).toEqual({ record_json: record, updated_at: 9007199254740993n });
+    if (legacyDiscovery) {
+      expect(repaired.prepare("SELECT value_json FROM config_machine_state WHERE state_key = 'plugins.bundledDiscovery'").get()?.value_json)
+        .toBe(JSON.stringify(OpenClawBundledDiscoveryMode.Compat));
+    }
+    const saved = connect(path.join(backupDir, 'original', 'state', 'openclaw.sqlite'));
+    expect(saved.prepare(`SELECT record_json,target_agent_id FROM ${TABLE}`).get()).toEqual({ record_json: record, target_agent_id: 'main' });
+    expect(fs.readFileSync(path.join(backupDir, 'original', 'openclaw.json'), 'utf8')).toBe(configBefore);
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).plugins.bundledDiscovery).toBeUndefined();
+  }, 180_000);
 
   test.each([
     `ALTER TABLE ${TABLE} ADD COLUMN unexplained TEXT NOT NULL DEFAULT 'unknown'`,
