@@ -257,6 +257,7 @@ function ensureBundledOpenClawRuntime(context) {
   const requiredExternalPaths = [
     path.join(runtimeRoot, 'node_modules'),
     path.join(runtimeRoot, 'openclaw-startup-state-migration.mjs'),
+    path.join(runtimeRoot, 'openclaw-xai-auth-store.mjs'),
   ];
   const missingExternal = requiredExternalPaths.filter((candidate) => !existsSync(candidate));
   if (missingExternal.length > 0) {
