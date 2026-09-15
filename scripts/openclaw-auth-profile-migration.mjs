@@ -12,6 +12,7 @@ import {
 } from '#openclaw-auth-profile-sqlite';
 import { createConfigIO } from '#openclaw-config-io';
 import { withLegacyMigrationStateLock } from '#openclaw-migration-lock';
+import { recoverLegacyXaiAuthLock } from './openclaw-legacy-auth-lock.mjs';
 
 export async function migrateAuthProfilesBeforeStartup({ stateDir, configPath, env }) {
   const result = await withLegacyMigrationStateLock({
@@ -36,6 +37,7 @@ export async function migrateAuthProfilesBeforeStartup({ stateDir, configPath, e
       const cfg = structuredClone(snapshot.parsed);
       const originalConfig = structuredClone(cfg);
       const warnings = [];
+      const lockChanges = await recoverLegacyXaiAuthLock(stateDir);
       const prompter = { confirmAutoFix: async () => true };
       const persistConfig = async nextConfig => {
         try {
@@ -62,8 +64,12 @@ export async function migrateAuthProfilesBeforeStartup({ stateDir, configPath, e
       const migrated = await maybeMigrateAuthProfileJsonStoresToSqlite({
         cfg, env: migrationEnv, prompter, persistConfig,
       });
-      const changes = [...sidecars.changes, ...migrated.changes];
-      for (const sourcePath of migrated.detected.filter(source => fs.existsSync(source))) {
+      const changes = [...lockChanges, ...sidecars.changes, ...migrated.changes];
+      const remainingSources = migrated.detected.filter(source => fs.existsSync(source));
+      // Preserve the cause (such as lock contention) ahead of the readiness
+      // symptom. Warnings about successfully archived malformed input stay notices.
+      if (remainingSources.length) warnings.push(...migrated.warnings);
+      for (const sourcePath of remainingSources) {
         warnings.push(`Legacy auth profile input still requires migration: ${sourcePath}`);
       }
       // Empty legacy files can be archived with a warning. They no longer block

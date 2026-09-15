@@ -20,6 +20,7 @@ import type {
   OpenClawEnginePhase as SharedOpenClawEnginePhase,
   OpenClawGatewayRepairErrorCode,
 } from '../../shared/openclawEngine/constants';
+import type { OpenClawDreamingRecoverySummary } from '../../shared/openclawEngine/dreamingRecovery';
 import type { Platform } from '../../shared/platform';
 import type { ModelThinkingLevel } from '../../shared/providers/modelThinking';
 
@@ -260,6 +261,7 @@ export interface OpenClawEngineStatus {
   progressPercent?: number;
   message?: string;
   errorCode?: OpenClawEngineErrorCode;
+  dreamingRecovery?: OpenClawDreamingRecoverySummary;
   gatewayPort?: number | null;
   gatewayHttpUrl?: string | null;
   canRetry: boolean;
