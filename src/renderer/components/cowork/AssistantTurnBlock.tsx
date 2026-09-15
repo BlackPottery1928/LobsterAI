@@ -12,11 +12,14 @@ import {
   parseCoworkErrorDetail,
 } from '../../../shared/cowork/errorDetail';
 import type { CoworkGoal } from '../../../shared/cowork/goal';
+import purchaseOfferFirstBadge from '../../assets/purchase-offer-first.svg';
+import purchaseOfferLimitedBadge from '../../assets/purchase-offer-limited.svg';
 import { dedupeArtifactsForDisplay } from '../../services/artifactParser';
 import { getPortalPricingUrl } from '../../services/endpoints';
 import { i18nService } from '../../services/i18n';
 import {
-  formatPurchaseOfferCountdown,
+  formatPurchaseOfferDiscount,
+  getPurchaseOfferDiscountRate,
   getPurchaseOfferPortalTab,
   getPurchaseOfferRemainingMs,
   isPurchaseOfferActive,
@@ -30,6 +33,7 @@ import AbnormalIcon from '../icons/AbnormalIcon';
 import ExclamationTriangleIcon from '../icons/ExclamationTriangleIcon';
 import InformationCircleIcon from '../icons/InformationCircleIcon';
 import MarkdownContent from '../MarkdownContent';
+import PurchaseOfferCountdown from '../PurchaseOfferCountdown';
 import ActivityGroupBlock from './ActivityGroupBlock';
 import AssistantMessageItem from './AssistantMessageItem';
 import { reportConversationBlockAction } from './conversationAnalytics';
@@ -262,20 +266,26 @@ const CreditQuotaExhaustedBanner: React.FC = () => {
   const offer = useSelector((state: RootState) => state.auth.purchaseOffer);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    if (!offer || !isPurchaseOfferActive(offer, Date.now())) return undefined;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
+    const currentTime = Date.now();
+    setNow(currentTime);
+    if (!offer?.expiresAtEpochMs) return undefined;
+    const remainingMs = getPurchaseOfferRemainingMs(offer, currentTime);
+    if (remainingMs <= 0) return undefined;
+    const timer = window.setTimeout(() => setNow(Date.now()), remainingMs + 1);
+    return () => window.clearTimeout(timer);
   }, [offer]);
-  const hasOffer = isPurchaseOfferActive(offer, now);
-  const remaining = offer ? getPurchaseOfferRemainingMs(offer, now) : 0;
-  const discount = Math.round((offer?.discountRate ?? 1) * 10);
+  const portalTab = offer ? getPurchaseOfferPortalTab(offer) : 'subscription';
+  const rate = offer
+    ? getPurchaseOfferDiscountRate(offer, portalTab === 'boost' ? 'boost_pack' : 'subscription')
+    : null;
+  const hasOffer = isPurchaseOfferActive(offer, now) && rate !== null;
+  const isFirstPurchase = hasOffer && offer?.offerType === 'first_purchase';
   const handlePurchase = async () => {
-    const pricingUrl = hasOffer && offer?.offerToken
-      ? getPortalPricingUrl(undefined, {
-        offerToken: offer.offerToken,
-        tab: getPurchaseOfferPortalTab(offer),
-      })
-      : getPortalPricingUrl();
+    const active = isPurchaseOfferActive(offer) && rate !== null;
+    const pricingUrl = getPortalPricingUrl(undefined, {
+      offerToken: active ? offer?.offerToken ?? undefined : undefined,
+      tab: portalTab,
+    });
     logCreditQuotaBannerEvent('debug', 'purchase action clicked');
     try {
       const result = await window.electron?.shell?.openExternal(pricingUrl);
@@ -291,31 +301,45 @@ const CreditQuotaExhaustedBanner: React.FC = () => {
   };
 
   return (
-    <div className="rounded-lg border border-border bg-background px-4 py-3 shadow-sm">
+    <div className="rounded-xl bg-surface px-4 py-3 shadow-sm">
       <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-surface-raised text-secondary">
-          <AbnormalIcon className="h-6 w-6" />
-        </div>
+        {hasOffer ? (
+          <div className="relative h-14 w-14 shrink-0">
+            <img
+              src={isFirstPurchase ? purchaseOfferFirstBadge : purchaseOfferLimitedBadge}
+              alt=""
+              className="h-full w-full object-contain"
+            />
+            <div className="absolute inset-0 flex flex-col items-center justify-center pt-0.5 text-[10px] font-semibold leading-3 text-white">
+              <span>{i18nService.t(isFirstPurchase ? 'lowCreditOfferBadgeFirstTop' : 'lowCreditOfferBadgeLimitedTop')}</span>
+              <span>{i18nService.t(isFirstPurchase ? 'lowCreditOfferBadgeFirstBottom' : 'lowCreditOfferBadgeLimitedBottom')}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface-raised text-secondary">
+            <AbnormalIcon className="h-6 w-6" />
+          </div>
+        )}
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold leading-5 text-foreground">
-            {hasOffer
-              ? (offer?.offerType === 'first_purchase'
-                ? i18nService.t('lowCreditOfferTaskFirstTitle').replace('{discount}', String(discount))
-                : i18nService.t('lowCreditOfferTaskReturningTitle').replace('{discount}', String(discount)))
-              : i18nService.t('coworkCreditQuotaBannerTitle')}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <div className="text-sm font-semibold leading-5 text-foreground">
+              {hasOffer && rate !== null
+                ? i18nService.t(isFirstPurchase ? 'lowCreditOfferTaskFirstTitle' : 'lowCreditOfferTaskReturningTitle')
+                  .replace('{discount}', formatPurchaseOfferDiscount(rate))
+                : i18nService.t('coworkCreditQuotaBannerTitle')}
+            </div>
+            {hasOffer && !isFirstPurchase && offer && (
+              <PurchaseOfferCountdown offer={offer} />
+            )}
           </div>
           <div className="mt-1 text-xs leading-5 text-secondary">
-            {hasOffer && offer
-              ? i18nService.t('lowCreditOfferTaskDescription').replace(
-                '{time}', formatPurchaseOfferCountdown(remaining),
-              )
-              : i18nService.t('coworkCreditQuotaBannerDescription')}
+            {i18nService.t('coworkCreditQuotaBannerDescription')}
           </div>
         </div>
         <button
           type="button"
           onClick={handlePurchase}
-          className="ml-2 inline-flex h-8 flex-shrink-0 items-center justify-center rounded-full bg-foreground px-5 text-xs font-medium text-background transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          className="ml-2 inline-flex h-8 shrink-0 items-center justify-center rounded-full bg-foreground px-5 text-xs font-medium text-background transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           {i18nService.t('coworkCreditQuotaBannerAction')}
         </button>

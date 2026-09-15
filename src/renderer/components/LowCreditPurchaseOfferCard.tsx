@@ -1,98 +1,136 @@
 import { XMarkIcon } from '@heroicons/react/24/outline';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import { getPortalPricingUrl } from '../services/endpoints';
 import { i18nService } from '../services/i18n';
 import {
-  formatPurchaseOfferCountdown,
-  getPurchaseOfferPortalTab,
+  formatPurchaseOfferDiscount,
+  getPurchaseOfferDiscountRate,
   getPurchaseOfferRemainingMs,
   isPurchaseOfferActive,
 } from '../services/lowCreditPurchaseOffer';
 import type { LowCreditPurchaseOffer } from '../store/slices/authSlice';
+import PurchaseOfferCountdown from './PurchaseOfferCountdown';
 
 interface LowCreditPurchaseOfferCardProps {
   offer: LowCreditPurchaseOffer;
+  variant?: 'first' | 'returning' | 'normal';
   onClose: () => void;
+  className?: string;
+  style?: React.CSSProperties;
 }
 
-const formatCredits = (value: number | null | undefined): string => (
-  new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value ?? 0)
+const formatCredits = (value: number): string => (
+  new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)
 );
 
-const LowCreditPurchaseOfferCard: React.FC<LowCreditPurchaseOfferCardProps> = ({ offer, onClose }) => {
+const LowCreditPurchaseOfferCard: React.FC<LowCreditPurchaseOfferCardProps> = ({
+  offer,
+  variant = offer.offerType === 'first_purchase' ? 'first' : 'returning',
+  onClose,
+  className = '',
+  style,
+}) => {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+    const currentTime = Date.now();
+    setNow(currentTime);
+    if (variant === 'normal' || !offer.expiresAtEpochMs) return undefined;
+    const remainingMs = getPurchaseOfferRemainingMs(offer, currentTime);
+    if (remainingMs <= 0) return undefined;
+    const timer = window.setTimeout(() => setNow(Date.now()), remainingMs + 1);
+    return () => window.clearTimeout(timer);
+  }, [offer, variant]);
 
-  const remainingMs = getPurchaseOfferRemainingMs(offer, now);
-  const active = isPurchaseOfferActive(offer, now);
-  const isFirstPurchase = offer.offerType === 'first_purchase';
+  const active = variant !== 'normal' && isPurchaseOfferActive(offer, now);
+  const isFirstPurchase = active && variant === 'first';
+  const subscriptionRate = active ? getPurchaseOfferDiscountRate(offer, 'subscription') : null;
+  const boostRate = active ? getPurchaseOfferDiscountRate(offer, 'boost_pack') : null;
+  const returningRate = boostRate ?? subscriptionRate;
+  const showReturningOffer = active && !isFirstPurchase && returningRate !== null;
+  const balance = Math.max(0, offer.creditsRemaining ?? 0);
   const percentage = Math.max(0, Math.min(100,
-    ((offer.creditsRemaining ?? 0) / Math.max(offer.thresholdCredits ?? 1, 1)) * 100));
-  const discountText = Math.round((offer.discountRate ?? 1) * 10);
-  const portalOptions = useMemo(() => ({
-    offerToken: offer.offerToken ?? undefined,
-    tab: getPurchaseOfferPortalTab(offer),
-  }), [offer]);
+    (balance / Math.max(offer.thresholdCredits ?? 500, 1)) * 100));
 
-  if (!active) return null;
-
-  const openPortal = async (tab: 'subscription' | 'boost', applyOffer: boolean) => {
-    await window.electron?.shell?.openExternal(getPortalPricingUrl(undefined, {
-      offerToken: applyOffer ? portalOptions.offerToken : undefined,
-      tab,
-    }));
+  const openPortal = async (tab: 'subscription' | 'boost') => {
+    const rate = tab === 'boost' ? boostRate : subscriptionRate;
+    const applyOffer = isPurchaseOfferActive(offer) && variant !== 'normal' && rate !== null;
+    try {
+      const result = await window.electron?.shell?.openExternal(getPortalPricingUrl(undefined, {
+        offerToken: applyOffer ? offer.offerToken ?? undefined : undefined,
+        tab,
+      }));
+      if (!result?.success) console.warn('[LowCreditPurchaseOfferCard] Unable to open pricing page');
+    } catch {
+      console.warn('[LowCreditPurchaseOfferCard] Unable to open pricing page');
+    }
   };
 
   return (
-    <div className="absolute bottom-[calc(100%+12px)] left-0 z-40 w-[336px] rounded-2xl border border-black/10 bg-background p-4 text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.18)] dark:border-white/10">
+    <div
+      className={`relative w-full min-w-0 animate-fade-in-up rounded-xl border border-black/[0.06] bg-white px-3 pb-4 pt-5 text-foreground shadow-[0_4px_16px_rgba(0,0,0,0.12),0_1px_4px_rgba(0,0,0,0.06)] dark:border-white/10 dark:bg-background ${className}`}
+      style={style}
+    >
       <button
         type="button"
         onClick={onClose}
-        className="absolute right-3 top-3 rounded-md p-1 text-secondary transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
+        className="absolute right-2 top-2 rounded-md p-1 text-secondary transition-colors hover:bg-black/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:hover:bg-white/10"
         aria-label={i18nService.t('lowCreditOfferClose')}
       >
-        <XMarkIcon className="h-4 w-4" />
+        <XMarkIcon className="h-3.5 w-3.5" />
       </button>
-      <div className="flex items-center gap-2 pr-7">
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 pr-3">
         {isFirstPurchase && (
-          <span className="rounded-md bg-[#ff5a45]/15 px-2 py-1 text-xs font-semibold text-[#f04432]">
+          <span className="shrink-0 rounded-bl-none rounded-br-full rounded-tl-full rounded-tr-full bg-gradient-to-r from-[#ff782c] to-[#ff2e79] px-1.5 py-0.5 text-[10px] font-medium leading-4 text-white">
             {i18nService.t('lowCreditOfferFirstBadge')}
           </span>
         )}
-        <div className="text-base font-semibold">
-          {i18nService.t('lowCreditOfferBalance').replace('{credits}', formatCredits(offer.creditsRemaining))}
+        <div className="text-sm font-semibold leading-5 tabular-nums">
+          {i18nService.t('lowCreditOfferBalance').replace('{credits}', formatCredits(balance))}
         </div>
       </div>
-      <div className="mt-2 text-sm text-secondary">{i18nService.t('lowCreditOfferDescription')}</div>
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+      <p className="mt-1.5 text-xs leading-4 text-[#858585] dark:text-secondary">{i18nService.t('lowCreditOfferDescription')}</p>
+      <div
+        className="mt-4 h-1 overflow-hidden rounded-full bg-black/15 dark:bg-white/15"
+        role="progressbar"
+        aria-label={i18nService.t('lowCreditOfferBalance').replace('{credits}', formatCredits(balance))}
+        aria-valuenow={percentage}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
         <div className="h-full rounded-full bg-foreground" style={{ width: `${percentage}%` }} />
       </div>
-      <div className="mt-2 text-right font-mono text-xs tabular-nums text-[#f04432]">
-        {i18nService.t('lowCreditOfferCountdown').replace(
-          '{time}', formatPurchaseOfferCountdown(remainingMs),
-        )}
-      </div>
-      <div className="mt-3 flex gap-2">
+      {showReturningOffer && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2">
+          <span className="shrink-0 rounded-bl-none rounded-br-full rounded-tl-full rounded-tr-full bg-gradient-to-r from-[#ff782c] to-[#ff2e79] px-2 py-0.5 text-xs leading-4 text-white">
+            {i18nService.t('lowCreditOfferLimitedDiscount').replace(
+              '{discount}', formatPurchaseOfferDiscount(returningRate),
+            )}
+          </span>
+          <PurchaseOfferCountdown offer={offer} />
+        </div>
+      )}
+      <div className={`${showReturningOffer ? 'mt-2' : 'mt-4'} flex gap-2`}>
         <button
           type="button"
-          onClick={() => void openPortal('boost', offer.eligibleProducts?.includes('boost_pack') === true)}
-          className="h-9 flex-1 rounded-full border border-black/15 px-3 text-sm font-medium transition-colors hover:bg-black/[0.03] dark:border-white/15 dark:hover:bg-white/[0.05]"
+          onClick={() => void openPortal('boost')}
+          className="min-h-8 min-w-0 flex-1 rounded-full border border-black/15 px-2 py-1 text-xs font-medium leading-5 transition-colors hover:bg-black/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:border-white/15 dark:hover:bg-white/[0.05]"
         >
-          {i18nService.t('lowCreditOfferRecharge')}
+          {isFirstPurchase && boostRate !== null
+            ? i18nService.t('lowCreditOfferDiscountRecharge').replace('{discount}', formatPurchaseOfferDiscount(boostRate))
+            : i18nService.t('lowCreditOfferRecharge')}
         </button>
         <button
           type="button"
-          onClick={() => void openPortal(portalOptions.tab, true)}
-          className="h-9 flex-[1.25] rounded-full bg-foreground px-3 text-sm font-medium text-background transition-opacity hover:opacity-85"
+          onClick={() => void openPortal('subscription')}
+          className="min-h-8 min-w-0 flex-[1.1] rounded-full bg-[#1b1d1e] px-2 py-1 text-xs font-medium leading-5 text-white transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:bg-foreground dark:text-background"
         >
-          {(isFirstPurchase
-            ? i18nService.t('lowCreditOfferFirstAction')
-            : i18nService.t('lowCreditOfferReturningAction'))
-            .replace('{discount}', String(discountText))}
+          {isFirstPurchase && subscriptionRate !== null && (
+            <span className="mr-1 text-[#ff4a28]">
+              {i18nService.t('lowCreditOfferDiscount').replace('{discount}', formatPurchaseOfferDiscount(subscriptionRate))}
+            </span>
+          )}
+          {i18nService.t('lowCreditOfferUpgrade')}
         </button>
       </div>
     </div>

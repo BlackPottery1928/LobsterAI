@@ -36,6 +36,8 @@ export interface LowCreditPurchaseOffer {
   offerType?: 'first_purchase' | 'returning_purchase' | null;
   campaignCode?: string | null;
   discountRate?: number | null;
+  productDiscountRates?: Partial<Record<'subscription' | 'boost_pack', number>>;
+  hasEverPaidPersonalOrder?: boolean;
   eligibleProducts?: Array<'subscription' | 'boost_pack'>;
   defaultTab?: 'subscription' | 'boost_pack' | null;
   creditsRemaining?: number | null;
