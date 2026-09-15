@@ -463,6 +463,7 @@ import { OpenClawEngineManager, type OpenClawEngineStatus } from './libs/opencla
 import {
   backupOpenClawConfig,
   getOpenClawGatewayRepairBusyError,
+  preserveOpenClawConfigForStartupRecovery,
 } from './libs/openclawGatewayRepair';
 import { OpenClawImConfigRestartTracker } from './libs/openclawImConfigRestart';
 import {
@@ -3290,10 +3291,13 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         openClawRuntimeAdapter.disconnectGatewayClient();
       }
 
+      const preserveConfig = preserveOpenClawConfigForStartupRecovery(originalPath, manager.getStatus().errorCode);
       await manager.stopGateway({ restarting: true });
-      const backupResult = backupOpenClawConfig(originalPath);
+      const backupResult = preserveConfig ? { originalPath, backupPath: undefined } : backupOpenClawConfig(originalPath);
       if (backupResult.backupPath) {
         console.log(`[OpenClawRepair] backed up OpenClaw config to ${backupResult.backupPath}.`);
+      } else if (preserveConfig) {
+        console.log('[OpenClawRepair] retaining config for targeted startup recovery; the helper backs up each affected source.');
       } else {
         console.log('[OpenClawRepair] no OpenClaw config file was present, continuing with regeneration.');
       }

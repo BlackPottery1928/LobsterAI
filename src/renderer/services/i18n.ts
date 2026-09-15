@@ -1358,7 +1358,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkOpenClawError: 'AI 引擎网关启动失败。',
     coworkOpenClawQuickRepair: '一键修复',
     coworkOpenClawErrorRepairHint:
-      '推荐使用一键修复：自动备份并重建 OpenClaw 配置后重新启动网关，可解决大多数启动失败问题；不会删除聊天记录、模型配置、技能或工作区文件。',
+      '一键修复会备份相关配置或状态，修复已识别的启动问题并重新启动网关；不会删除聊天记录、模型配置、技能或工作区文件。',
     coworkOpenClawRuntimeMissingError: 'AI 引擎运行时文件缺失，安装未完成。',
     coworkOpenClawRuntimeDamagedError: 'AI 引擎运行文件损坏，无法启动。',
     coworkOpenClawRuntimeDamagedRepairHint:
@@ -1369,14 +1369,14 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkOpenClawErrorDefer: '稍后处理',
     openClawMaintenanceTitle: '运行维护',
     openClawRepairGatewayStateTitle: '修复启动问题',
-    openClawRepairGatewayStateDesc: '备份并重建 OpenClaw 配置，然后重新启动网关。',
+    openClawRepairGatewayStateDesc: '备份相关配置或状态，修复启动问题并重新启动网关。',
     openClawRepairConfirmTitle: '修复 OpenClaw 启动问题？',
-    openClawRepairConfirmDesc: '应用会停止当前网关，备份 openclaw.json，重新生成配置并启动网关。',
+    openClawRepairConfirmDesc: '应用会停止当前网关，备份需要修复的配置或状态，完成修复后重新启动网关。',
     openClawRepairConfirmSafeDesc: '不会删除聊天记录、模型配置、技能或工作区文件。',
     openClawRepairConfirmAction: '开始修复',
     openClawRepairRunning: '正在修复...',
-    openClawRepairSuccess: '修复已完成，网关已使用重新生成的配置启动。',
-    openClawRepairSuccessNoBackup: '未找到旧配置文件，已直接重新生成配置并启动网关。',
+    openClawRepairSuccess: '修复已完成，网关已重新启动。',
+    openClawRepairSuccessNoBackup: '网关已重新启动。',
     openClawRepairBackupPath: '备份文件',
     openClawRepairFailed: '修复启动问题失败，请重试或手动重启网关。',
     openClawRepairBusyError: '当前仍有 Agent 任务或定时任务在运行，请停止后再修复。',
@@ -5305,7 +5305,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkOpenClawError: 'The AI engine gateway failed to start.',
     coworkOpenClawQuickRepair: 'Quick Repair',
     coworkOpenClawErrorRepairHint:
-      'Quick Repair backs up and rebuilds the OpenClaw config, then restarts the gateway. It resolves most startup failures and keeps chats, model settings, skills, and workspace files.',
+      'Quick Repair backs up affected config or state, repairs recognized startup issues, and restarts the gateway. Chats, model settings, skills, and workspace files are preserved.',
     coworkOpenClawRuntimeMissingError:
       'AI engine runtime files are missing — the installation did not complete.',
     coworkOpenClawRuntimeDamagedError: 'AI engine runtime files are damaged. Startup has stopped.',
@@ -5318,17 +5318,17 @@ const translations: Record<LanguageType, Record<string, string>> = {
     openClawMaintenanceTitle: 'Run Maintenance',
     openClawRepairGatewayStateTitle: 'Repair Startup',
     openClawRepairGatewayStateDesc:
-      'Back up and rebuild the OpenClaw config, then restart the gateway.',
+      'Back up affected config or state, repair startup issues, and restart the gateway.',
     openClawRepairConfirmTitle: 'Repair OpenClaw startup?',
     openClawRepairConfirmDesc:
-      'The app will stop the current gateway, back up openclaw.json, regenerate the config, and start the gateway.',
+      'The app will stop the gateway, back up the config or state being repaired, and restart the gateway after repair.',
     openClawRepairConfirmSafeDesc:
       'Chat history, model settings, skills, and workspace files will not be deleted.',
     openClawRepairConfirmAction: 'Start Repair',
     openClawRepairRunning: 'Repairing...',
-    openClawRepairSuccess: 'Repair completed. The gateway started with regenerated config.',
+    openClawRepairSuccess: 'Repair completed. The gateway has restarted.',
     openClawRepairSuccessNoBackup:
-      'No old config file was found. The config was regenerated and the gateway started.',
+      'The gateway has restarted.',
     openClawRepairBackupPath: 'Backup file',
     openClawRepairFailed: 'Failed to repair startup. Try again or restart the gateway manually.',
     openClawRepairBusyError:

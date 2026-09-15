@@ -14,6 +14,7 @@ import {
   OpenClawGatewayFailureKind,
   type OpenClawGatewayFailureSnapshot,
 } from '../../shared/openclawEngine/constants';
+import { OpenClawStartupCompatibilityMode } from '../../shared/openclawEngine/startupCompatibility';
 import { OpenClawStartupMigrationStatus } from '../../shared/openclawEngine/startupMigration';
 import { t } from '../i18n';
 import { ensureElectronNodeShim, getElectronNodeRuntimePath, getSkillsRoot } from './coworkUtil';
@@ -33,6 +34,7 @@ import { buildOpenClawGatewayShutdownBridge, spawnOpenClawGatewayProcess, stopOp
 import { cleanupStaleThirdPartyPluginsFromBundledDir, listLocalOpenClawExtensionIds,syncLocalOpenClawExtensionsIntoRuntime } from './openclawLocalExtensions';
 import { migrateAllFtsOnlyMemoryIndexes } from './openclawMemoryIndexMigration';
 import { migrateLegacySessionStorageWithDoctor } from './openclawSessionLegacyMigration';
+import { extractOpenClawBindingSchemaFailure, extractOpenClawCliFailure, hasLegacyOpenClawDiscovery, isOpenClawBindingSchemaFailure, runOpenClawStartupCompatibility } from './openclawStartupCompatibility';
 import { migrateLegacyStateBeforeStartup } from './openclawStartupStateMigration';
 import { ensureOpenClawWorkerShims, getMissingOpenClawWorkerTargets } from './openclawWorkerShims';
 import { appendPythonRuntimeToEnv } from './pythonRuntime';
@@ -346,6 +348,7 @@ export class OpenClawEngineManager extends EventEmitter {
   private gatewaySpawnedAt: number | null = null;
   private gatewayLogPrunedDateKey: string | null = null;
   private gatewaySelfRestartNotedAt: number | null = null;
+  private startupCompatibilityRunner: ((mode: OpenClawStartupCompatibilityMode) => ReturnType<typeof runOpenClawStartupCompatibility>) | null = null;
 
   constructor() {
     super();
@@ -660,13 +663,17 @@ export class OpenClawEngineManager extends EventEmitter {
     }
     console.log(`${gwDiagTs()} startGateway: reason=${reason}, currentPhase=${this.status.phase}, port=${this.gatewayPort ?? 'none'}`);
     this.shutdownRequested = false;
+    this.startupCompatibilityRunner = null;
     this.startGatewayPromise = this.startGatewayUntilSettled(generation).finally(() => {
       this.startGatewayPromise = null;
+      this.startupCompatibilityRunner = null;
     });
     return this.startGatewayPromise;
   }
 
   private async startGatewayUntilSettled(generation: number): Promise<OpenClawEngineStatus> {
+    // This budget belongs to the whole request, including scheduled process retries.
+    let bindingRecoveryAttempted = false;
     do {
       const retryWait = this.gatewayRestartWait;
       if (retryWait) {
@@ -676,6 +683,26 @@ export class OpenClawEngineManager extends EventEmitter {
       }
       if (this.shutdownRequested || generation !== this.gatewayLifecycleGeneration) return this.getStatus();
       const status = await this.doStartGateway();
+      if (this.shutdownRequested || generation !== this.gatewayLifecycleGeneration) return this.getStatus();
+      if (status.phase === OpenClawEnginePhase.Error
+        && isOpenClawBindingSchemaFailure(status.message, this.stateDir)
+        && this.startupCompatibilityRunner && !isGatewayProcessAlive(this.gatewayProcess)) {
+        if (bindingRecoveryAttempted) return status;
+        bindingRecoveryAttempted = true;
+        this.setStatus({
+          phase: OpenClawEnginePhase.Starting, version: status.version, canRetry: false,
+          message: t('openClawStartupCompatibilityRepairing'),
+        });
+        const recovery = await this.startupCompatibilityRunner(OpenClawStartupCompatibilityMode.RepairBindings);
+        if (this.shutdownRequested || generation !== this.gatewayLifecycleGeneration) return this.getStatus();
+        if (recovery.status !== OpenClawStartupMigrationStatus.Failed) continue;
+        this.setStatus({
+          ...status,
+          errorCode: OpenClawEngineErrorCode.StartupCompatibilityFailed,
+          message: recovery.error || status.message,
+        });
+        return this.getStatus();
+      }
       if (status.phase !== OpenClawEnginePhase.Starting || !this.gatewayRestartWait) return status;
       // Keep callers awaiting the complete recovery, even if the retry timer
       // fired while the previous attempt was still finishing a health probe.
@@ -830,7 +857,7 @@ export class OpenClawEngineManager extends EventEmitter {
     console.log(`[OpenClaw] startGateway: resolveGatewayPort done (${elapsed()}), port=${port}`);
     this.gatewayPort = port;
     this.writeGatewayPort(port);
-    this.ensureConfigFile();
+    const hasLegacyDiscovery = this.ensureConfigFile();
     // A force-killed (or crashed) gateway can leave a stale/empty lock file
     // that blocks every new gateway for OpenClaw's 30s staleness window.
     this.cleanupStaleGatewayLocksSafely('pre-spawn');
@@ -937,6 +964,22 @@ export class OpenClawEngineManager extends EventEmitter {
     }
 
     if (this.shutdownRequested) return this.getStatus();
+    this.startupCompatibilityRunner = mode => runOpenClawStartupCompatibility({
+      stateDir: this.stateDir, configPath: this.configPath, runtimeRoot: runtime.root!,
+      electronNodeRuntimePath, env, mode,
+    });
+    if (hasLegacyDiscovery) {
+      const compatibility = await this.startupCompatibilityRunner(OpenClawStartupCompatibilityMode.MigrateConfig);
+      if (this.shutdownRequested) return this.getStatus();
+      if (compatibility.status === OpenClawStartupMigrationStatus.Failed) {
+        this.setStatus({
+          phase: OpenClawEnginePhase.Error, version: runtime.version, canRetry: true,
+          errorCode: OpenClawEngineErrorCode.StartupCompatibilityFailed,
+          message: compatibility.error,
+        });
+        return this.getStatus();
+      }
+    }
     await migrateLegacyCronStorageWithDoctor({
       stateDir: this.stateDir,
       runtimeRoot: runtime.root,
@@ -958,6 +1001,8 @@ export class OpenClawEngineManager extends EventEmitter {
         phase: 'error',
         version: runtime.version,
         message: legacySessionMigration.error,
+        errorCode: isOpenClawBindingSchemaFailure(legacySessionMigration.error, this.stateDir)
+          ? OpenClawEngineErrorCode.StartupCompatibilityFailed : undefined,
         canRetry: true,
       });
       return this.getStatus();
@@ -987,6 +1032,8 @@ export class OpenClawEngineManager extends EventEmitter {
         phase: OpenClawEnginePhase.Error,
         version: runtime.version,
         message: t('openClawStartupMigrationFailed', { error: startupMigration.error ?? '' }),
+        errorCode: isOpenClawBindingSchemaFailure(startupMigration.error, this.stateDir)
+          ? OpenClawEngineErrorCode.StartupCompatibilityFailed : undefined,
         canRetry: true,
       });
       return this.getStatus();
@@ -1727,11 +1774,11 @@ export class OpenClawEngineManager extends EventEmitter {
     }
   }
 
-  private ensureConfigFile(): void {
+  private ensureConfigFile(): boolean {
     ensureDir(path.dirname(this.configPath));
     if (!fs.existsSync(this.configPath)) {
       fs.writeFileSync(this.configPath, JSON.stringify({ gateway: { mode: 'local' } }, null, 2) + '\n', 'utf8');
-      return;
+      return false;
     }
     // Ensure gateway.mode is set even if config already exists
     try {
@@ -1741,9 +1788,11 @@ export class OpenClawEngineManager extends EventEmitter {
         config.gateway = { ...config.gateway, mode: 'local' };
         fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
       }
+      return hasLegacyOpenClawDiscovery(config);
     } catch {
       // ignore parse errors
     }
+    return false;
   }
 
   private writeGatewayPort(port: number): void {
@@ -2071,6 +2120,23 @@ export class OpenClawEngineManager extends EventEmitter {
           version: this.status.version,
           message: t('openClawPluginVerificationFailed', { error: pluginVerificationFailure }),
           canRetry: true,
+        });
+        return;
+      }
+
+      const cliFailure = extractOpenClawCliFailure('', recentOutput);
+      // A health-state write warning can accompany an unrelated fatal error.
+      // Only the CLI's actual cause or a thrown/startup-migration error qualifies.
+      const fatalSchemaLines = recentOutput.split(/\r?\n/).filter(line =>
+        !line.includes('Config health-state write failed:')
+        && /\bError:\s*SQLite schema|Failed migrating shared state database schema/.test(line)).join('\n');
+      const bindingFailure = extractOpenClawBindingSchemaFailure(cliFailure ?? fatalSchemaLines, this.stateDir);
+      if (code !== 0 && bindingFailure) {
+        this.clearScheduledGatewayRestart();
+        this.setStatus({
+          phase: OpenClawEnginePhase.Error, version: this.status.version, canRetry: true,
+          errorCode: OpenClawEngineErrorCode.StartupCompatibilityFailed,
+          message: bindingFailure,
         });
         return;
       }

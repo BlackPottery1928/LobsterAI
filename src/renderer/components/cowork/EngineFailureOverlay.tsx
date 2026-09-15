@@ -70,7 +70,7 @@ const EngineFailureOverlay: React.FC<EngineFailureOverlayProps> = ({
   };
 
   // Same repair flow as Settings > Agent Engine > Repair Startup: back up
-  // openclaw.json, regenerate config, restart the gateway.
+  // affected config/state and restart through the targeted recovery path.
   const handleQuickRepairGateway = async () => {
     if (isRepairingGateway || isRestartingGateway) return;
     setIsRepairingGateway(true);
