@@ -4,7 +4,9 @@ import path from 'path';
 import { stripVTControlCharacters } from 'util';
 import { z } from 'zod';
 
+import { OpenClawEngineErrorCode } from '../../shared/openclawEngine/constants';
 import { inspectOpenClawPath, logOpenClawConfigLockDiagnostics } from './openclawConfigDiagnostics';
+import { extractDreamingStartupFailure } from './openclawDreamingStartupFailure';
 import { extractOpenClawCliFailure } from './openclawStartupCompatibility';
 
 const LEGACY_SESSION_DOCTOR_TIMEOUT_MS = 300_000;
@@ -54,7 +56,7 @@ export type LegacySessionMigrationRunner = (
 export type LegacySessionMigrationResult =
   | { status: 'skipped'; reason: 'no-legacy-session-files' | 'missing-openclaw-cli' }
   | { status: 'migrated'; code: number | null; migratedPaths: string[] }
-  | { status: 'failed'; code: number | null; error: string };
+  | { status: 'failed'; code: number | null; error: string; errorCode?: OpenClawEngineErrorCode };
 
 function fileExists(filePath: string): boolean {
   try {
@@ -274,6 +276,12 @@ export async function migrateLegacySessionStorageWithDoctor(params: {
     }
     if (result.code !== 0 && !completedWithWarnings) {
       const failure = `OpenClaw legacy session migration failed with exit code ${result.code}.`;
+      const dreamingFailure = result.code !== null ? extractDreamingStartupFailure(result.stdout, result.stderr) : undefined;
+      if (dreamingFailure) {
+        console.error('[OpenClaw] Legacy session migration blocked by invalid Memory Core state:', dreamingFailure);
+        return { status: 'failed', code: result.code, error: dreamingFailure,
+          errorCode: OpenClawEngineErrorCode.MemoryDreamingMigrationFailed };
+      }
       const details = [
         failure,
         result.stderr ? `stderr tail:\n${tailLog(result.stderr)}` : '',

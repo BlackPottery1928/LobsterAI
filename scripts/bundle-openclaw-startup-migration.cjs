@@ -55,6 +55,7 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedE
       '#openclaw-repair-plugin-records': path.join(openclawSrc, 'src/plugins/installed-plugin-index-records.ts'),
       '#openclaw-repair-plugin-payload': path.join(openclawSrc, 'src/cli/update-cli/plugin-payload-validation.ts'),
       '#openclaw-repair-plugin-consent': path.join(openclawSrc, 'src/plugins/capability-consent.ts'),
+      '#openclaw-dreaming-workspaces': path.join(openclawSrc, 'src/memory-host-sdk/dreaming.ts'),
       '#openclaw-config-machine-state': path.join(openclawSrc, 'src/state/config-machine-state.ts'),
       '#openclaw-state-db': path.join(openclawSrc, 'src/state/openclaw-state-db.ts'),
       '#openclaw-state-schema': path.join(openclawSrc, 'src/state/openclaw-state-schema.ts'),

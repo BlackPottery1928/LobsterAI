@@ -66,6 +66,7 @@ export const OpenClawEngineErrorCode = {
   RuntimeFilesMissing: 'runtime_files_missing',
   /** A targeted startup migration/recovery failed; retain its source during Quick Repair. */
   StartupCompatibilityFailed: 'startup_compatibility_failed',
+  MemoryDreamingMigrationFailed: 'memory_dreaming_migration_failed',
 } as const;
 
 export type OpenClawEngineErrorCode =

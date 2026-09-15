@@ -211,6 +211,7 @@ describe('gateway terminal plugin verification failure', () => {
       gatewayRecentOutput: new WeakMap([[child, output.split('\n')]]),
       gatewayFailureByProcess: new WeakMap(),
       expectedGatewayExits: new WeakSet(),
+      gatewayReadyProcesses: new WeakSet(),
       gatewayRestartTimer: null,
       gatewayRestartWait: null,
       gatewayRestartAttempt: 0,
@@ -242,7 +243,7 @@ describe('gateway terminal plugin verification failure', () => {
     internals.gatewayRestartTimer = setTimeout(pendingRestart, 3_000);
     internals.gatewayRestartWait = { promise: Promise.resolve(true), resolve: resolveRetry };
 
-    child.emit('exit', 1);
+    child.emit('close', 1);
     await vi.advanceTimersByTimeAsync(120_000);
 
     expect(manager.getStatus()).toMatchObject({ phase: OpenClawEnginePhase.Error, canRetry: true });
@@ -260,7 +261,7 @@ describe('gateway terminal plugin verification failure', () => {
 
   test('retains automatic retries for plugin warnings followed by a transient crash', async () => {
     const { child, manager, start } = makeSupervisor('[config] warnings: plugins.allow: plugin not installed: qqbot\nPlugin download failed: ECONNRESET');
-    child.emit('exit', 1);
+    child.emit('close', 1);
     expect(manager.getStatus()).toMatchObject({ phase: OpenClawEnginePhase.Starting, canRetry: false });
     await vi.advanceTimersByTimeAsync(3_000);
     expect(start).toHaveBeenCalledExactlyOnceWith('auto-restart-after-crash');
@@ -269,7 +270,7 @@ describe('gateway terminal plugin verification failure', () => {
   test('keeps config-validation text inside a terminal plugin diagnostic in the plugin error', () => {
     const pluginDetail = '- Plugin "custom" failed: config validation failed: missing capability declaration';
     const { child, manager } = makeSupervisor(`${PLUGIN_FAILURE}\n${pluginDetail}`);
-    child.emit('exit', 1);
+    child.emit('close', 1);
     expect(manager.getStatus()).toMatchObject({ phase: OpenClawEnginePhase.Error, canRetry: true });
     expect(manager.getStatus().message).toContain(pluginDetail);
     expect(manager.getStatus().message).not.toContain('openclaw.json is invalid');
@@ -277,7 +278,7 @@ describe('gateway terminal plugin verification failure', () => {
 
   test('preserves the existing invalid-json error classification', () => {
     const { child, manager } = makeSupervisor('JSON5 parse failed: invalid character at 4:3 in openclaw.json');
-    child.emit('exit', 1);
+    child.emit('close', 1);
     expect(manager.getStatus()).toMatchObject({ phase: OpenClawEnginePhase.Error, canRetry: true });
     expect(manager.getStatus().message).toContain('openclaw.json is invalid');
     expect(manager.getStatus().message).not.toContain(PLUGIN_FAILURE);
