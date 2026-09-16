@@ -59,6 +59,7 @@ import type {
 } from '../types/cowork';
 import { OpenClawSessionKeepAlive as OpenClawSessionKeepAliveValues } from '../types/cowork';
 import Modal from './common/Modal';
+import DreamingRecoveryNotice from './cowork/DreamingRecoveryNotice';
 import DreamingSettingsSection from './cowork/DreamingSettingsSection';
 import EmbeddingSettingsSection from './cowork/EmbeddingSettingsSection';
 import DshExperimentalSettings from './DshExperimentalSettings';
@@ -5418,6 +5419,10 @@ const Settings: React.FC<SettingsProps> = ({
                     </div>
                   </div>
                 </section>
+
+                {openClawEngineStatus?.dreamingRecovery && (
+                  <DreamingRecoveryNotice summary={openClawEngineStatus.dreamingRecovery} />
+                )}
 
                 {openClawRepairResult && (
                   <div className={`rounded-lg border px-3 py-3 text-sm ${openClawRepairResult.success
