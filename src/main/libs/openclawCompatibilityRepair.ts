@@ -10,7 +10,6 @@ import {
 } from '../../shared/openclawEngine/repair';
 import { OpenClawStartupCompatibilityMode } from '../../shared/openclawEngine/startupCompatibility';
 import { OpenClawStartupMigrationStatus } from '../../shared/openclawEngine/startupMigration';
-import { preserveOpenClawConfigForStartupRecovery } from './openclawGatewayRepair';
 import { isOpenClawBindingSchemaFailure, runOpenClawStartupCompatibility } from './openclawStartupCompatibility';
 import type { StartupMigrationRunner } from './openclawStartupStateMigration';
 
@@ -120,11 +119,9 @@ export async function runOpenClawDoctorRepair(params: {
   runtimeRoot: string; stateDir: string; configPath: string; backupDir: string;
   electronNodeRuntimePath: string; env: NodeJS.ProcessEnv; runner?: StartupMigrationRunner;
 }): Promise<{ code: number | null }> {
-  // Doctor removes retired JSON fields. Verify the canonical discovery value
-  // first, while the pre-Doctor snapshot and its source are still available.
-  if (preserveOpenClawConfigForStartupRecovery(params.configPath)) {
-    await withBindingRecovery(params, () => runStartupCompatibilityRepair(params, OpenClawStartupCompatibilityMode.MigrateConfig));
-  }
+  // Migrate the shared schema before importing config into it. Doctor may then
+  // remove retired JSON fields only after their canonical values are preserved.
+  await withBindingRecovery(params, () => runStartupCompatibilityRepair(params, OpenClawStartupCompatibilityMode.PrepareStartup));
   const result = await (params.runner ?? runRepair)(params.electronNodeRuntimePath, [
     path.join(params.runtimeRoot, 'openclaw.mjs'), ...OPENCLAW_DOCTOR_REPAIR_ARGS,
   ], {

@@ -1,4 +1,4 @@
-// This entry runs only for a legacy config field or a matching startup failure.
+// Shared startup/repair preparation and narrowly scoped failure recovery.
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -10,6 +10,7 @@ import { withLegacyMigrationStateLock } from '#openclaw-migration-lock';
 import { recoverRetiredBindingColumns } from './openclaw-binding-schema-recovery.mjs';
 import { resolveMemoryDreamingWorkspaces } from '#openclaw-dreaming-workspaces';
 import { recoverLegacyDreamingState } from './openclaw-dreaming-state-recovery.mjs';
+import { migrateSharedStateSchema } from './openclaw-state-schema-migration.mjs';
 import { DREAMING_RECOVERY_REPORT_VERSION, OpenClawDreamingRecoveryOutcome } from '../src/shared/openclawEngine/dreamingRecovery.ts';
 import {
   OPENCLAW_LEGACY_DISCOVERY_KEY,
@@ -29,9 +30,21 @@ const report = {
 const machineStateKey = `plugins.${OPENCLAW_LEGACY_DISCOVERY_KEY}`;
 const isDiscoveryMode = value => Object.values(OpenClawBundledDiscoveryMode).includes(value);
 
-async function migrateConfig({ stateDir, configPath, env }) {
-  const raw = fs.readFileSync(configPath, 'utf8');
-  const config = JSON.parse(raw);
+async function migrateConfig({ stateDir, configPath, env, allowUnreadable = false }) {
+  let raw;
+  let config;
+  try {
+    raw = fs.readFileSync(configPath, 'utf8');
+    config = JSON.parse(raw);
+  } catch (error) {
+    // Preparation preserves malformed/missing config for Doctor or gateway validation.
+    if (allowUnreadable) return [];
+    throw error;
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    if (allowUnreadable) return [];
+    throw new Error('Startup configuration must be an OpenClaw config object.');
+  }
   if (!Object.hasOwn(config.plugins ?? {}, OPENCLAW_LEGACY_DISCOVERY_KEY)) return [];
   const value = config.plugins[OPENCLAW_LEGACY_DISCOVERY_KEY];
   if (!isDiscoveryMode(value)) throw new Error('Legacy plugins.bundledDiscovery has an unsupported value.');
@@ -95,7 +108,12 @@ try {
           report.changes.push(`Backed up and isolated ${report.dreaming.files.length} invalid legacy Memory Core JSON files.`);
         }
       } else {
-        report.changes.push(...await migrateConfig({ stateDir, configPath, env }));
+        if (mode === OpenClawStartupCompatibilityMode.PrepareStartup) {
+          report.changes.push(...await migrateSharedStateSchema({ stateDir, configPath, env, backups: report.backups }));
+        }
+        report.changes.push(...await migrateConfig({
+          stateDir, configPath, env, allowUnreadable: mode === OpenClawStartupCompatibilityMode.PrepareStartup,
+        }));
       }
       return { changes: [], warnings: [] };
     },
