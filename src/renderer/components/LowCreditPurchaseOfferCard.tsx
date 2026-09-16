@@ -1,5 +1,7 @@
 import { XMarkIcon } from '@heroicons/react/24/outline';
+import { AuthSubscriptionStatus } from '@shared/auth/constants';
 import React, { useEffect, useState } from 'react';
+import { useSelector } from 'react-redux';
 
 import { getPortalPricingUrl } from '../services/endpoints';
 import { i18nService } from '../services/i18n';
@@ -9,6 +11,7 @@ import {
   getPurchaseOfferRemainingMs,
   isPurchaseOfferActive,
 } from '../services/lowCreditPurchaseOffer';
+import type { RootState } from '../store';
 import type { LowCreditPurchaseOffer } from '../store/slices/authSlice';
 import PurchaseOfferCountdown from './PurchaseOfferCountdown';
 
@@ -31,6 +34,9 @@ const LowCreditPurchaseOfferCard: React.FC<LowCreditPurchaseOfferCardProps> = ({
   className = '',
   style,
 }) => {
+  const hasActiveSubscription = useSelector((state: RootState) => (
+    state.auth.quota?.subscriptionStatus === AuthSubscriptionStatus.Active
+  ));
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const currentTime = Date.now();
@@ -46,6 +52,9 @@ const LowCreditPurchaseOfferCard: React.FC<LowCreditPurchaseOfferCardProps> = ({
   const isFirstPurchase = active && variant === 'first';
   const subscriptionRate = active ? getPurchaseOfferDiscountRate(offer, 'subscription') : null;
   const boostRate = active ? getPurchaseOfferDiscountRate(offer, 'boost_pack') : null;
+  const boostOnlyOffer = active && offer.eligibleProducts?.includes('boost_pack') === true
+    && !offer.eligibleProducts.includes('subscription');
+  const showSubscriptionButton = !hasActiveSubscription && !boostOnlyOffer;
   const returningRate = boostRate ?? subscriptionRate;
   const showReturningOffer = active && !isFirstPurchase && returningRate !== null;
   const balance = Math.max(0, offer.creditsRemaining ?? 0);
@@ -114,24 +123,28 @@ const LowCreditPurchaseOfferCard: React.FC<LowCreditPurchaseOfferCardProps> = ({
         <button
           type="button"
           onClick={() => void openPortal('boost')}
-          className="min-h-8 min-w-0 flex-1 rounded-full border border-black/15 px-2 py-1 text-xs font-medium leading-5 transition-colors hover:bg-black/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:border-white/15 dark:hover:bg-white/[0.05]"
+          className={`min-h-8 min-w-0 flex-1 rounded-full px-2 py-1 text-xs font-medium leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${showSubscriptionButton
+            ? 'border border-black/15 transition-colors hover:bg-black/[0.03] dark:border-white/15 dark:hover:bg-white/[0.05]'
+            : 'bg-[#1b1d1e] text-white transition-opacity hover:opacity-85 dark:bg-foreground dark:text-background'}`}
         >
           {isFirstPurchase && boostRate !== null
             ? i18nService.t('lowCreditOfferDiscountRecharge').replace('{discount}', formatPurchaseOfferDiscount(boostRate))
             : i18nService.t('lowCreditOfferRecharge')}
         </button>
-        <button
-          type="button"
-          onClick={() => void openPortal('subscription')}
-          className="min-h-8 min-w-0 flex-[1.1] rounded-full bg-[#1b1d1e] px-2 py-1 text-xs font-medium leading-5 text-white transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:bg-foreground dark:text-background"
-        >
-          {isFirstPurchase && subscriptionRate !== null && (
-            <span className="mr-1 text-[#ff4a28]">
-              {i18nService.t('lowCreditOfferDiscount').replace('{discount}', formatPurchaseOfferDiscount(subscriptionRate))}
-            </span>
-          )}
-          {i18nService.t('lowCreditOfferUpgrade')}
-        </button>
+        {showSubscriptionButton && (
+          <button
+            type="button"
+            onClick={() => void openPortal('subscription')}
+            className="min-h-8 min-w-0 flex-[1.1] rounded-full bg-[#1b1d1e] px-2 py-1 text-xs font-medium leading-5 text-white transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:bg-foreground dark:text-background"
+          >
+            {isFirstPurchase && subscriptionRate !== null && (
+              <span className="mr-1 text-[#ff4a28]">
+                {i18nService.t('lowCreditOfferDiscount').replace('{discount}', formatPurchaseOfferDiscount(subscriptionRate))}
+              </span>
+            )}
+            {i18nService.t(isFirstPurchase ? 'lowCreditOfferUpgrade' : 'lowCreditOfferSubscribe')}
+          </button>
+        )}
       </div>
     </div>
   );
