@@ -281,6 +281,7 @@ import {
 import { registerSessionDiagnosticsHandlers } from './ipcHandlers/sessionDiagnostics';
 import { registerSiteIpcHandlers } from './ipcHandlers/site';
 import { registerSkillHandlers } from './ipcHandlers/skills';
+import { registerSubscriptionTrialIpcHandlers } from './ipcHandlers/subscriptionTrial';
 import { LibraryIndexService } from './library/libraryIndexService';
 import { registerLibraryIpcHandlers } from './library/libraryIpc';
 import { LibraryLocalStore } from './library/libraryLocalStore';
@@ -7124,6 +7125,17 @@ if (!gotTheLock) {
   });
 
   registerActivityIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+    getServerBaseUrl: getServerApiBaseUrl,
+    getClientVersion: () => app.getVersion(),
+    platform: process.platform,
+    hasAuthTokens: () => getAuthTokens() !== null,
+    fetchPublic: (url, options) => net.fetch(url, options),
+    fetchWithAuth,
+  });
+
+  registerSubscriptionTrialIpcHandlers({
     ipcMain,
     getMainWindow: () => mainWindow,
     getServerBaseUrl: getServerApiBaseUrl,

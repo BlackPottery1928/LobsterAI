@@ -72,6 +72,10 @@ export const getPortalPricingUrl = (
   const suffix = queryString ? `?${queryString}` : '';
   return `${getPortalBase()}/pricing${suffix}`;
 };
+export const getPortalSubscriptionTrialUrl = (campaignCode: string) => (
+  `${getPortalBase()}/pricing?tab=subscription&trialCampaign=${encodeURIComponent(campaignCode)}`
+);
+
 export const getPortalProfileUrl = () => `${getPortalBase()}/profile`;
 export const getPortalCreditsDetailUrl = () => `${getPortalBase()}/profile/detail`;
 export const getPortalRechargeUrl = () => `${getPortalBase()}/`;

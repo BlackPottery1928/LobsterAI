@@ -6,6 +6,13 @@ export type LanguageType = 'zh' | 'en';
 // 语言文本映射
 const translations: Record<LanguageType, Record<string, string>> = {
   zh: {
+    subscriptionTrialTitle: '¥0.01 解锁 1000 积分',
+    subscriptionTrialSubtitle: '限时标准版体验',
+    subscriptionTrialBenefits: '畅享 7 天标准版权益。支付当天不计，活动积分于第 7 天日末失效。',
+    subscriptionTrialRules: '每个账号每活动限成功购买一次。体验期内暂不支持套餐升级。',
+    subscriptionTrialAction: '立即解锁',
+    subscriptionTrialRenewal: '第 7 天自动续订 ¥49/月，可随时取消自动续订',
+
     coworkNativeQuestionOther: '其他回答',
     coworkNativeQuestionAnswer: '请输入你的回答',
     coworkNativeQuestionSubmitFailed: '回答未能提交，请重试。',
@@ -3890,6 +3897,13 @@ const translations: Record<LanguageType, Record<string, string>> = {
     emailDeleting: '删除中...',
   },
   en: {
+    subscriptionTrialTitle: '1,000 credits for ¥0.01',
+    subscriptionTrialSubtitle: 'Limited-time Standard trial',
+    subscriptionTrialBenefits: 'Enjoy 7 days of Standard benefits. The payment day is excluded; trial credits expire at the end of day 7 (China time).',
+    subscriptionTrialRules: 'One purchase per account per campaign. Plan upgrades are unavailable during the trial.',
+    subscriptionTrialAction: 'Unlock now',
+    subscriptionTrialRenewal: 'Renews on day 7 at ¥49/month. Cancel auto-renewal anytime.',
+
     coworkNativeQuestionOther: 'Other answer',
     coworkNativeQuestionAnswer: 'Enter your answer',
     coworkNativeQuestionSubmitFailed: 'Your answer could not be submitted. Please try again.',

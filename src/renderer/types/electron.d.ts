@@ -172,6 +172,7 @@ import type {
   SkinGetActiveResponse,
   SkinListResponse,
 } from '../../shared/skin/types';
+import type { SubscriptionTrialBridge } from '../../shared/subscriptionTrial/constants';
 import type { CoworkTempDirPreview } from './cowork';
 interface ApiResponse {
   ok: boolean;
@@ -1988,6 +1989,7 @@ interface IElectronAPI {
       error?: string;
     }>;
   };
+  subscriptionTrial: SubscriptionTrialBridge;
   activity: {
     getSlot: (
       input: ActivityHostGetSlotInput,

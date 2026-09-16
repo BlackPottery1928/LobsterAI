@@ -49,6 +49,7 @@ import { SkillsAndConnectorsView, SkillsConnectorsSection } from './components/s
 import SkinBackdrop, { SkinBackdropVariant } from './components/skin/SkinBackdrop';
 import SkinPresentationScope from './components/skin/SkinPresentationScope';
 import StartupCreditCampaign from './components/StartupCreditCampaign';
+import SubscriptionTrialCampaign from './components/SubscriptionTrialCampaign';
 import Toast, { type ToastEventDetail } from './components/Toast';
 import AppUpdateBadge from './components/update/AppUpdateBadge';
 import AppUpdateBlockingPanel from './components/update/AppUpdateBlockingPanel';
@@ -2097,6 +2098,10 @@ const App: React.FC = () => {
           onClose={() => setToastMessage(null)}
         />
       )}
+      <SubscriptionTrialCampaign
+        privacyAgreed={privacyAgreed}
+        enabled={privacyAgreed === true && !isEnterpriseAccount && !isOverlayActive && hasResolvedEngineStartupOverlayState && !isEngineStartupOverlayVisible}
+      />
       <StartupCreditCampaign
         enabled={privacyAgreed === true && !isEnterpriseAccount}
       />
