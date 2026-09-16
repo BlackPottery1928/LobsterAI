@@ -4,6 +4,8 @@ import {
   type AuthSessionStatus as AuthSessionStatusValue,
 } from '@shared/auth/constants';
 
+import { type CreditQuotaSnapshot, getCreditQuotaSnapshot } from '../../services/lowCreditPurchaseOffer';
+
 export interface UserProfile {
   yid: string;
   nickname: string;
@@ -120,6 +122,7 @@ interface AuthState {
   user: UserProfile | null;
   quota: UserQuota | null;
   purchaseOffer: LowCreditPurchaseOffer | null;
+  creditQuotaSnapshot: CreditQuotaSnapshot | null;
   profileSummary: ProfileSummary | null;
   ownerAccountKey: string | null;
   accountGeneration: number;
@@ -132,6 +135,7 @@ const initialState: AuthState = {
   user: null,
   quota: null,
   purchaseOffer: null,
+  creditQuotaSnapshot: null,
   profileSummary: null,
   ownerAccountKey: null,
   accountGeneration: 0,
@@ -154,6 +158,7 @@ const authSlice = createSlice({
         state.accountGeneration += 1;
         state.profileSummary = null;
         state.purchaseOffer = null;
+        state.creditQuotaSnapshot = null;
       }
       state.isLoggedIn = true;
       state.isLoading = false;
@@ -162,6 +167,8 @@ const authSlice = createSlice({
       state.quota = action.payload.quota;
       if (action.payload.purchaseOffer !== undefined) {
         state.purchaseOffer = action.payload.purchaseOffer;
+        state.creditQuotaSnapshot = getCreditQuotaSnapshot(action.payload.purchaseOffer)
+          ?? state.creditQuotaSnapshot;
       }
       state.ownerAccountKey = action.payload.ownerAccountKey;
     },
@@ -175,6 +182,7 @@ const authSlice = createSlice({
       state.user = null;
       state.quota = null;
       state.purchaseOffer = null;
+      state.creditQuotaSnapshot = null;
       state.profileSummary = null;
       state.ownerAccountKey = null;
     },
@@ -182,6 +190,7 @@ const authSlice = createSlice({
       state.accountGeneration += 1;
       state.quota = null;
       state.purchaseOffer = null;
+      state.creditQuotaSnapshot = null;
       state.profileSummary = null;
     },
     setAuthExpired(state) {
@@ -194,6 +203,7 @@ const authSlice = createSlice({
       state.user = null;
       state.quota = null;
       state.purchaseOffer = null;
+      state.creditQuotaSnapshot = null;
       state.profileSummary = null;
       state.ownerAccountKey = null;
     },
@@ -216,11 +226,22 @@ const authSlice = createSlice({
     updateQuota(state, action: PayloadAction<UserQuota>) {
       state.quota = action.payload;
     },
-    updatePurchaseOffer(state, action: PayloadAction<LowCreditPurchaseOffer | null>) {
-      state.purchaseOffer = action.payload;
+    updatePurchaseOffer(state, action: PayloadAction<{
+      purchaseOffer: LowCreditPurchaseOffer | null;
+      profileSummary?: ProfileSummary | null;
+    }>) {
+      const { purchaseOffer, profileSummary } = action.payload;
+      state.purchaseOffer = purchaseOffer;
+      // Keep the last confirmed presentation when neither endpoint has a balance.
+      state.creditQuotaSnapshot = getCreditQuotaSnapshot(purchaseOffer, profileSummary)
+        ?? state.creditQuotaSnapshot;
+      if (profileSummary) state.profileSummary = profileSummary;
     },
     setProfileSummary(state, action: PayloadAction<ProfileSummary>) {
       state.profileSummary = action.payload;
+      // Bootstrap after login when the offer endpoint could not supply a balance.
+      // Later quota refreshes publish their offer and balance together instead.
+      state.creditQuotaSnapshot ??= getCreditQuotaSnapshot(state.purchaseOffer, action.payload);
     },
     clearProfileSummary(state) {
       state.profileSummary = null;

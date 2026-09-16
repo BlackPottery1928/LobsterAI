@@ -1,4 +1,21 @@
-import type { LowCreditPurchaseOffer } from '../store/slices/authSlice';
+import type { LowCreditPurchaseOffer, ProfileSummary } from '../store/slices/authSlice';
+
+export interface CreditQuotaSnapshot {
+  creditsRemaining: number;
+  purchaseOffer: LowCreditPurchaseOffer | null;
+}
+
+export const getCreditQuotaSnapshot = (
+  purchaseOffer: LowCreditPurchaseOffer | null | undefined,
+  profileSummary?: ProfileSummary | null,
+): CreditQuotaSnapshot | null => {
+  // Both endpoints include all personal credit sources; auth.quota may not.
+  const creditsRemaining = [purchaseOffer?.creditsRemaining, profileSummary?.totalCreditsRemaining]
+    .find(value => typeof value === 'number' && Number.isFinite(value));
+  return typeof creditsRemaining === 'number'
+    ? { creditsRemaining: Math.max(0, creditsRemaining), purchaseOffer: purchaseOffer ?? null }
+    : null;
+};
 
 export const isPurchaseOfferActive = (
   offer: LowCreditPurchaseOffer | null | undefined,

@@ -25,6 +25,7 @@ import {
   isPurchaseOfferActive,
 } from '../../services/lowCreditPurchaseOffer';
 import type { RootState } from '../../store';
+import type { LowCreditPurchaseOffer } from '../../store/slices/authSlice';
 import type { Artifact } from '../../types/artifact';
 import type { CoworkMessage, CoworkMessageMetadata } from '../../types/cowork';
 import { revealLocalPathWithToast } from '../../utils/localFileActions';
@@ -262,8 +263,7 @@ const logCreditQuotaBannerEvent = (
   }
 };
 
-const CreditQuotaExhaustedBanner: React.FC = () => {
-  const offer = useSelector((state: RootState) => state.auth.purchaseOffer);
+const CreditQuotaExhaustedBanner: React.FC<{ offer: LowCreditPurchaseOffer | null }> = ({ offer }) => {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const currentTime = Date.now();
@@ -531,11 +531,16 @@ const AssistantTurnBlock: React.FC<{
   isStreamingTurn = false,
   hasRunningSubagents = false,
 }) => {
+  const creditQuotaSnapshot = useSelector((state: RootState) => state.auth.creditQuotaSnapshot);
+  const hideCreditQuotaBanner = !creditQuotaSnapshot || creditQuotaSnapshot.creditsRemaining > 0;
   const [artifactCardsExpanded, setArtifactCardsExpanded] = useState(false);
   const [processExpanded, setProcessExpanded] = useState(false);
   const visibleAssistantItems = useMemo(
-    () => getVisibleAssistantItems(turn.assistantItems),
-    [turn.assistantItems],
+    () => getVisibleAssistantItems(turn.assistantItems).filter(item => {
+      if (!hideCreditQuotaBanner || item.type !== 'system') return true;
+      return !isCreditQuotaExhaustedKey(getSystemMessageErrorKey(item.message, item.message.content));
+    }),
+    [turn.assistantItems, hideCreditQuotaBanner],
   );
   const consolidatedItems = useMemo(
     () => consolidateMediaPolling(visibleAssistantItems),
@@ -604,7 +609,9 @@ const AssistantTurnBlock: React.FC<{
     const normalizedContent = getScheduledReminderDisplayText(rawContent) ?? rawContent;
     const errorKey = getSystemMessageErrorKey(message, normalizedContent);
     if (isCreditQuotaExhaustedKey(errorKey)) {
-      return <CreditQuotaExhaustedBanner />;
+      return hideCreditQuotaBanner
+        ? null
+        : <CreditQuotaExhaustedBanner offer={creditQuotaSnapshot.purchaseOffer} />;
     }
     const displayContent = getSystemMessageDisplayContent(message, normalizedContent);
     const content = mapDisplayText ? mapDisplayText(displayContent) : displayContent;
@@ -894,6 +901,10 @@ const AssistantTurnBlock: React.FC<{
     });
     setProcessExpanded(nextExpanded);
   };
+
+  if (renderChunks.length === 0 && !showActivityIndicator && !artifacts?.length) {
+    return null;
+  }
 
   return (
     <div className={`py-2 ${COWORK_DETAIL_GUTTER_CLASS}`}>
