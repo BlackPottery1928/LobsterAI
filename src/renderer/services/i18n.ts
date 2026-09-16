@@ -2090,6 +2090,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkErrorFreeQuotaExhausted:
       '积分额度已用完，请升级套餐后继续使用。[立即升级/充值](https://lobsterai.youdao.com/portal#/pricing)',
     coworkErrorInsufficientBalance: 'API 余额不足，请充值后重试。',
+    coworkErrorModelServiceUnavailable: '该模型服务暂不可用，请切换模型或稍后重试。',
+    coworkErrorProviderCooldown: '模型凭据暂时处于冷却期，请稍后重试或切换其他服务商。',
     coworkCreditQuotaBannerTitle: '积分已用尽，请及时充值。',
     coworkCreditQuotaBannerDescription: '已达到使用上限，需购买 token 继续使用。',
     coworkCreditQuotaBannerAction: '去购买',
@@ -6088,6 +6090,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkErrorFreeQuotaExhausted:
       'Your credits have been used up. Upgrade your plan to continue.\n\n[Upgrade or recharge](https://lobsterai.youdao.com/portal#/pricing)',
     coworkErrorInsufficientBalance: 'Insufficient API balance. Please top up and try again.',
+    coworkErrorModelServiceUnavailable: 'This model service is temporarily unavailable. Switch models or try again later.',
+    coworkErrorProviderCooldown: 'The model credentials are temporarily in cooldown. Try again later or switch providers.',
     coworkCreditQuotaBannerTitle: 'Credits used up. Please recharge.',
     coworkCreditQuotaBannerDescription: 'You have reached the usage limit. Purchase tokens to continue.',
     coworkCreditQuotaBannerAction: 'Buy',

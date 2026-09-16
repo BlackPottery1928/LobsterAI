@@ -1678,10 +1678,17 @@ function classifyOpenClawSafeRuntimeErrorMetadata(
   // rate_limit because it also says "too many requests" or "throttled". Let
   // the high-confidence capacity signal in the preserved raw preview win after
   // retaining LobsterAI's explicit HTTP 403 access-denial rule above.
-  const rawErrorClassifiedKey = metadata.rawErrorPreview
-    ? classifyErrorKey(metadata.rawErrorPreview)
-    : null;
-  if (rawErrorClassifiedKey === CoworkErrorI18nKey.ModelOverloaded) {
+  const rawErrorClassifiedKey = classifyErrorKey([
+    metadata.errorCode ?? metadata.code,
+    metadata.rawErrorPreview,
+    metadata.providerErrorMessagePreview,
+  ].filter(Boolean).join('\n'), metadata.provider);
+  if (
+    rawErrorClassifiedKey === CoworkErrorI18nKey.ModelOverloaded
+    || rawErrorClassifiedKey === CoworkErrorI18nKey.ModelServiceUnavailable
+    || rawErrorClassifiedKey === CoworkErrorI18nKey.ProviderCooldown
+    || rawErrorClassifiedKey === CoworkErrorI18nKey.QuotaExhausted
+  ) {
     return rawErrorClassifiedKey;
   }
 
@@ -1692,7 +1699,8 @@ function classifyOpenClawSafeRuntimeErrorMetadata(
 
   const failoverReason = metadata.failoverReason?.trim();
   if (failoverReason && COWORK_ERROR_KEY_BY_OPENCLAW_FAILOVER_REASON[failoverReason]) {
-    return COWORK_ERROR_KEY_BY_OPENCLAW_FAILOVER_REASON[failoverReason];
+    return classifyErrorKey(failoverReason, metadata.provider)
+      ?? COWORK_ERROR_KEY_BY_OPENCLAW_FAILOVER_REASON[failoverReason];
   }
 
   for (const candidate of [
@@ -1702,7 +1710,7 @@ function classifyOpenClawSafeRuntimeErrorMetadata(
     metadata.providerErrorType,
   ]) {
     if (!candidate) continue;
-    const classifiedKey = classifyErrorKey(candidate);
+    const classifiedKey = classifyErrorKey(candidate, metadata.provider);
     if (classifiedKey) return classifiedKey;
   }
 
@@ -1759,7 +1767,7 @@ export function resolveOpenClawRuntimeError(
   const metadataClassifiedKey = classifyOpenClawSafeRuntimeErrorMetadata(metadata);
   const explicitEnterpriseQuotaError = resolveEnterpriseQuotaError(
     metadata?.errorCode ?? metadata?.code,
-    normalized,
+    `${normalized}\n${metadata?.rawErrorPreview ?? ''}`,
   );
   if (explicitEnterpriseQuotaError) {
     consumeRecentOpenClawTokenProxyQuotaError();
@@ -1769,13 +1777,22 @@ export function resolveOpenClawRuntimeError(
     );
   }
 
-  // OpenClaw's friendly wrapper may already say "rate limit" even when its
-  // preserved raw metadata identifies a provider-capacity failure.
-  if (metadataClassifiedKey === CoworkErrorI18nKey.ModelOverloaded) {
+  const classifiedKey = metadataClassifiedKey === CoworkErrorI18nKey.QuotaExhausted
+    ? metadataClassifiedKey
+    : classifyErrorKey(normalized, metadata?.provider);
+  // Preserve actual user quota errors; otherwise let upstream service/cooldown
+  // evidence override OpenClaw's generic billing or rate-limit wrapper.
+  if (
+    classifiedKey !== CoworkErrorI18nKey.QuotaExhausted
+    && (
+      metadataClassifiedKey === CoworkErrorI18nKey.ModelOverloaded
+      || metadataClassifiedKey === CoworkErrorI18nKey.ModelServiceUnavailable
+      || metadataClassifiedKey === CoworkErrorI18nKey.ProviderCooldown
+    )
+  ) {
     consumeRecentOpenClawTokenProxyQuotaError();
     return buildResolvedRuntimeError(t(metadataClassifiedKey));
   }
-  const classifiedKey = classifyErrorKey(normalized);
 
   if (classifiedKey) {
     if (
