@@ -84,6 +84,7 @@ export const LogReporterAction = {
   PromptTemplateAction: 'lobsterai_prompt_template_action',
   ShortcutSettingChanged: 'lobsterai_shortcut_setting_changed',
   SidebarAction: 'lobsterai_sidebar_action',
+  SubscriptionTrialUnlockClick: 'lobsterai_subscription_trial_unlock_click',
   SkillAction: 'lobsterai_skill_action',
   SkillEnabled: 'lobsterai_skill_enabled',
   ScheduledTaskAction: 'lobsterai_scheduled_task_action',

@@ -72,9 +72,36 @@ export const getPortalPricingUrl = (
   const suffix = queryString ? `?${queryString}` : '';
   return `${getPortalBase()}/pricing${suffix}`;
 };
-export const getPortalSubscriptionTrialUrl = (campaignCode: string) => (
-  `${getPortalBase()}/pricing?tab=subscription&trialCampaign=${encodeURIComponent(campaignCode)}`
-);
+const PENNY_BANNER_TARGET = 'penny';
+export const getPortalSubscriptionTrialUrl = (campaignCode?: string) => {
+  const query = new URLSearchParams({ tab: 'subscription', banner: PENNY_BANNER_TARGET });
+  if (campaignCode) query.set('trialCampaign', campaignCode);
+  return `${getPortalBase()}/pricing?${query}`;
+};
+
+// Sidebar banners have no campaign type field. Preserve configured destinations and
+// attribution, adding the slide target only to Portal links for the penny offer.
+export const getClientBannerTargetUrl = (linkUrl: string, description: string): string => {
+  const describesTrial = /(?:^|[^\d])0\.01(?:[^\d]|$)/.test(description);
+  if (!linkUrl) return describesTrial ? getPortalSubscriptionTrialUrl() : getPortalInvitationUrl();
+  try {
+    const url = new URL(linkUrl);
+    if (![new URL(PORTAL_BASE_TEST).origin, new URL(PORTAL_BASE_PROD).origin].includes(url.origin)) return linkUrl;
+    const hashRoute = url.hash.startsWith('#/');
+    const route = new URL(hashRoute ? url.hash.slice(1) : url.pathname + url.search, url.origin);
+    const isPricing = hashRoute
+      ? ['/', '/pricing'].includes(route.pathname)
+      : ['/', '/pricing', '/portal', '/portal/'].includes(route.pathname);
+    if (!isPricing || !(describesTrial || route.searchParams.has('trialCampaign') || route.searchParams.get('banner') === PENNY_BANNER_TARGET)) return linkUrl;
+    route.searchParams.set('banner', PENNY_BANNER_TARGET);
+    route.searchParams.set('tab', 'subscription');
+    if (hashRoute) url.hash = route.pathname + route.search;
+    else url.search = route.search;
+    return url.toString();
+  } catch {
+    return linkUrl;
+  }
+};
 
 export const getPortalProfileUrl = () => `${getPortalBase()}/profile`;
 export const getPortalCreditsDetailUrl = () => `${getPortalBase()}/profile/detail`;

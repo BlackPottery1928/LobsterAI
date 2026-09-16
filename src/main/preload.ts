@@ -128,7 +128,7 @@ import type {
   SkinGetActiveResponse,
   SkinListResponse,
 } from '../shared/skin/types';
-import { SubscriptionTrialIpc, type SubscriptionTrialPopupInput } from '../shared/subscriptionTrial/constants';
+import { SubscriptionTrialIpc } from '../shared/subscriptionTrial/constants';
 import { NimQrLoginIpc } from './ipcHandlers/nimQrLogin';
 import { OpenClawSessionIpc } from './openclawSession/constants';
 import { OpenClawSessionPolicyIpc } from './openclawSessionPolicy/constants';
@@ -1085,7 +1085,6 @@ contextBridge.exposeInMainWorld('electron', {
   },
   subscriptionTrial: {
     status: () => ipcRenderer.invoke(SubscriptionTrialIpc.Status),
-    claimPopup: (input: SubscriptionTrialPopupInput) => ipcRenderer.invoke(SubscriptionTrialIpc.ClaimPopup, input),
   },
   activity: {
     getSlot: (input: ActivityHostGetSlotInput) =>

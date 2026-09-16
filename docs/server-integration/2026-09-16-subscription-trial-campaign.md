@@ -21,7 +21,7 @@ Server、Portal、Electron 均从各自 `feat/low-credit-purchase-offer` 创建 
 
 先执行 Server `sql/V91__subscription_trial_campaign.sql`，无外键、无历史数据改写。
 
-新增 `subscription_trial_participations`（pending/active/converted/refunded，成功时间永久保留）、`subscription_trial_popup_days`（账号、活动、北京时间日期唯一）和 `payment_orders.subscription_trial_id`。
+新增 `subscription_trial_participations`（pending/active/converted/refunded，成功时间永久保留）和 `payment_orders.subscription_trial_id`。
 
 1000 积分复用 `invitation_user_reward_credits`，类型 campaign，来源 `subscription_trial:<participationId>`，关联 `reward_credit_id`；不混入 monthly_credits。
 
@@ -118,15 +118,19 @@ Portal 支持 Cookie/Session（`credentials: include`）及现有 JWT Bearer；E
 
 canUpgrade=false 时升级按钮置灰，说明“体验期内暂不支持套餐升级”。续费成功或体验到期后刷新恢复。即使活动配置关闭，已生效的体验标识与限制仍有效。
 
-### POST /api/subscription-trial/popup/claim
+### 客户端本地弹窗状态
 
-登录后使用，仅控制客户端弹窗频率，不预占购买资格：
+服务端仅提供活动状态和购买资格，不提供弹窗领取接口，不记录曝光日期。每日一次针对同一客户端，匿名、登录和切换账号共用同一份本地记录，不做跨设备同步。
+
+复用广告位的 `localStore`（Electron 本地存储），key 为 `subscription_trial.client_popup.v1:<testMode>:<campaignCode>`：
 
 ```json
-{ "campaignCode": "standard_trial_2026_09", "alreadyShown": false }
+{ "nextShowAt": 1789574400000, "expiresAt": 1790784000000 }
 ```
 
-返回活动状态及 showPopup。北京时间每账号每活动每天首个请求可为 true，同日其他设备为 false。匿名客户端按本地设备日期存储；登录时如果匿名已展示，传 alreadyShown=true 合并当天记录，并始终返回 false。显示即计入每日一次，手动关闭、打开购买页不再触发。
+真正展示后保存 nextShowAt（北京时间次日零点）和 expiresAt（活动截止时间）。当天手动关闭、购买跳转、登录退出、账号切换、客户端重启均不重置次数。不同客户端独立计算。活动循环只更新倒计时，不影响本地频控。
+
+本地根据服务端校准时间启动截止定时器；活动到期自动隐藏，不等待下一次接口轮询。客户端从休眠、后台恢复时立即校验本地截止时间；订阅状态变为 active 时立即隐藏。后续状态查询只用于资格及配置同步，不写任何服务端弹窗记录。
 
 ### 错误码
 
@@ -145,14 +149,34 @@ PricingView 挂载独立活动横幅，保留既有低余额优惠、充值活�
 
 新增独立 `subscriptionTrial` IPC，仅允许主窗口主 frame 调用，API 基址复用主进程端点配置。响应失败保持不展示，不把认证失败降为匿名活动。
 
-新装用户完成引导和登录后展示；完成引导但未登录的状态持久保存，下次启动仍等待首次登录。已有匿名用户按设备本地北京时间日期频控；登录后合并匿名记录到服务端账号，跨设备账号频控由唯一键保障。
+新装用户完成引导和登录后展示；完成引导但未登录的状态持久保存，下次启动仍等待首次登录。未登录与已登录非订阅用户均由本客户端的本地记录按北京时间每日频控；活动到期通过本地定时器自动消失。
 
-活动弹窗避让引导、引擎启动、更新、权限及已有公共 Modal/对话框；其他弹窗关闭后再显示。身份变更时丢弃过期异步响应，团队隐藏，切回个人重新拉取。购买通过系统浏览器进入 `#/pricing?tab=subscription&trialCampaign=<code>`，保留 Portal 自身登录与协议确认。
+活动弹窗避让引导、引擎启动、更新、权限及已有公共 Modal/对话框；其他弹窗关闭后再显示。身份变更时丢弃过期异步响应，团队隐藏，切回个人重新拉取。购买通过系统浏览器进入 `#/pricing?tab=subscription&banner=penny&trialCampaign=<code>`，保留 Portal 自身登录与协议确认。
 
 ## 验证与发布
 
-Java 定向构建覆盖配置合法性、匿名/团队/订阅资格、购买成功后退款不恢复资格、每日频控及匿名合并、循环不重置、重复回调发放、重复订单、正常套餐绕过拦截、取消续费后升级限制、关联退款、零月度积分、首次扣款日期及已有积分到期排序/续费测试。
+Java 定向构建覆盖配置合法性、匿名/团队/订阅资格、购买成功后退款不恢复资格、循环不重置、重复回调发放、重复订单、正常套餐绕过拦截、取消续费后升级限制、关联退款、零月度积分、首次扣款日期及已有积分到期排序/续费测试。
 
 Portal 和 Electron 按 package.json 执行 npm run lint、npm run build。遵照要求未启动开发服务、浏览器、视觉或交互测试。真实微信签约、预通知、扣款、回调联调须在配置测试环境后验收，编译和单元检查不代表已经完成渠道联调。
 
 发布顺序：数据库 V91 → Server → Portal → Electron → 填妥配置并开启活动。活动关闭回滚不撤回已购权益，不关闭已有协议，不删除参与记录；不要删除新增表或列再运行新代码。
+
+
+## 广告轮播与客户端入口（2026-09-16）
+
+- Portal 广告模板、样式和文案来自 `dingjiaye-penny-subscription-banner` 的 `82f0ccb`，仅复制广告相关实现，不合并该分支的套餐卡片或低余额优惠修改。
+- 每 3 秒轮播，鼠标悬停或键盘焦点在广告内时暂停，离开后重新计时。正式环境的 0.01 广告仍按服务端活动窗口、用户资格和个人身份展示，循环倒计时不会重置购买资格。团队积分包广告属于后续活动，当前开发与正式环境的主页轮播均不展示，保留模板和样式供后续启用。
+- 客户端弹窗进入 `#/pricing?tab=subscription&banner=penny&trialCampaign=<code>`；`banner=penny` 只选中广告，不自动发起购买。旧的 `trialCampaign` 定位参数继续兼容。活动接口较晚返回时，资格确认后切至 0.01 广告；不可参与的账号不强行显示。
+- 左下角 0.01 广告建议将链接配置为 `#/pricing?tab=subscription&banner=penny`（前面加当前环境 Portal 地址）。客户端也会为带 `trialCampaign` 参数或活动描述含 `0.01` 的 Portal 定价链接补齐目标参数，并保留原有来源参数。其他广告链接不变；本次未修改线上广告配置。
+- 点击「立即解锁」仍走当前协议确认和支付流程；未登录时返回地址附加 `trialCheckout=1`，登录返回后继续确认。
+- 本地开发直接访问 `https://local.youdao.com:5180/` 即显示充值与 0.01 两张广告，无需 `previewBanner` 参数；`/?banner=penny` 可验证默认选中 0.01。示例展示仅在开发环境生效，其倒计时不会用于下单或资格判断。正式构建仍使用活动接口控制 0.01 广告的资格与窗口。
+
+
+## 客户端弹窗验收与埋点补齐（2026-09-16）
+
+- 弹窗触发：活动状态有效、个人非订阅身份；已有匿名用户可展示，新用户完成引导后仍须等待首次登录。引擎启动、引导、设置、更新和其他对话框关闭后再展示。
+- 每日频控：按服务端时间校准北京时间；同一客户端共用本地记录，登录、退出、切换账号均不重置次数，不向服务端领取或上报展示资格。遇到其他弹窗时等待，真正渲染后才保存次日零点与活动截止时间。关闭后当天不再展示，活动到期或订阅状态变为 active 时立即隐藏。
+- 点击埋点：`lobsterai_subscription_trial_unlock_click`，每次有效「立即解锁」点击上报一次，在异步资格复核和浏览器跳转之前记录。字段：`campaignCode`、`source=trial_popup`、`isLoggedIn=true/false`；公共字段沿用日志组件，包括点击时的 `is_logged_in`、环境、版本及设备标识。遵循现有 `usageAnalyticsEnabled` 开关，账号身份不在业务事件中重复传输。
+- 故障诊断：客户端日志 `[SubscriptionTrial] Popup state:` 区分 `status_unavailable`、`claim_unavailable`、`inactive`、`subscribed`、`enterprise`、`waiting_for_first_login`、`waiting_for_other_dialog`、`shown_today`、`account_shown_today` 与 `shown`。主进程在 API 失败时记录服务器地址、认证状态、HTTP 状态和业务错误码，相同错误去重；不记录 Token、账号信息或响应正文。
+- 本次现场检查：运行中的开发客户端使用测试模式，未设置 `LOBSTER_SERVER_BASE_URL`，因此请求测试后端 `https://lobsterai-server.inner.youdao.com`；其匿名 `GET /api/subscription-trial` 返回 HTTP 401 / code 40100，客户端日志为 `status_unavailable`。这是实际弹窗联调的阻塞，不能以本地 Portal 广告展示或客户端构建成功代替验收。
+- 接入前置条件仍为：部署 V91 和本分支 Server，确保活动状态 GET 支持匿名访问，并配置有效的标准版 planId、活动起止时间及 enabled。配置示例默认关闭，本次没有发布服务或修改线上配置。主进程 IPC 诊断修改需重启开发客户端后生效。
