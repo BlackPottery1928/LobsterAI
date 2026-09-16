@@ -64,6 +64,9 @@ export const OpenClawEngineErrorCode = {
   RuntimeEntryMissing: 'runtime_entry_missing',
   /** The bundle exists, but required worker implementations are missing or unreadable. */
   RuntimeFilesMissing: 'runtime_files_missing',
+  /** A targeted startup migration/recovery failed; retain its source during Quick Repair. */
+  StartupCompatibilityFailed: 'startup_compatibility_failed',
+  MemoryDreamingMigrationFailed: 'memory_dreaming_migration_failed',
 } as const;
 
 export type OpenClawEngineErrorCode =

@@ -108,6 +108,7 @@ interface CoworkState {
   /** Live session-tail messages kept outside a detached, contiguous history window. */
   detachedTailMessagesBySessionId: Record<string, CoworkMessage[]>;
   remoteManaged: boolean;
+  isRepairingOpenClaw: boolean;
   pendingPermissions: CoworkPermissionRequest[];
   config: CoworkConfig;
   /** Media generation models fetched from server */
@@ -149,6 +150,7 @@ const initialState: CoworkState = {
   messageRailIndexLoadingBySessionId: {},
   detachedTailMessagesBySessionId: {},
   remoteManaged: false,
+  isRepairingOpenClaw: false,
   pendingPermissions: [],
   config: {
     workingDirectory: '',
@@ -1243,6 +1245,10 @@ const coworkSlice = createSlice({
       state.remoteManaged = action.payload;
     },
 
+    setOpenClawRepairing(state, action: PayloadAction<boolean>) {
+      state.isRepairingOpenClaw = action.payload;
+    },
+
     updateSessionPinned(state, action: PayloadAction<{ sessionId: string; pinned: boolean; pinOrder?: number | null }>) {
       const { sessionId, pinned, pinOrder } = action.payload;
       const sessionIndex = state.sessions.findIndex(s => s.id === sessionId);
@@ -1568,6 +1574,7 @@ export const {
   setContextMaintenance,
   markCompactionNotified,
   setRemoteManaged,
+  setOpenClawRepairing,
   updateSessionPinned,
   updateSessionTitle,
   updateCurrentSessionModelOverride,

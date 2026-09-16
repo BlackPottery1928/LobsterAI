@@ -39,6 +39,7 @@ import EngineFailureOverlay from './components/cowork/EngineFailureOverlay';
 import EngineStartupOverlay from './components/cowork/EngineStartupOverlay';
 import KitsView from './components/kits/KitsView';
 import LibraryView from './components/library/LibraryView';
+import FirstRunLoginIntroduction from './components/login/FirstRunLoginIntroduction';
 import NewUserOnboardingOverlay, {
   NewUserOnboardingStep,
   type NewUserOnboardingStep as NewUserOnboardingStepType,
@@ -282,6 +283,7 @@ const App: React.FC = () => {
   const pendingNewUserWelcomeAfterLoginSawStartupRef = useRef(false);
   const pendingNewUserWelcomeAfterLoginWaitingLoggedRef = useRef(false);
   const pendingNewUserWelcomeAuthCallbackAtRef = useRef(0);
+  const newUserLoginPendingRef = useRef(false);
   const isUserInitiatedUpdateFlowActiveRef = useRef(false);
   const dispatch = useDispatch();
   const defaultSelectedModel = useSelector((state: RootState) => state.model.defaultSelectedModel);
@@ -302,6 +304,7 @@ const App: React.FC = () => {
   );
   const shouldShowNewUserOnboarding =
     privacyAgreed === false
+    && !authUser
     && !isNewUserOnboardingDismissed
     && hasResolvedEngineStartupOverlayState
     && !isEngineStartupOverlayVisible
@@ -1413,7 +1416,9 @@ const App: React.FC = () => {
     finishNewUserOnboarding('next');
   }, [finishNewUserOnboarding, newUserOnboardingStep]);
 
-  const handleNewUserOnboardingStartExperience = useCallback(() => {
+  const handleNewUserOnboardingStartExperience = useCallback(async () => {
+    if (newUserLoginPendingRef.current) return;
+    newUserLoginPendingRef.current = true;
     console.log('[Onboarding] start experience clicked; starting login handoff');
     reportOnboardingAction('guide_start_experience_click', {
       source: 'new_user_onboarding',
@@ -1421,8 +1426,7 @@ const App: React.FC = () => {
     });
     setNewUserWelcomeAfterLoginPending();
     setNewUserWelcomeAfterLoginSignal((value) => value + 1);
-    finishNewUserOnboarding('start_experience');
-    void authService.login()
+    await authService.login()
       .then((result) => {
         // [INTRA-ONLY] Dismissing the in-app credential form is not a failure:
         // stay silent instead of reporting a login that never happened.
@@ -1449,6 +1453,7 @@ const App: React.FC = () => {
           source: 'new_user_onboarding',
           result: 'success',
         });
+        finishNewUserOnboarding('start_experience');
         setNewUserWelcomeAfterLoginSignal((value) => value + 1);
       })
       .catch((error) => {
@@ -1460,6 +1465,9 @@ const App: React.FC = () => {
         });
         consumeNewUserWelcomeAfterLoginPending();
         showToast(i18nService.t('welcomeLoginFailed'));
+      })
+      .finally(() => {
+        newUserLoginPendingRef.current = false;
       });
   }, [finishNewUserOnboarding, newUserOnboardingStep, showToast]);
 
@@ -2202,12 +2210,14 @@ const App: React.FC = () => {
           </AppUpdateInteractionOverlay>
         )}
         {shouldShowNewUserOnboarding && (
-          <NewUserOnboardingOverlay
-            step={newUserOnboardingStep}
-            onNext={handleNewUserOnboardingNext}
-            onSkip={handleNewUserOnboardingSkip}
-            onStartExperience={handleNewUserOnboardingStartExperience}
-          />
+          <FirstRunLoginIntroduction onStartExperience={handleNewUserOnboardingStartExperience}>
+            <NewUserOnboardingOverlay
+              step={newUserOnboardingStep}
+              onNext={handleNewUserOnboardingNext}
+              onSkip={handleNewUserOnboardingSkip}
+              onStartExperience={handleNewUserOnboardingStartExperience}
+            />
+          </FirstRunLoginIntroduction>
         )}
       </div>
 

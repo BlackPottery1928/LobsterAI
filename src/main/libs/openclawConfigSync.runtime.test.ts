@@ -689,6 +689,20 @@ describe('OpenClawConfigSync runtime config output', () => {
     expect(config.gateway.port).toBe(18789);
   });
 
+  test('retains discovery migration input, then never writes it back after the helper removes it', async () => {
+    const sync = await createSync();
+    fs.writeFileSync(configPath, JSON.stringify({ plugins: { bundledDiscovery: 'compat' } }));
+    expect(sync.sync('before-discovery-migration').ok).toBe(true);
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(config.plugins.bundledDiscovery).toBe('compat');
+    // Simulate the helper's completed, verified removal with this sync instance alive.
+    delete config.plugins.bundledDiscovery;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    expect(sync.sync('after-discovery-migration').ok).toBe(true);
+    expect(sync.sync('repeat-after-discovery-migration').ok).toBe(true);
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).plugins).not.toHaveProperty('bundledDiscovery');
+  });
+
   test('keeps Tailscale disabled by default', async () => {
     const sync = await createSync();
     expect(sync.sync('default-network').ok).toBe(true);

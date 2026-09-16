@@ -42,7 +42,7 @@ import {
   __openClawTokenProxyTestUtils,
   consumeRecentOpenClawTokenProxyQuotaError,
 } from '../openclawTokenProxy';
-import { AgentLifecyclePhase } from './constants';
+import { AgentEventStream, AgentLifecyclePhase, OpenClawChatState, OpenClawGatewayMethod } from './constants';
 import { ContinuityCapsuleSource } from './coworkContinuityCapsule';
 import {
   buildOpenClawChatSendPayloadTooLargeError,
@@ -5540,6 +5540,85 @@ test('chat error replaces generic LLM failure using safe OpenClaw metadata', () 
   expect(persistedError?.content).toContain('OAuth 授权已失效');
 });
 
+test.each([
+  { withChatMetadata: false, remapRun: false },
+  { withChatMetadata: true, remapRun: false },
+  { withChatMetadata: false, remapRun: true },
+])('chat error preserves lifecycle error previews: $withChatMetadata, remapped: $remapRun', ({ withChatMetadata, remapRun }) => {
+  const { session, store } = createReconcileStore([
+    { id: 'msg-1', type: 'user', content: 'hello', timestamp: 1, metadata: {} },
+  ]);
+  const adapter = new OpenClawRuntimeAdapter(store, {});
+  const sessionKey = `agent:main:lobsterai:${session.id}`;
+  const runId = 'run-error-detail';
+  const rawErrorPreview = "Cannot read properties of undefined (reading 'trim')";
+  adapter.on('error', () => {});
+  const turn = createActiveTurn(session.id, sessionKey, runId);
+  const lifecycleRunId = remapRun ? 'run-internal-error-detail' : runId;
+  turn.knownRunIds.add(lifecycleRunId);
+  adapter.activeTurns.set(session.id, turn);
+
+  adapter.handleAgentLifecycleEvent(session.id, {
+    phase: AgentLifecyclePhase.Error,
+    error: 'LLM request failed.',
+    provider: 'lobsterai-server',
+    model: 'deepseek-v4-pro',
+    providerRuntimeFailureKind: 'unclassified',
+    rawErrorPreview,
+  }, lifecycleRunId);
+  adapter.handleChatEvent({
+    state: OpenClawChatState.Error,
+    runId,
+    sessionKey,
+    errorMessage: 'LLM request failed.',
+    ...(withChatMetadata ? { rawErrorPreview: 'final provider detail', httpCode: '500' } : {}),
+  }, 1);
+
+  const detail = session.messages.find((message) => message.type === 'system')?.metadata?.errorDetail;
+  expect(detail).toMatchObject({
+    provider: 'lobsterai-server',
+    model: 'deepseek-v4-pro',
+    rawErrorPreview: withChatMetadata ? 'final provider detail' : rawErrorPreview,
+  });
+  if (withChatMetadata) expect(detail?.httpCode).toBe('500');
+  expect(adapter.activeTurns.has(session.id)).toBe(false);
+});
+
+test.each(['retry', 'different-run', 'different-error'])('chat error does not reuse lifecycle details from %s', (scenario) => {
+  const { session, store } = createReconcileStore([
+    { id: 'msg-1', type: 'user', content: 'hello', timestamp: 1, metadata: {} },
+  ]);
+  const adapter = new OpenClawRuntimeAdapter(store, {});
+  const sessionKey = `agent:main:lobsterai:${session.id}`;
+  const turn = createActiveTurn(session.id, sessionKey, 'run-old-error');
+  adapter.on('error', () => {});
+  adapter.activeTurns.set(session.id, turn);
+  adapter.handleAgentLifecycleEvent(session.id, {
+    phase: AgentLifecyclePhase.Error,
+    error: 'LLM request failed.',
+    rawErrorPreview: '401 Unauthorized',
+    providerRuntimeFailureKind: 'auth_invalid_token',
+  }, turn.runId);
+
+  if (scenario === 'retry') {
+    adapter.handleAgentLifecycleEvent(session.id, { phase: AgentLifecyclePhase.Start }, turn.runId);
+  } else if (scenario === 'different-run') {
+    turn.runId = 'run-new-error';
+    turn.knownRunIds.add(turn.runId);
+  }
+  const errorMessage = scenario === 'different-error' ? 'Dispatch failed' : 'LLM request failed.';
+  adapter.handleChatEvent({
+    state: OpenClawChatState.Error,
+    runId: turn.runId,
+    sessionKey,
+    errorMessage,
+  }, 1);
+
+  const persistedError = session.messages.find((message) => message.type === 'system');
+  expect(persistedError?.content).toBe(errorMessage);
+  expect(persistedError?.metadata?.errorDetail?.rawErrorPreview).toBeUndefined();
+});
+
 test('chat error can consume quota signal after lifecycle error schedules fallback', () => {
   vi.useFakeTimers();
   try {
@@ -8923,7 +9002,37 @@ test('ordinary write tool does not trigger memory maintenance handling', async (
   expect(session.messages.find((message) => message.type === 'tool_use')?.metadata?.toolName).toBe('write');
 });
 
-test('blocked plan mode mutation waits for lifecycle end before safety recovery', async () => {
+function createPlanSafetyRecoveryContext(runtimeRunId = 'run-plan-unsafe') {
+  const { session, store } = createReconcileStore([
+    { id: 'msg-1', type: 'user', content: 'plan a bakery website', timestamp: 1, metadata: {} },
+  ]);
+  session.status = 'running';
+  const adapter = new OpenClawRuntimeAdapter(store, {});
+  const errorSpy = vi.fn();
+  adapter.on('error', errorSpy);
+  const sessionKey = `agent:main:lobsterai:${session.id}`;
+  const turn = createActiveTurn(session.id, sessionKey, 'run-plan-unsafe');
+  turn.planMode = true;
+  const request = vi.fn(async (method: string, params: Record<string, unknown>) => (
+    method === OpenClawGatewayMethod.ChatSend ? { runId: params.idempotencyKey } : {}
+  ));
+  adapter.gatewayClient = { start: () => {}, stop: () => {}, request };
+  adapter.activeTurns.set(session.id, turn);
+  adapter.sessionIdByRunId.set(turn.runId, session.id);
+  adapter.bindRunIdToTurn(session.id, runtimeRunId);
+  adapter.handleAgentEvent({
+    runId: runtimeRunId,
+    sessionKey,
+    stream: AgentEventStream.Tool,
+    data: { phase: 'start', name: 'exec', toolCallId: 'call-write', args: { command: 'mkdir bakery' } },
+  }, 1);
+  return { adapter, session, sessionKey, turn, request, errorSpy };
+}
+
+test.each([
+  [AgentLifecyclePhase.End, AgentLifecyclePhase.Error],
+  [AgentLifecyclePhase.Error, AgentLifecyclePhase.End],
+])('plan safety recovery survives old lifecycle %s then %s', async (firstPhase, secondPhase) => {
   vi.useFakeTimers();
   try {
     const preface = 'Now let me read the workspace to understand the project structure.';
@@ -8939,6 +9048,8 @@ test('blocked plan mode mutation waits for lifecycle end before safety recovery'
     ]);
     session.status = 'running';
     const adapter = new OpenClawRuntimeAdapter(store, {});
+    const errorSpy = vi.fn();
+    adapter.on('error', errorSpy);
     const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
     const sessionKey = `agent:main:lobsterai:${session.id}`;
     const turn = createActiveTurn(session.id, sessionKey, 'run-plan-unsafe');
@@ -8995,9 +9106,16 @@ test('blocked plan mode mutation waits for lifecycle end before safety recovery'
       runId: 'run-plan-unsafe',
       sessionKey,
       stream: 'lifecycle',
-      data: { phase: 'end', aborted: true },
+      data: { phase: firstPhase, aborted: true, error: 'This operation was aborted' },
     }, 3);
-    await vi.advanceTimersByTimeAsync(1499);
+    await vi.advanceTimersByTimeAsync(68);
+    adapter.handleAgentEvent({
+      runId: 'run-plan-unsafe',
+      sessionKey,
+      stream: 'lifecycle',
+      data: { phase: secondPhase, aborted: true, error: 'This operation was aborted' },
+    }, 4);
+    await vi.advanceTimersByTimeAsync(1431);
     expect(requests.some((request) => request.method === 'chat.send')).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
 
@@ -9023,7 +9141,180 @@ test('blocked plan mode mutation waits for lifecycle end before safety recovery'
 
     expect(session.messages.find((message) => message.id === 'msg-2')?.content).toBe(recoveredPlan);
     expect(session.messages.some((message) => message.content === preface)).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(requests.filter((request) => request.method === 'chat.abort')).toHaveLength(1);
+    expect(adapter.activeTurns.get(session.id)).toBe(turn);
+    expect(session.status).toBe('running');
+    expect(errorSpy).not.toHaveBeenCalled();
   } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('late events from a plan safety abort do not replace or terminate the recovered plan', async () => {
+  vi.useFakeTimers();
+  try {
+    const runtimeRunId = 'run-plan-unsafe-runtime';
+    const { adapter, session, sessionKey, turn, request, errorSpy } = createPlanSafetyRecoveryContext(runtimeRunId);
+    const oldRunId = turn.runId;
+    adapter.handleAgentEvent({
+      runId: runtimeRunId, sessionKey, stream: AgentEventStream.Lifecycle,
+      data: { phase: AgentLifecyclePhase.End, aborted: true },
+    }, 2);
+    // A late chat abort must not push the 1.5s lifecycle recovery back to 10s.
+    await vi.advanceTimersByTimeAsync(500);
+    adapter.handleChatEvent({ runId: oldRunId, sessionKey, state: OpenClawChatState.Aborted }, 3);
+    await vi.advanceTimersByTimeAsync(1000);
+    const recoveryRunId = turn.runId;
+    expect(recoveryRunId).not.toBe(oldRunId);
+    expect(request.mock.calls.filter(([method]) => method === OpenClawGatewayMethod.ChatSend)).toHaveLength(1);
+
+    const plan = [
+      '<proposed_plan>',
+      '# Summary',
+      '- Build a bakery website with an accessible menu and clear opening hours.',
+      '# Implementation Approach',
+      '- Reuse the existing components and keep the current routing structure.',
+      '# Key Changes',
+      '- Add the product list, store address, contact details, and navigation.',
+      '# Validation',
+      '- Verify keyboard navigation and narrow and wide screen layouts.',
+      '# Assumptions',
+      '- Use the product information already provided by the user.',
+      '</proposed_plan>',
+    ].join('\n');
+    const finalResult = adapter.handleChatFinal(session.id, turn, {
+      runId: recoveryRunId, sessionKey, state: OpenClawChatState.Final,
+      message: { role: 'assistant', content: plan },
+    });
+    await vi.advanceTimersByTimeAsync(900);
+    await finalResult;
+    const finalTimer = turn.finalCompletionTimer;
+    expect(finalTimer).toBeDefined();
+
+    for (const runId of [oldRunId, runtimeRunId]) {
+      for (const phase of [AgentLifecyclePhase.Error, AgentLifecyclePhase.End]) {
+        adapter.handleAgentEvent({
+          runId, sessionKey, stream: AgentEventStream.Lifecycle,
+          data: { phase, error: 'This operation was aborted', aborted: true },
+        });
+      }
+      for (const state of [OpenClawChatState.Error, OpenClawChatState.Aborted, OpenClawChatState.Final]) {
+        adapter.handleChatEvent({
+          runId, sessionKey, state, errorMessage: 'This operation was aborted',
+          message: { role: 'assistant', content: 'old incomplete response' },
+        });
+      }
+      adapter.processAgentAssistantText({
+        runId, sessionKey, stream: AgentEventStream.Assistant,
+        data: { text: 'late old text', thinking: 'late old thinking' },
+      });
+    }
+    expect(turn.finalCompletionTimer).toBe(finalTimer);
+    expect(turn.currentText).toBe(plan);
+    expect(adapter.terminatedRunIds.has(oldRunId)).toBe(false);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(session.status).toBe('completed');
+    expect(adapter.activeTurns.has(session.id)).toBe(false);
+    expect(session.messages.filter(message => message.type === 'assistant')).toHaveLength(1);
+    expect(session.messages.some(message => message.content === plan)).toBe(true);
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(request.mock.calls.filter(([method]) => method === OpenClawGatewayMethod.ChatAbort)).toHaveLength(1);
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
+test.each([0, 1500])('user stop at %dms cancels plan safety recovery and its pending work', async delayMs => {
+  vi.useFakeTimers();
+  try {
+    const { adapter, session, sessionKey, turn, request, errorSpy } = createPlanSafetyRecoveryContext();
+    const oldRunId = turn.runId;
+    adapter.handleAgentEvent({
+      runId: oldRunId, sessionKey, stream: AgentEventStream.Lifecycle,
+      data: { phase: AgentLifecyclePhase.Error, error: 'This operation was aborted' },
+    }, 2);
+    await vi.advanceTimersByTimeAsync(delayMs);
+    const sendCount = request.mock.calls.filter(([method]) => method === OpenClawGatewayMethod.ChatSend).length;
+    adapter.stopSession(session.id);
+    adapter.handleChatEvent({ runId: oldRunId, sessionKey, state: OpenClawChatState.Aborted }, 3);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(request.mock.calls.filter(([method]) => method === OpenClawGatewayMethod.ChatSend)).toHaveLength(sendCount);
+    expect(session.status).toBe('idle');
+    expect(adapter.activeTurns.has(session.id)).toBe(false);
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(turn.planModeSafetyRecoveryTimer).toBeUndefined();
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
+test.each([false, true])('late plan recovery acknowledgement cannot affect a new turn (reject: %s)', async shouldReject => {
+  vi.useFakeTimers();
+  try {
+    const { adapter, session, sessionKey, turn, request, errorSpy } = createPlanSafetyRecoveryContext();
+    let resolveSend!: (value: { runId: string }) => void;
+    let rejectSend!: (error: Error) => void;
+    const sendResult = new Promise<{ runId: string }>((resolve, reject) => {
+      resolveSend = resolve;
+      rejectSend = reject;
+    });
+    request.mockImplementation(async method => method === OpenClawGatewayMethod.ChatSend ? sendResult : {});
+    adapter.handleAgentEvent({
+      runId: turn.runId, sessionKey, stream: AgentEventStream.Lifecycle,
+      data: { phase: AgentLifecyclePhase.End, aborted: true },
+    }, 2);
+    await vi.advanceTimersByTimeAsync(1500);
+    const recoveryRunId = turn.runId;
+    adapter.stopSession(session.id);
+    const nextTurn = createActiveTurn(session.id, sessionKey, 'next-user-run');
+    adapter.activeTurns.set(session.id, nextTurn);
+    session.status = 'running';
+    if (shouldReject) rejectSend(new Error('Recovery acknowledgement failed'));
+    else resolveSend({ runId: 'late-recovery-alias' });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(adapter.activeTurns.get(session.id)).toBe(nextTurn);
+    expect(session.status).toBe('running');
+    expect([...nextTurn.knownRunIds]).toEqual(['next-user-run']);
+    expect(adapter.sessionIdByRunId.has(recoveryRunId)).toBe(false);
+    expect(errorSpy).not.toHaveBeenCalled();
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
+test('plan safety recovery still surfaces its own genuine lifecycle failure exactly once', async () => {
+  vi.useFakeTimers();
+  try {
+    const { adapter, session, sessionKey, turn, request, errorSpy } = createPlanSafetyRecoveryContext();
+    const oldRunId = turn.runId;
+    adapter.handleAgentEvent({
+      runId: oldRunId, sessionKey, stream: AgentEventStream.Lifecycle,
+      data: { phase: AgentLifecyclePhase.Error, error: 'This operation was aborted' },
+    }, 2);
+    await vi.advanceTimersByTimeAsync(1500);
+    const recoveryRunId = turn.runId;
+    adapter.handleAgentEvent({
+      runId: recoveryRunId, sessionKey, stream: AgentEventStream.Lifecycle,
+      data: { phase: AgentLifecyclePhase.Error, error: 'Recovery provider failed' },
+    }, 3);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(errorSpy).toHaveBeenCalledExactlyOnceWith(session.id, 'Recovery provider failed');
+    expect(session.status).toBe('error');
+    expect(request).toHaveBeenCalledWith(OpenClawGatewayMethod.ChatAbort, { sessionKey, runId: recoveryRunId });
+    expect(turn.lifecycleErrorFallbackTimer).toBeUndefined();
+    adapter.handleChatEvent({
+      runId: recoveryRunId, sessionKey, state: OpenClawChatState.Error, errorMessage: 'Recovery provider failed',
+    }, 4);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(session.messages.filter(message => message.type === 'system')).toHaveLength(1);
+  } finally {
+    vi.clearAllTimers();
     vi.useRealTimers();
   }
 });
@@ -9219,6 +9510,95 @@ test('lifecycle error fallback ignores a later run for the same session', async 
     expect(session.status).toBe('completed');
     expect(adapter.activeTurns.get(session.id)?.runId).toBe('new-run');
   } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('lifecycle error fallback cannot abort a later execution within the same turn', async () => {
+  vi.useFakeTimers();
+  try {
+    const { session, store } = createReconcileStore([]);
+    session.status = 'running';
+    const adapter = new OpenClawRuntimeAdapter(store, {});
+    const errorSpy = vi.fn();
+    adapter.on('error', errorSpy);
+    const request = vi.fn(async () => ({}));
+    adapter.gatewayClient = { start: () => {}, stop: () => {}, request };
+    const sessionKey = `agent:main:lobsterai:${session.id}`;
+    const turn = createActiveTurn(session.id, sessionKey, 'old-run');
+    adapter.activeTurns.set(session.id, turn);
+    adapter.handleAgentLifecycleEvent(session.id, { phase: AgentLifecyclePhase.Error, error: 'Old failure' }, 'old-run');
+    await vi.advanceTimersByTimeAsync(1500);
+    turn.runId = 'recovery-client-run';
+    adapter.bindRunIdToTurn(session.id, 'recovery-runtime-run');
+    expect(turn.knownRunIds.has('old-run')).toBe(true);
+    expect(turn.lifecycleErrorFallbackTimer).toBeUndefined();
+    // An even later duplicate of the old error must not arm another timer.
+    adapter.handleAgentLifecycleEvent(session.id, { phase: AgentLifecyclePhase.Error, error: 'Old failure' }, 'old-run');
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(request).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(session.status).toBe('running');
+    expect(adapter.activeTurns.get(session.id)).toBe(turn);
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
+test('lifecycle error fallback uses the chat send identity and duplicate errors do not extend its deadline', async () => {
+  vi.useFakeTimers();
+  try {
+    const { session, store } = createReconcileStore([]);
+    const adapter = new OpenClawRuntimeAdapter(store, {});
+    const errorSpy = vi.fn();
+    adapter.on('error', errorSpy);
+    const request = vi.fn(async () => ({}));
+    adapter.gatewayClient = { start: () => {}, stop: () => {}, request };
+    const sessionKey = `agent:main:lobsterai:${session.id}`;
+    const turn = createActiveTurn(session.id, sessionKey, 'client-run');
+    adapter.activeTurns.set(session.id, turn);
+    adapter.bindRunIdToTurn(session.id, 'runtime-run');
+    const error = { phase: AgentLifecyclePhase.Error, error: 'Provider failed' };
+    adapter.handleAgentLifecycleEvent(session.id, error, 'runtime-run');
+    await vi.advanceTimersByTimeAsync(15_000);
+    adapter.handleAgentLifecycleEvent(session.id, error, 'runtime-run');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(request).toHaveBeenCalledWith(OpenClawGatewayMethod.ChatAbort, { sessionKey, runId: 'client-run' });
+    expect(errorSpy).toHaveBeenCalledExactlyOnceWith(session.id, 'Provider failed');
+    expect(session.status).toBe('error');
+    expect(turn.lifecycleErrorFallbackTimer).toBeUndefined();
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
+test('user stop clears lifecycle error fallback before the same session is reused', async () => {
+  vi.useFakeTimers();
+  try {
+    const { session, store } = createReconcileStore([]);
+    const adapter = new OpenClawRuntimeAdapter(store, {});
+    const errorSpy = vi.fn();
+    adapter.on('error', errorSpy);
+    const request = vi.fn(async () => ({}));
+    adapter.gatewayClient = { start: () => {}, stop: () => {}, request };
+    const sessionKey = `agent:main:lobsterai:${session.id}`;
+    const turn = createActiveTurn(session.id, sessionKey, 'old-run');
+    adapter.activeTurns.set(session.id, turn);
+    adapter.handleAgentLifecycleEvent(session.id, { phase: AgentLifecyclePhase.Error, error: 'Old failure' }, 'old-run');
+    adapter.stopSession(session.id);
+    expect(turn.lifecycleErrorFallbackTimer).toBeUndefined();
+    const nextTurn = createActiveTurn(session.id, sessionKey, 'next-run');
+    adapter.activeTurns.set(session.id, nextTurn);
+    session.status = 'running';
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(request.mock.calls.filter(([method]) => method === OpenClawGatewayMethod.ChatAbort)).toHaveLength(1);
+    expect(adapter.activeTurns.get(session.id)).toBe(nextTurn);
+    expect(session.status).toBe('running');
+    expect(errorSpy).not.toHaveBeenCalled();
+  } finally {
+    vi.clearAllTimers();
     vi.useRealTimers();
   }
 });
