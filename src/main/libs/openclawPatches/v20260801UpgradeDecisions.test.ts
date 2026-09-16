@@ -22,6 +22,7 @@ const RETAINED_PATCHES = [
   'openclaw-inferred-plugin-install-allowlist.patch',
   'openclaw-lancedb-optional-transformers.patch',
   'openclaw-lobsterai-model-compat-api.patch',
+  'openclaw-lobsterai-provider-cooldown.patch',
   'openclaw-lobsterai-startup-recovery.patch',
   'openclaw-managed-npm-junction-cleanup.patch',
   'openclaw-memory-sidecar-archive-generations.patch',

@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { afterEach, expect, test, vi } from 'vitest';
 
-import { OPENCLAW_REPAIR_ENTRY, OPENCLAW_REPAIR_RESULT_PREFIX, OpenClawRepairPhase } from '../../shared/openclawEngine/repair';
+import { OPENCLAW_REPAIR_ENTRY, OPENCLAW_REPAIR_RESULT_PREFIX, OpenClawRepairPhase, OpenClawRepairStage } from '../../shared/openclawEngine/repair';
 import { OPENCLAW_STARTUP_COMPATIBILITY_ENTRY, OPENCLAW_STARTUP_COMPATIBILITY_RESULT_PREFIX, OpenClawStartupCompatibilityMode } from '../../shared/openclawEngine/startupCompatibility';
 import { OpenClawStartupMigrationStatus } from '../../shared/openclawEngine/startupMigration';
 import { createOpenClawRepairBackupDirectory, OPENCLAW_DOCTOR_REPAIR_ARGS, runOpenClawCompatibilityRepair, runOpenClawDoctorRepair } from './openclawCompatibilityRepair';
@@ -61,6 +61,24 @@ test('structured failure takes precedence over unrelated plugin warnings', async
     success: false, phase: OpenClawRepairPhase.Recovery, changes: [], backups: [], error: 'Unsupported database schema',
   }), stderr: 'Config warnings: duplicate plugin ID' });
   await expect(runOpenClawCompatibilityRepair({ ...params, phase: OpenClawRepairPhase.Recovery, runner })).rejects.toThrow('Unsupported database schema');
+});
+
+test('snapshot failure preserves its phase and source path for the UI', async () => {
+  const params = fixture();
+  const failurePath = path.join(params.stateDir, 'agents', 'main', 'agent', 'openclaw-agent.sqlite');
+  const runner: StartupMigrationRunner = async () => ({ code: 1, stderr: '', stdout: OPENCLAW_REPAIR_RESULT_PREFIX + JSON.stringify({
+    phase: OpenClawRepairPhase.Snapshot, success: false, changes: [], backups: [], failurePath, error: 'SQLITE_CORRUPT',
+  }) });
+  await expect(runOpenClawCompatibilityRepair({ ...params, phase: OpenClawRepairPhase.Snapshot, runner }))
+    .rejects.toMatchObject({ stage: OpenClawRepairStage.Snapshot, failurePath, message: 'SQLITE_CORRUPT' });
+});
+
+test('an interrupted Doctor retains its own stage', async () => {
+  const params = fixture();
+  const runner = vi.fn<StartupMigrationRunner>().mockResolvedValueOnce(startupResult())
+    .mockRejectedValueOnce(new Error('Doctor process timed out'));
+  await expect(runOpenClawDoctorRepair({ ...params, runner }))
+    .rejects.toMatchObject({ stage: OpenClawRepairStage.Doctor, message: 'Doctor process timed out' });
 });
 
 test('backup directories do not collide on repeated repair requests', () => {

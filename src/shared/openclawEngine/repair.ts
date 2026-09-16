@@ -8,6 +8,24 @@ export const OpenClawRepairPhase = {
 } as const;
 export type OpenClawRepairPhase = typeof OpenClawRepairPhase[keyof typeof OpenClawRepairPhase];
 
+export const OpenClawRepairStage = {
+  ...OpenClawRepairPhase,
+  Preparation: 'preparation',
+  Doctor: 'doctor',
+  Configuration: 'configuration',
+  Gateway: 'gateway',
+} as const;
+export type OpenClawRepairStage = typeof OpenClawRepairStage[keyof typeof OpenClawRepairStage];
+
+export const OPENCLAW_REPAIR_SNAPSHOT_MANIFEST = 'snapshot-manifest.json';
+export const OPENCLAW_PLUGIN_SKILLS_DIRECTORY = 'plugin-skills';
+
+export interface OpenClawRepairSnapshotManifest {
+  version: 1;
+  generatedPluginSkillLinks: Array<{ path: string; target: string }>;
+  restoreInstructions: string;
+}
+
 export const OpenClawRepairPluginSource = {
   Npm: 'npm',
   Path: 'path',
@@ -19,4 +37,5 @@ export interface OpenClawCompatibilityRepairReport {
   changes: string[];
   backups: string[];
   error?: string;
+  failurePath?: string;
 }

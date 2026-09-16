@@ -184,7 +184,7 @@ import {
   OpenClawEnginePhase,
   OpenClawGatewayRepairErrorCode,
 } from '../shared/openclawEngine/constants';
-import { OpenClawRepairPhase } from '../shared/openclawEngine/repair';
+import { OpenClawRepairPhase, OpenClawRepairStage } from '../shared/openclawEngine/repair';
 import { PlatformRegistry } from '../shared/platform';
 import type { ProviderConfig } from '../shared/providers';
 import {
@@ -443,7 +443,7 @@ import {
   DEFAULT_MANAGED_AGENT_ID,
   OpenClawChannelSessionSync,
 } from './libs/openclawChannelSessionSync';
-import { createOpenClawRepairBackupDirectory, runOpenClawCompatibilityRepair, runOpenClawDoctorRepair } from './libs/openclawCompatibilityRepair';
+import { createOpenClawRepairBackupDirectory, OpenClawRepairFailure, runOpenClawCompatibilityRepair, runOpenClawDoctorRepair } from './libs/openclawCompatibilityRepair';
 import {
   CONFIG_DELIVERY_FALLBACK_REASON_PREFIX,
   DEFERRED_SYNC_REASON_PREFIX,
@@ -3217,6 +3217,8 @@ type OpenClawGatewayRepairResult = {
   error?: string;
   errorCode?: OpenClawGatewayRepairErrorCode;
   recoverable?: boolean;
+  failedStage?: OpenClawRepairStage;
+  failurePath?: string;
 };
 
 let openClawGatewayRepairPromise: Promise<OpenClawGatewayRepairResult> | null = null;
@@ -3296,6 +3298,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
     }
 
     let backupPath: string | undefined;
+    let repairStage: OpenClawRepairStage = OpenClawRepairStage.Preparation;
     let releaseConfigMaintenance: (() => void) | undefined;
     try {
       openClawManualRepairActive = true;
@@ -3333,6 +3336,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         await runOpenClawCompatibilityRepair({ ...repairOptions, phase: OpenClawRepairPhase.Recovery });
         // The snapshot already backs up config. Retain compatibility sources
         // through migration and config sync instead of regenerating from scratch.
+        repairStage = OpenClawRepairStage.Configuration;
         if (!preserveConfig) backupOpenClawConfig(originalPath, backupPath);
         await startAskUserServer();
         const sync = await syncOpenClawConfig({ reason: 'manual-repair', restartGatewayIfRunning: false, manualRepair: true });
@@ -3343,6 +3347,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
           legacyConfigPath: path.join(backupPath, 'original', 'openclaw.json'),
         });
       });
+      repairStage = OpenClawRepairStage.Gateway;
       const started = await manager.startGateway('manual-repair');
       // Reconnection can await a token refresh that itself needs config sync.
       // Release config writers after repair/startup, before awaiting the client.
@@ -3365,16 +3370,21 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         originalPath,
         backupPath,
         error: success ? undefined : status.message || 'Failed to restart OpenClaw gateway after repair.',
+        failedStage: success ? undefined : repairStage,
       };
     } catch (error) {
       console.error('[OpenClawRepair] gateway state repair failed:', error);
       const message = error instanceof Error ? error.message : 'Failed to repair OpenClaw gateway state.';
+      const failedStage = error instanceof OpenClawRepairFailure ? error.stage : repairStage;
       return {
         success: false,
         status: manager.setExternalError(message),
         originalPath,
         backupPath,
         error: message,
+        failedStage,
+        failurePath: error instanceof OpenClawRepairFailure ? error.failurePath : undefined,
+        errorCode: failedStage === OpenClawRepairStage.Snapshot ? OpenClawGatewayRepairErrorCode.SnapshotFailed : undefined,
       };
     } finally {
       openClawManualRepairActive = false;
