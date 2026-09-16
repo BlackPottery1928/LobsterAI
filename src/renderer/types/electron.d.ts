@@ -125,6 +125,7 @@ import type {
   OpenClawEnginePhase as SharedOpenClawEnginePhase,
   OpenClawGatewayRepairErrorCode,
 } from '../../shared/openclawEngine/constants';
+import type { OpenClawRepairStage } from '../../shared/openclawEngine/repair';
 import type {
   PublishingQuota,
   PublishingQuotaErrorData,
@@ -385,6 +386,8 @@ interface OpenClawGatewayRepairResult {
   error?: string;
   errorCode?: OpenClawGatewayRepairErrorCode;
   recoverable?: boolean;
+  failedStage?: OpenClawRepairStage;
+  failurePath?: string;
 }
 
 interface OpenClawSessionPolicyConfig {

@@ -8,7 +8,8 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { runOpenClawCompatibilityRepair, runOpenClawDoctorRepair } from '../src/main/libs/openclawCompatibilityRepair';
-import { OpenClawRepairPhase } from '../src/shared/openclawEngine/repair';
+import { migrateLegacySessionStorageWithDoctor } from '../src/main/libs/openclawSessionLegacyMigration';
+import { OPENCLAW_REPAIR_SNAPSHOT_MANIFEST, OpenClawRepairPhase } from '../src/shared/openclawEngine/repair';
 import {
   OPENCLAW_STARTUP_COMPATIBILITY_ENTRY,
   OPENCLAW_STARTUP_COMPATIBILITY_RESULT_PREFIX,
@@ -16,6 +17,7 @@ import {
   OpenClawStartupCompatibilityMode,
 } from '../src/shared/openclawEngine/startupCompatibility';
 import { OpenClawStartupMigrationStatus } from '../src/shared/openclawEngine/startupMigration';
+import { readRepairedGatewayHistory } from './helpers/openclawGatewayRepairSmoke';
 
 const runtimeRoot = process.env.OPENCLAW_STARTUP_COMPAT_RUNTIME;
 const execFileAsync = promisify(execFile);
@@ -82,6 +84,7 @@ describe.skipIf(!runtimeRoot)('packaged shared-state preparation', () => {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR,
       OPENCLAW_HOME: directory, OPENCLAW_STATE_DIR: stateDir, OPENCLAW_CONFIG_PATH: configPath,
       OPENCLAW_SERVICE_REPAIR_POLICY: 'external', ELECTRON_RUN_AS_NODE: '1',
+      OPENCLAW_NO_AUTO_UPDATE: '1',
       XDG_CACHE_HOME: path.join(directory, 'cache'), TMPDIR: directory, TEMP: directory, TMP: directory,
     };
   }
@@ -201,5 +204,95 @@ describe.skipIf(!runtimeRoot)('packaged shared-state preparation', () => {
     expect(events(connect())).toEqual([{ sequence: 42, event_id: 'retained-event', run_id: 'retained-run' }]);
     expect(connect(path.join(backupDir, 'original', 'state', 'openclaw.sqlite'))
       .prepare('PRAGMA user_version').get()?.user_version).toBe(1);
+  }, 180_000);
+
+  test.each([1, 15])('repairs agent v1 and dangling skill links with shared schema %s, retaining media and WAL data', async sharedVersion => {
+    seedLegacyState().close();
+    if (sharedVersion === 15) await prepare();
+    const agentPath = path.join(stateDir, 'agents', 'main', 'agent', 'openclaw-agent.sqlite');
+    fs.mkdirSync(path.dirname(agentPath), { recursive: true });
+    const agent = connect(agentPath);
+    // The owned, path/source-keyed v1 memory layout supported by the pinned
+    // owner. Keep committed records in WAL while taking the repair snapshot.
+    agent.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA wal_autocheckpoint = 0;
+      PRAGMA user_version = 1;
+      CREATE TABLE schema_meta (
+        meta_key TEXT NOT NULL PRIMARY KEY, role TEXT NOT NULL, schema_version INTEGER NOT NULL,
+        agent_id TEXT, app_version TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      INSERT INTO schema_meta VALUES ('primary', 'agent', 1, 'main', NULL, 1, 1);
+      CREATE TABLE memory_index_state (id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL);
+      INSERT INTO memory_index_state VALUES (1, 7);
+      CREATE TABLE memory_index_sources (
+        path TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'memory', hash TEXT NOT NULL,
+        mtime INTEGER NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (path, source)
+      );
+      INSERT INTO memory_index_sources VALUES ('MEMORY.md', 'memory', 'source-hash', 10, 20);
+      CREATE TABLE memory_index_chunks (
+        id TEXT PRIMARY KEY, path TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'memory',
+        start_line INTEGER NOT NULL, end_line INTEGER NOT NULL, hash TEXT NOT NULL,
+        model TEXT NOT NULL, text TEXT NOT NULL, embedding TEXT NOT NULL, updated_at INTEGER NOT NULL
+      );
+      INSERT INTO memory_index_chunks VALUES ('sentinel', 'MEMORY.md', 'memory', 1, 1, 'chunk-hash', 'model', 'retained memory', '[]', 1);
+    `);
+    const sessionsDir = path.join(stateDir, 'agents', 'main', 'sessions');
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const mediaPath = path.join(stateDir, 'attachment.png');
+    fs.writeFileSync(mediaPath, 'attachment bytes');
+    const sessionFile = path.join(sessionsDir, 'legacy-session.jsonl');
+    fs.writeFileSync(path.join(sessionsDir, 'sessions.json'), JSON.stringify({
+      'agent:main:main': { sessionId: 'legacy-session', updatedAt: 1000, sessionFile },
+    }));
+    fs.writeFileSync(sessionFile, [
+      { type: 'session', version: 3, id: 'legacy-session', timestamp: '2026-09-01T00:00:00.000Z', cwd: directory },
+      { type: 'message', id: 'legacy-media', parentId: null, timestamp: '2026-09-01T00:00:01.000Z',
+        message: { role: 'user', content: 'retained message', MediaPath: mediaPath, MediaType: 'image/png' } },
+    ].map(event => JSON.stringify(event)).join('\n') + '\n');
+    const skillsDir = path.join(stateDir, 'plugin-skills');
+    fs.mkdirSync(skillsDir);
+    const skillLink = path.join(skillsDir, 'browser-automation');
+    fs.symlinkSync(path.join(directory, 'removed-installation', 'browser-automation'), skillLink, 'junction');
+    fs.writeFileSync(path.join(skillsDir, 'notes.txt'), 'retained user file');
+    const backupDir = path.join(directory, 'manual-backup');
+    fs.mkdirSync(backupDir);
+    const params = { runtimeRoot: runtimeRoot!, stateDir, configPath, backupDir,
+      electronNodeRuntimePath: process.execPath, env: environment() };
+    await runOpenClawCompatibilityRepair({ ...params, phase: OpenClawRepairPhase.Snapshot });
+    const savedAgent = connect(path.join(backupDir, 'original', 'agents', 'main', 'agent', 'openclaw-agent.sqlite'));
+    expect(savedAgent.prepare('PRAGMA user_version').get()?.user_version).toBe(1);
+    expect(savedAgent.prepare('SELECT text FROM memory_index_chunks').get()?.text).toBe('retained memory');
+    expect(JSON.parse(fs.readFileSync(path.join(backupDir, OPENCLAW_REPAIR_SNAPSHOT_MANIFEST), 'utf8'))
+      .generatedPluginSkillLinks).toEqual([{ path: path.join('plugin-skills', 'browser-automation'), target: fs.readlinkSync(skillLink) }]);
+    expect(fs.readFileSync(path.join(backupDir, 'original', 'plugin-skills', 'notes.txt'), 'utf8')).toBe('retained user file');
+    agent.close();
+    savedAgent.close();
+    await runOpenClawDoctorRepair(params);
+    await runOpenClawCompatibilityRepair({ ...params, phase: OpenClawRepairPhase.Recovery });
+    const imported = await migrateLegacySessionStorageWithDoctor(params);
+    expect(imported.status, JSON.stringify(imported)).not.toBe(OpenClawStartupMigrationStatus.Failed);
+    const migratedAgent = connect(agentPath);
+    expect(migratedAgent.prepare('PRAGMA user_version').get()?.user_version).toBe(19);
+    expect(migratedAgent.prepare('PRAGMA integrity_check').get()?.integrity_check).toBe('ok');
+    expect(migratedAgent.prepare('SELECT text FROM memory_index_chunks').get()?.text).toBe('retained memory');
+    const messages = migratedAgent.prepare('SELECT event_json FROM transcript_events').all()
+      .map(row => JSON.parse(String(row.event_json))).filter(event => event.type === 'message');
+    expect(messages).toEqual([expect.objectContaining({ message: expect.objectContaining({ content: 'retained message' }) })]);
+    expect(JSON.stringify(messages)).toContain(mediaPath.replaceAll('\\', '\\\\'));
+    expect(fs.readFileSync(mediaPath, 'utf8')).toBe('attachment bytes');
+    expect(connect().prepare('PRAGMA user_version').get()?.user_version).toBe(15);
+    expect(events(connect())).toEqual([{ sequence: 42, event_id: 'retained-event', run_id: 'retained-run' }]);
+    migratedAgent.close();
+    await runOpenClawDoctorRepair(params);
+    await runOpenClawCompatibilityRepair({ ...params, phase: OpenClawRepairPhase.Recovery });
+    expect(connect(agentPath).prepare('SELECT COUNT(*) AS count FROM transcript_events').get()?.count).toBe(2);
+    if (sharedVersion === 1) {
+      // A successful Doctor exit alone does not prove the gateway can start,
+      // accept authenticated RPCs, and still read the old session after restart.
+      const gateway = { runtimeRoot: runtimeRoot!, env: environment(), sessionKey: 'agent:main:main' };
+      expect(await readRepairedGatewayHistory(gateway)).toContain('retained message');
+      expect(await readRepairedGatewayHistory(gateway)).toContain('retained message');
+    }
   }, 180_000);
 });
