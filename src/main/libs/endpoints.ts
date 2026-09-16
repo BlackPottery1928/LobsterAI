@@ -63,11 +63,11 @@ const getUpdateCheckBaseUrl = (): string => getIntranetBaseUrl() ?? 'https://api
 const getUpdateOvermindChannel = (): 'test' | 'prod' => (isTestModeEnabled() ? 'test' : 'prod');
 
 export const getUpdateCheckUrl = (): string => (
-  `${getUpdateCheckBaseUrl()}/openapi/get/luna/hardware/lobsterai/${getUpdateOvermindChannel()}/update`
+  `${getUpdateCheckBaseUrl()}/ai-platform/desktop/lobsterai/${getUpdateOvermindChannel()}/update`
 );
 
 export const getManualUpdateCheckUrl = (): string => (
-  `${getUpdateCheckBaseUrl()}/openapi/get/luna/hardware/lobsterai/${getUpdateOvermindChannel()}/update-manual`
+  `${getUpdateCheckBaseUrl()}/ai-platform/desktop/lobsterai/${getUpdateOvermindChannel()}/update`
 );
 
 export const getFallbackDownloadUrl = (): string => (

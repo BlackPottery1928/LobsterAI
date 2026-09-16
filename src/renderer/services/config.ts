@@ -97,11 +97,27 @@ const normalizeProviderApiFormat = (providerKey: string, apiFormat: unknown): 'a
   return ApiFormat.Anthropic;
 };
 
+// [INTRA-ONLY] DeepSeek's model list is owned by the build config
+// (`src/shared/providers/constants.ts`), not the stored `app_config` row: this
+// build points it at an intranet proxy serving a fixed catalogue.
+// `normalizeProviderModels` is the only way provider models enter the renderer
+// config, so forcing there also covers Settings writes.
+const CONFIG_OWNED_PROVIDER_MODELS = new Set<string>([ProviderName.DeepSeek]);
+
+const resolveProviderModelsSource = (
+  providerKey: string,
+  models: ProviderConfig['models'],
+): ProviderConfig['models'] => (
+  CONFIG_OWNED_PROVIDER_MODELS.has(providerKey)
+    ? defaultConfig.providers?.[providerKey]?.models?.map(model => ({ ...model }))
+    : models
+);
+
 const normalizeProviderModels = (
   providerKey: string,
   models: ProviderConfig['models'],
   providerContext: Pick<ProviderConfig, 'apiFormat'>,
-): ProviderConfig['models'] => models?.map(model => {
+): ProviderConfig['models'] => resolveProviderModelsSource(providerKey, models)?.map(model => {
   const {
     compatibilityMode: _legacyCompatibilityMode,
     ...modelWithoutCompatibilityMode

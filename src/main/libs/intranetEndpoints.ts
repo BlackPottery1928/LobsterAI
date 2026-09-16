@@ -1,8 +1,9 @@
 // [INTRA-ONLY] Intranet deployment routing.
 //
 // Two things this build must reach on the intranet instead of over the public
-// internet: the credential login (`/api/auth/login`) and the auto-update check
-// (`/openapi/get/luna/hardware/lobsterai/{test,prod}/update[-manual]`).
+// internet: the credential login (`/ai-platform/desktop/lobsterai/api/auth/login`)
+// and the auto-update check
+// (`/ai-platform/desktop/lobsterai/{test,prod}/update[-manual]`).
 // Everything else keeps the upstream addresses on purpose — the Lobster server
 // origin is also the model-inference proxy base, so repointing it wholesale
 // would take the whole app offline, not just the parts the intranet serves.
@@ -24,7 +25,7 @@
  * (usable for dev runs, but a Finder-launched .app on macOS does not inherit the
  * shell environment, so the compiled value is the production mechanism).
  */
-export const INTRANET_BASE_URL = 'http://127.0.0.1:8080';
+export const INTRANET_BASE_URL = 'http://10.129.128.19:9999';
 
 export const INTRANET_BASE_URL_ENV = 'LOBSTER_INTRANET_BASE_URL';
 

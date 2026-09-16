@@ -18,7 +18,7 @@ import { getIntranetBaseUrl } from './intranetEndpoints';
 
 // --- Service contract -------------------------------------------------------
 // Default convention; adjust these to match the real permission API.
-export const INTRANET_AUTH_LOGIN_PATH = '/api/auth/login';
+export const INTRANET_AUTH_LOGIN_PATH = '/ai-platform/desktop/lobsterai/api/auth/login';
 const REQUEST_EMPLOYEE_ID_FIELD = 'employeeId';
 const REQUEST_PASSWORD_FIELD = 'password';
 const RESPONSE_ACCESS_TOKEN_FIELD = 'accessToken';

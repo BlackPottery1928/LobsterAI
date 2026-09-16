@@ -405,7 +405,8 @@ describe('configService provider migrations', () => {
     expect(savedConfig.model.defaultModelProvider).toBe(ProviderName.Minimax);
   });
 
-  test('fills DeepSeek V4 context windows when saving partial config updates', async () => {
+  // [INTRA-ONLY] Stored DeepSeek models are replaced by the build config's list.
+  test('drops stored DeepSeek models in favour of the build config catalogue', async () => {
     const legacyConfig = makeLegacyConfigWithDeepSeekV4WithoutContextWindow();
     const { configService, storeData } = await loadConfigServiceWithStoredConfig(legacyConfig);
 
@@ -418,10 +419,8 @@ describe('configService provider migrations', () => {
     });
 
     const savedConfig = storeData[CONFIG_KEYS.APP_CONFIG] as AppConfig;
-    expect(savedConfig.providers?.[ProviderName.DeepSeek].models).toEqual([
-      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', supportsImage: false, supportsThinking: true, contextWindow: 1_000_000 },
-      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', supportsImage: false, supportsThinking: true, contextWindow: 1_000_000 },
-    ]);
+    expect(savedConfig.providers?.[ProviderName.DeepSeek].models?.map(model => model.id))
+      .toEqual(['DeepSeek-V4-Flash']);
   });
 
   test('preserves old MiMo models while injecting V2.5 models and 1M contexts', async () => {
@@ -458,8 +457,7 @@ describe('configService provider migrations', () => {
     const savedConfig = storeData[CONFIG_KEYS.APP_CONFIG] as AppConfig;
     expect(savedConfig.providers?.[ProviderName.Minimax].models?.find(model => model.id === 'MiniMax-M3')?.contextWindow).toBe(512_000);
     expect(savedConfig.providers?.[ProviderName.Minimax].models?.find(model => model.id === 'MiniMax-M3')?.supportsThinking).toBe(true);
-    expect(savedConfig.providers?.[ProviderName.DeepSeek].models?.find(model => model.id === 'deepseek-v4-flash')?.contextWindow).toBe(256_000);
-    expect(savedConfig.providers?.[ProviderName.DeepSeek].models?.find(model => model.id === 'deepseek-v4-pro')?.contextWindow).toBe(384_000);
+    // DeepSeek is config-owned, so its stored context windows are not preserved.
     expect(savedConfig.providers?.[ProviderName.Xiaomi].models?.find(model => model.id === 'mimo-v2.5-pro')?.contextWindow).toBe(640_000);
     expect(savedConfig.providers?.[ProviderName.Xiaomi].models?.find(model => model.id === 'mimo-v2.5')?.contextWindow).toBe(768_000);
     expect(savedConfig.providers?.[ProviderName.Volcengine].models?.find(model => model.id === 'ark-code-latest')?.supportsThinking).toBe(true);
