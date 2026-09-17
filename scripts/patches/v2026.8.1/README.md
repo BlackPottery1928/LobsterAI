@@ -57,3 +57,98 @@ ordinary non-main-agent migration, marker-only config persistence, failed config
 commit followed by retry, and repeated startup without unrelated config changes.
 Remove the patch once the pinned upstream owner provides an equivalent commit
 boundary.
+
+## Browser DNS failure and Gateway process recovery
+
+Three independent patches contain browser failures at their owners. A DNS
+failure in a Playwright document route must finish the affected request rather
+than leak an unhandled rejection or terminate the Gateway. Restoring the global
+handler alone keeps the process alive but can leave navigation waiting for its
+timeout.
+
+| Patch | Purpose and upstream source |
+| --- | --- |
+| `openclaw-gateway-fast-path-rejection-handler.patch` | Backports [#141163](https://github.com/openclaw/openclaw/pull/141163), commit `1ddd53680b6bbc1d725fd67edc9ffa31944dfe86`: install existing process error handlers before the Gateway fast path, without duplicate registration on full CLI fallback. |
+| `openclaw-browser-navigation-error-containment.patch` | Change only `gotoPageWithNavigationGuard` in `pw-session-navigation.ts`, own all route callback failures, terminate failed requests, and contain late asynchronous work. Adds `pw-session-navigation.rejection.test.ts`. |
+| `openclaw-browser-cdp-dispatch-rejection.patch` | Backports [#150177](https://github.com/openclaw/openclaw/pull/150177), commit `22572027ded601e128335c45c537a37113b384d5`: catch rejected CDP message dispatch promises and close the affected connection using its existing lifecycle. |
+
+The navigation fix covers Playwright-based navigation in managed Chrome,
+extension relay, and direct CDP profiles. The default LobsterAI in-app browser
+uses `existing-session` through the MCP bridge and Electron navigation; it does
+not execute this route callback. Inspect the actual profile/driver when testing
+fallbacks or explicitly selected profiles.
+
+Only known transient network errors from `assertBrowserNavigationAllowed` are
+isolated to a subframe; unknown errors and `continue` failures still fail the
+operation. DNS failures do not quarantine or close an existing page. Error
+precedence is top-level policy denial, then ordinary `guardError`, then
+`page.goto` failure, then cleanup failure. A `stopSignal` ends the wait for DNS;
+late resolution/rejection remains observed and cannot continue the stale route.
+Only the exact handler is removed. The full unroute-and-in-flight-drain cleanup
+chain shares a 1000ms grace period, independent of the remaining goto timeout.
+The patch adds no diagnostic logs and leaves adjacent navigation guards alone.
+
+Apply the patch set through `npm run openclaw:patch`, run the owning upstream
+startup, navigation, and CDP regression suites, and rebuild the runtime through
+the normal OpenClaw runtime build flow. Verify real-browser DNS failure,
+Gateway PID/readiness continuity, and subsequent browser operations on that
+runtime. A source test or an isolated Chrome experiment does not establish
+packaged-app, IM, or cross-platform coverage. The full scope and validation
+record live in the [bugfix design](../../../specs/bugfixes/openclaw-browser-dns-recovery/2026-09-17-openclaw-browser-dns-recovery-design.md).
+
+### Validation record (2026-09-17)
+
+| Check | Result |
+| --- | --- |
+| Complete patch reapplication | Two complete runs of all 42 patches; each reported `Applied 42 / Skipped 0`. |
+| LobsterAI patch suite | 20 files; 69 passed, 1 skipped (70 total). |
+| Host checks | Changed-file strict ESLint, `node --check scripts/apply-openclaw-patches.cjs`, and `compile:electron` passed. |
+| OpenClaw browser regression | 3 files, all 65 tests passed, including 13 new navigation cases, CDP, and existing navigation guard coverage. |
+| OpenClaw process error policy | All 54 `unhandled-rejections` and all 10 `fatal-detection` tests passed. |
+| Full OpenClaw CLI regression | Patched: 252 passed, 3 failed (255 total). Original `run-main.ts` and `exit.test.ts` restored: 248 passed, the same 3 failed with identical assertions (251 total). |
+| Independent read-only navigation review | No outstanding finding. |
+| Final QA runtime build | All `qaRuntime` phases passed; final build completed in 2m19.6s. |
+| Real Gateway + managed Chrome | Six required scenarios passed; a separate client-side top-level redirect returned raw Node `ENOTFOUND` from the route guard in 1177ms. All 76 health checks passed on the same PID and WebSocket; zero unexpected disconnects. |
+
+The three CLI failures reproduce on the original source and concern POSIX path
+fixtures on Windows; they were left unchanged. The total differs by the four
+new fast-path tests, which are absent from the original test file. This is not a
+claim that the full CLI suite passed. The initial navigation red run covered
+11 cases (9 failed, 2 passed); two boundary cases were added afterward, so the
+current 13 cases were not all rerun against the original implementation.
+
+Automated review was launched but its preflight rejected before sending because
+TruffleHog is unavailable locally. No automated review conclusion was obtained;
+this is neither a product failure nor a completed review. Ordinary oxlint
+(warnings as errors) and oxfmt passed for all six changed upstream files.
+The upstream changed gate passed conflict-marker and max-lines checks, then
+stopped on assertion-SAFETY violations in seven files modified by existing
+patches outside these three fixes. Broad type-aware lint and scoped tsgo could
+not complete under local memory pressure; full OpenClaw type validation remains
+a build-machine follow-up. The final live run used fresh Windows state/profile
+and the rebuilt checkout, with LobsterAI's default proxy-compatible network
+setting and blocked-host policy still active. A bad iframe was aborted while
+its main page loaded, the same tab recovered, and policy denial remained effective.
+The HTTP 302 case returned a Chromium DNS error and is distinct from the Node
+route-guard case. Source/entry hashes matched; logs had no unhandled rejection
+or uncaught exception. All four owned ports closed during cleanup; the final
+Windows taskkill exit code is intentional cleanup. Actual user extension/attached
+profiles, in-app MCP, packaged-app, real IM, and cross-platform acceptance are
+not recorded as complete; see the design record.
+
+### Retirement when upgrading OpenClaw
+
+**Upgrading to `v2026.9.4` allows removal of only the fast-path handler patch
+after equivalence and regression checks; do not remove all three patches.**
+
+| Patch | Decision for `v2026.9.4` | Later removal condition |
+| --- | --- | --- |
+| Gateway fast-path handler | May remove: [that tag's `run-main.ts`](https://github.com/openclaw/openclaw/blob/v2026.9.4/src/cli/run-main.ts#L1506) already contains #141163. | Confirm handlers are installed before actual Gateway work and only once on every shipped startup path, then pass the owning regression. |
+| Browser navigation containment | Retain and port to the target source. The inspected [main navigation implementation](https://github.com/openclaw/openclaw/blob/5d1389f2c8a3546e2c6dd52bafe90a09e1667460/extensions/browser/src/browser/pw-session-navigation.ts#L409) still rethrows ordinary route DNS errors. | Remove only the portions covered by equivalent upstream route failure, request completion, and late-callback cleanup behavior; retain the regression contracts. |
+| Browser CDP dispatch | Retain: #150177 merged on 2026-09-16 UTC / 2026-09-17 Asia/Shanghai, after `v2026.9.4` was published. | A later pinned release must contain #150177 or equivalent behavior and pass synchronous/asynchronous dispatch and connection-close regressions. |
+
+Upstream inspection is fixed at main commit
+`5d1389f2c8a3546e2c6dd52bafe90a09e1667460` on 2026-09-17. Recheck the exact
+upgrade tag, update patch manifests/validators and this record, then rebuild;
+a closed PR, patch conflict, or global rejection listener alone is not evidence
+that all three fixes are obsolete.
