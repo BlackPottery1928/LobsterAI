@@ -2,7 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { backup, DatabaseSync } from 'node:sqlite';
-import { detectOpenClawStateDatabaseSchemaMigrations, repairOpenClawStateDatabaseSchema } from '#openclaw-state-db';
+import {
+  closeOpenClawStateDatabaseByPath,
+  detectOpenClawStateDatabaseSchemaMigrations,
+  openOpenClawStateDatabase,
+  repairOpenClawStateDatabaseSchema,
+} from '#openclaw-state-db';
 import { OPENCLAW_STATE_SCHEMA_VERSION } from '#openclaw-state-db-contract';
 import { assertOpenClawStateDatabaseOwner, assertSupportedSchemaVersion } from '#openclaw-repair-state-check';
 import { assertCurrentStateRuntimeSchema } from '#openclaw-state-schema-validation';
@@ -24,6 +29,7 @@ export async function migrateSharedStateSchema({ stateDir, configPath, env, back
   }
   if (!fs.existsSync(databasePath)) return [];
 
+  let needsLegacyInitialization = false;
   const source = new DatabaseSync(databasePath, { readOnly: true });
   try {
     assertSupportedSchemaVersion(source, databasePath);
@@ -38,6 +44,8 @@ export async function migrateSharedStateSchema({ stateDir, configPath, env, back
       throw new Error('Shared-state migration requires consistent legacy schema metadata.');
     }
     verifyIntegrity(source);
+    needsLegacyInitialization = version === 1
+      && !source.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'audit_events'").get();
     fs.mkdirSync(backupRoot, { recursive: true, mode: 0o700 });
     const directory = fs.mkdtempSync(path.join(backupRoot, `state-schema-${Date.now()}-${randomUUID()}-`));
     const databaseBackup = path.join(directory, 'openclaw.sqlite');
@@ -59,6 +67,13 @@ export async function migrateSharedStateSchema({ stateDir, configPath, env, back
   // Do not implement parallel SQL migrations or run general Doctor/plugin repairs at startup.
   const result = repairOpenClawStateDatabaseSchema({ stateDir, env });
   if (result.warnings.length) throw new Error(result.warnings.join('\n'));
+  if (needsLegacyInitialization) {
+    // The pinned repair owner leaves pre-audit v1 at v1 so normal open can
+    // initialize the complete schema. Finish that step under the same lease
+    // and backup before requiring the current runtime schema below.
+    try { openOpenClawStateDatabase({ path: databasePath, env }); }
+    finally { closeOpenClawStateDatabaseByPath(databasePath); }
+  }
   const verified = new DatabaseSync(databasePath, { readOnly: true });
   try {
     assertCurrentStateRuntimeSchema(verified, databasePath);
