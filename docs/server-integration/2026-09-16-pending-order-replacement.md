@@ -6,7 +6,7 @@ Server 新增报价、幂等换购与进度接口，修复先打开一种商品�
 
 ## Endpoint Details
 
-- `POST /api/payment/quote`：`{offerToken?,target}`。只读报价，返回 amount、originalAmount、discountRate、baseCredits、bonusCredits、totalCredits、creditsEstimated、serverTimeEpochMs、replacementEnabled。
+- `POST /api/payment/quote`：`{offerToken?,target}`。只读报价，返回 amount、originalAmount、discountRate、baseCredits、bonusCredits、totalCredits、creditsEstimated、serverTimeEpochMs；为兼容旧版 Portal，额外固定返回 `replacementEnabled=true`，不再对应配置开关。
 - `POST /api/payment/orders/{oldOrderNo}/replace`：`{requestId,offerToken,target}`。requestId 为同一用户唯一 UUID，重试必须复用。
 - `GET /api/payment/order-replacements/{requestId}`：返回 processing / completed / old_order_paid / offer_unavailable，completed 包含 order 支付信息和订单状态。
 - 原下单接口不变。42304 错误的 data 包含 currentOrderNo/currentProductKey 与订单时间字段。
@@ -23,7 +23,7 @@ Server 新增报价、幂等换购与进度接口，修复先打开一种商品�
 ## Frontend Action Items
 
 1. 用户选择时先 quote 展示实际金额、基础积分和预计赠送积分。门槛按折后实付金额，最终赠送按实际支付时活动规则。
-2. quote.replacementEnabled 为 true 时，显式选择遇到 42304 仅发起一次换购；不要递归处理新冲突取消别的标签页的新订单。
+2. 显式选择遇到携带 currentOrderNo 的 42304，且持有当前优惠 token 时，仅发起一次换购；不再检查 quote.replacementEnabled，不要递归处理新冲突取消别的标签页的新订单。
 3. 保存 requestId 及原目标，处理中隐藏旧二维码，轮询进度。超时/重新打开继续同请求；关闭页面不取消后台操作。
 4. completed 使用返回的新支付参数；old_order_paid 刷新账户/优惠并让用户重新选择；offer_unavailable 明确提示，不自动原价购买。
 5. 订单显示 payment_review 时提示已收款待核对，不再展示可支付二维码。服务端留有交易凭证供对账。
@@ -34,7 +34,9 @@ Cookie/Session 或 JWT Bearer；JSON Content-Type。服务端校验订单和 off
 
 ## Notes & Caveats
 
-必须先应用 V90 DDL，部署全部服务端节点，再开启 `PAYMENT_ORDER_REPLACEMENT_ENABLED=true`，最后发布 Portal。开关默认 false，个人关单恢复在关闭时暂停；此状态仅用于短暂发布过渡。无需历史数据 UPDATE。旧数据库的 NULL flow 不代表未扫码。
+必须先应用 V90 DDL，部署全部服务端节点，最后发布 Portal。换购、换购恢复与个人订单超时清理始终可用，无需配置文件或环境变量启用，遗留开关配置不再生效。无需历史数据 UPDATE。旧数据库的 NULL flow 不代表未扫码。
+
+2026-09-16 用户 14189 在 50 元切换 100 元商品时，虽然新商品已选中，但旧开关关闭导致前端未调用换购接口。现已删除该开关及 Portal 的条件判断；旧 Portal 通过固定 true 的兼容字段继续工作。服务端 42304 提示改为先处理原订单或等待关闭。发布后验证 50 元到 100 元的换购；仍需先查单、确认关单再释放优惠。接口签名、结构和鉴权方式不变。
 
 订单支付时限与优惠时限独立，已签发订单按价格快照付款；换购不能重置优惠期限。渠道关单/扣款状态未知时 pending 可超过 30 分钟，前端展示处理中。微信代扣关单可能受最短时间限制；已发出的支付宝 WAP 链接查无订单时需等待到期或取得明确关闭证明。
 
