@@ -71,6 +71,7 @@ import {
   selectCurrentSession,
   selectIsStreaming,
   selectLastMessageContent,
+  selectPendingPermissions,
   selectRemoteManaged,
 } from '../../store/selectors/coworkSelectors';
 import {
@@ -183,6 +184,7 @@ import CoworkBtwFloatingPanel from './CoworkBtwFloatingPanel';
 import CoworkChangesBadge from './CoworkChangesBadge';
 import CoworkConversationSearch from './CoworkConversationSearch';
 import CoworkPromptInput, { type CoworkPromptInputRef } from './CoworkPromptInput';
+import QuestionDock from './interactions/QuestionDock';
 import LazyRenderTurn, { clearHeightCache } from './LazyRenderTurn';
 import {
   buildConversationTurns,
@@ -1406,6 +1408,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
   const isMac = window.electron.platform === 'darwin';
   const isWindows = window.electron.platform === 'win32';
   const currentSession = useSelector(selectCurrentSession);
+  const pendingPermissions = useSelector(selectPendingPermissions);
   const enterpriseAccountContext = useSelector(selectEnterpriseAccountContext);
   const isStreaming = useSelector(selectIsStreaming);
   const remoteManaged = useSelector(selectRemoteManaged);
@@ -6813,6 +6816,9 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
             <PromptInputCollapseIcon className="h-3.5 w-3.5" />
           </button>
         )}
+        <div className={COWORK_DETAIL_CONTENT_CLASS}>
+          <QuestionDock sessionId={currentSession.id} permissions={pendingPermissions} />
+        </div>
         {minimizedPermission && (
           <div className={`${COWORK_DETAIL_CONTENT_CLASS} mb-2`}>
             <div

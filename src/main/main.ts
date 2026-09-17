@@ -10671,16 +10671,15 @@ if (!gotTheLock) {
         // AskUserQuestion plugin responses go to the bridge server, not the runtime
         if (options.requestId) {
           const result = options.result;
+          const updatedInput = result.behavior === 'allow' && result.updatedInput && typeof result.updatedInput === 'object'
+            ? (result.updatedInput as Record<string, unknown>)
+            : undefined;
           const askUserResponse: AskUserResponse = {
             behavior: result.behavior === 'allow' ? 'allow' : 'deny',
-            answers:
-              result.behavior === 'allow' &&
-              result.updatedInput &&
-              typeof result.updatedInput === 'object'
-                ? ((result.updatedInput as Record<string, unknown>).answers as
-                    | Record<string, string>
-                    | undefined)
-                : undefined,
+            answers: updatedInput?.answers as Record<string, string> | undefined,
+            skippedQuestionIds: Array.isArray(updatedInput?.skippedQuestionIds)
+              ? (updatedInput.skippedQuestionIds as string[])
+              : undefined,
           };
           getMcpRuntime().resolveAskUser(options.requestId, askUserResponse);
         }

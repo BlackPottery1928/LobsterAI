@@ -27,6 +27,7 @@ export type AskUserRequest = {
   requestId: string;
   sessionKey?: string;
   questions: Array<{
+    id?: string;
     question: string;
     header?: string;
     title?: string;
@@ -39,6 +40,7 @@ export type AskUserRequest = {
 export type AskUserResponse = {
   behavior: 'allow' | 'deny';
   answers?: Record<string, string>;
+  skippedQuestionIds?: string[];
 };
 
 type PendingAskUser = {
