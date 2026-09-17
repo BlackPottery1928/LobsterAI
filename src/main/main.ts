@@ -298,6 +298,7 @@ import {
   quitAppWithoutConfirmation,
   showAppQuitConfirmation,
 } from './libs/appQuitConfirmation';
+import { hideAppWindowsForQuit } from './libs/appQuitWindows';
 import { AppUpdateCoordinator, INSTALLATION_UUID_KEY } from './libs/appUpdateCoordinator';
 import { AuthCallbackRouter } from './libs/authCallbackRouter';
 import {
@@ -3729,7 +3730,7 @@ const getDesktopNotificationManager = (): DesktopNotificationManager => {
         flushOpenSessionFromNotification();
       },
       updateTrayReminder: (count: number, onClick?: () => void) => {
-        updateTrayReminder(() => mainWindow, { count, onClick });
+        updateTrayReminder(() => isQuitting ? null : mainWindow, { count, onClick });
       },
     });
   }
@@ -4126,6 +4127,7 @@ const flushOpenSessionFromNotification = (): void => {
 };
 
 const focusMainWindowForReason = (reason: string): void => {
+  if (isQuitting) return;
   const targetWindow = mainWindow && !mainWindow.isDestroyed()
     ? mainWindow
     : ensureMainWindowForReason?.(reason) ?? null;
@@ -4755,6 +4757,9 @@ const scheduleReload = (reason: string, webContents?: WebContents) => {
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
+  if (isDev) {
+    console.warn('[Main] Development startup skipped: another LobsterAI instance is already running. Quit that instance and restart electron:dev to load the current source.');
+  }
   app.quit();
 } else {
   // Register custom protocol for OAuth callback
@@ -4795,7 +4800,7 @@ if (!gotTheLock) {
   let pendingShowOnFirstFrame = false;
 
   const focusMainWindow = (reason: string) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (isQuitting || !mainWindow || mainWindow.isDestroyed()) return;
     try {
       if (!mainWindow.isVisible() && !hasRenderedFirstFrame) {
         pendingShowOnFirstFrame = true;
@@ -13675,6 +13680,7 @@ if (!gotTheLock) {
 
   // 创建主窗口
   const createWindow = () => {
+    if (isQuitting) return;
     // 如果窗口已经存在，就不再创建新窗口
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -13860,7 +13866,7 @@ if (!gotTheLock) {
     // "应用没打开"。开机自启保持仅托盘,不弹窗。
     const SHOW_FALLBACK_DELAY_MS = 10_000;
     const showFallbackTimer = setTimeout(() => {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (isQuitting || !mainWindow || mainWindow.isDestroyed()) return;
       if (mainWindow.isVisible() || hasRenderedFirstFrame) return;
       if (isAutoLaunched()) return;
       console.warn(
@@ -13873,7 +13879,7 @@ if (!gotTheLock) {
     let hasOpenedDevelopmentTools = false;
     const developmentLoadRecovery: DevelopmentMainWindowLoadRecovery | null = isDev
       ? createDevelopmentMainWindowLoadRecovery({
-          isTargetAvailable: () => !createdMainWindow.isDestroyed(),
+          isTargetAvailable: () => !isQuitting && !createdMainWindow.isDestroyed(),
           loadDevelopmentUrl: () => createdMainWindow.loadURL(DEV_SERVER_URL),
           loadErrorPage: () => createdMainWindow.loadFile(
             path.join(__dirname, '../resources/error.html'),
@@ -14004,6 +14010,7 @@ if (!gotTheLock) {
     // 等待内容加载完成后再显示窗口
     mainWindow.once('ready-to-show', () => {
       clearTimeout(showFallbackTimer);
+      if (isQuitting) return;
       // 开机自启时不显示窗口，仅显示托盘图标
       if (!isAutoLaunched()) {
         mainWindow?.show();
@@ -14013,7 +14020,7 @@ if (!gotTheLock) {
       const initLang = getStore().get<{ language?: string }>('app_config')?.language;
       setLanguage(initLang === 'en' ? 'en' : 'zh');
       // 窗口就绪后创建系统托盘
-      createTray(() => mainWindow);
+      createTray(() => isQuitting ? null : mainWindow);
 
       // Start cron polling after the window is ready.
       (async () => {
@@ -14050,6 +14057,7 @@ if (!gotTheLock) {
   };
 
   ensureMainWindowForReason = (reason: string): BrowserWindow | null => {
+    if (isQuitting) return null;
     if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
     console.log(`[Main] recreating main window after ${reason}`);
     createWindow();
@@ -14350,6 +14358,7 @@ if (!gotTheLock) {
   const runAppCleanupAndExit = (trigger: string) => {
     isCleanupInProgress = true;
     isQuitting = true;
+    hideAppWindowsForQuit();
 
     const watchdog = setTimeout(() => {
       console.error(
@@ -14405,8 +14414,6 @@ if (!gotTheLock) {
       )
       .then(confirmed => {
         if (appQuitConfirmationGate.finishPrompt(confirmed)) {
-          // Cleanup is asynchronous and cannot be cancelled once teardown starts.
-          if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setEnabled(false);
           runAppCleanupAndExit('before-quit');
         } else {
           console.log('[Main] quit cancelled at the confirmation prompt');
@@ -14982,7 +14989,7 @@ if (!gotTheLock) {
       if (currentLanguage !== lastLanguage) {
         lastLanguage = currentLanguage;
         setLanguage(currentLanguage === 'en' ? 'en' : 'zh');
-        updateTrayMenu(() => mainWindow);
+        updateTrayMenu(() => isQuitting ? null : mainWindow);
       }
 
       const previousUseSystemProxy = oldConfig
@@ -15026,7 +15033,7 @@ if (!gotTheLock) {
 
     // 在 macOS 上，当点击 dock 图标时显示已有窗口或重新创建
     app.on('activate', () => {
-      if (isDataMigrationRestoreInProgress) {
+      if (isQuitting || isDataMigrationRestoreInProgress) {
         return;
       }
       if (mainWindow && !mainWindow.isDestroyed()) {
