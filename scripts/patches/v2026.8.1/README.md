@@ -1,5 +1,30 @@
 # OpenClaw v2026.8.1 patch notes
 
+## LobsterAI provider cooldown
+
+`openclaw-lobsterai-provider-cooldown.patch` adds `lobsterai-server` to the
+existing provider-managed auth cooldown bypass. LobsterAI's local token proxy
+owns login refresh, and its server enforces user quota and selects upstream
+model credentials. A billing/auth failure from one upstream model must not
+disable the shared proxy credential and block other models for the agent.
+
+The shared predicate covers both failure persistence and auth availability,
+including already-persisted `inline-api-key:lobsterai-server` cooldowns. No
+credential or SQLite migration is needed. Other providers retain their existing
+cooldowns; real login and quota errors still reach the user.
+
+After applying the patch, run the two owning upstream suites:
+
+```sh
+pnpm test src/agents/auth-profiles/usage.test.ts src/agents/model-auth.profiles.test.ts
+```
+
+Regression cases cover auth/billing failure writes and existing billing state
+with both literal and environment-backed proxy credentials. The runtime build
+fingerprint includes this patch; rebuild through `npm run electron:dev:openclaw`
+before testing the fix in the desktop app. Remove this patch when the pinned
+upstream provides an equivalent provider-managed cooldown contract.
+
 ## Auth migration config commit
 
 `openclaw-auth-migration-config-commit.patch` adds an optional

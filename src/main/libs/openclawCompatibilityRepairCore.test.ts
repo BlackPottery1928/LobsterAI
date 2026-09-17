@@ -6,7 +6,10 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { OpenClawRepairPhase, OpenClawRepairPluginSource } from '../../shared/openclawEngine/repair';
+import {
+  OPENCLAW_PLUGIN_SKILLS_DIRECTORY, OPENCLAW_REPAIR_SNAPSHOT_MANIFEST,
+  OpenClawRepairPhase, OpenClawRepairPluginSource,
+} from '../../shared/openclawEngine/repair';
 import {
   assertOwnedRepairPath, type CompatibilityRepairOptions, type CompatibilityRepairOwners,
   type RepairInstallRecord, repairOpenClawCompatibility,
@@ -32,7 +35,56 @@ function owners(): CompatibilityRepairOwners {
   };
 }
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const directory of directories.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test.each([false, true])('snapshots a generated skill link without creating or following it, dangling=%s', async dangling => {
+  const options = fixture();
+  const skills = path.join(options.stateDir, OPENCLAW_PLUGIN_SKILLS_DIRECTORY);
+  const external = path.join(path.dirname(options.stateDir), 'old-installation');
+  const link = path.join(skills, 'browser-automation');
+  fs.mkdirSync(skills);
+  if (!dangling) {
+    fs.mkdirSync(external);
+    fs.writeFileSync(path.join(external, 'SKILL.md'), 'external source must remain unchanged');
+  }
+  fs.symlinkSync(external, link, 'junction');
+  const linkTarget = fs.readlinkSync(link);
+  fs.writeFileSync(path.join(skills, 'user-note.md'), 'keep real files');
+  fs.mkdirSync(path.join(skills, 'user-directory'));
+  fs.writeFileSync(path.join(skills, 'user-directory', 'SKILL.md'), 'keep real directories');
+  const symlink = vi.spyOn(fs, 'symlinkSync').mockImplementation(() => {
+    throw Object.assign(new Error('EPERM: cannot create symbolic links'), { code: 'EPERM' });
+  });
+
+  const report = await repairOpenClawCompatibility(options, owners());
+  expect(report, report.error).toMatchObject({ success: true });
+  expect(symlink).not.toHaveBeenCalled();
+  expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+  expect(fs.readlinkSync(link)).toBe(linkTarget);
+  const savedSkills = path.join(options.backupDir, 'original', OPENCLAW_PLUGIN_SKILLS_DIRECTORY);
+  expect(fs.lstatSync(path.join(savedSkills, 'browser-automation'), { throwIfNoEntry: false })).toBeUndefined();
+  expect(fs.readFileSync(path.join(savedSkills, 'user-note.md'), 'utf8')).toBe('keep real files');
+  expect(fs.readFileSync(path.join(savedSkills, 'user-directory', 'SKILL.md'), 'utf8')).toBe('keep real directories');
+  const manifest = JSON.parse(fs.readFileSync(path.join(options.backupDir, OPENCLAW_REPAIR_SNAPSHOT_MANIFEST), 'utf8'));
+  expect(manifest.generatedPluginSkillLinks).toEqual([{ path: path.relative(options.stateDir, link), target: linkTarget }]);
+  expect(manifest.restoreInstructions).toContain('openclaw skills list');
+  if (!dangling) expect(fs.readFileSync(path.join(external, 'SKILL.md'), 'utf8')).toBe('external source must remain unchanged');
+});
+
+test.each(['outside-index', 'nested', 'database'])('does not suppress backup failure for a %s link', async kind => {
+  const options = fixture();
+  const skills = path.join(options.stateDir, OPENCLAW_PLUGIN_SKILLS_DIRECTORY);
+  const link = kind === 'outside-index' ? path.join(options.stateDir, 'user-link')
+    : path.join(skills, kind === 'nested' ? 'user-directory/link' : 'user.sqlite');
+  fs.mkdirSync(path.dirname(link), { recursive: true });
+  fs.symlinkSync(path.join(path.dirname(options.stateDir), 'absent'), link, 'junction');
+  vi.spyOn(fs, 'symlinkSync').mockImplementation(() => { throw new Error('EPERM: symbolic link denied'); });
+  const report = await repairOpenClawCompatibility(options, owners());
+  expect(report).toMatchObject({ success: false, failurePath: link });
+  expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+  expect(fs.existsSync(path.join(options.backupDir, OPENCLAW_REPAIR_SNAPSHOT_MANIFEST))).toBe(false);
 });
 
 test('snapshot includes committed WAL data, config, and legacy transcripts without changing sources', async () => {

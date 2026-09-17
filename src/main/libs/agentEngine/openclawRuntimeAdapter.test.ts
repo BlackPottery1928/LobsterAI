@@ -36,6 +36,7 @@ import { OpenClawCronRunMetadataKey } from '../../../shared/cowork/openclawCronS
 import { CoworkSelectedTextSource } from '../../../shared/cowork/selectedText';
 import { CoworkSteerRejectReason, CoworkSteerStatus } from '../../../shared/cowork/steer';
 import { OpenClawTranscriptSafetyLimit } from '../../../shared/openclawTranscript/constants';
+import { ProviderName } from '../../../shared/providers/constants';
 import { t } from '../../i18n';
 import { OpenClawChannelSessionSync } from '../openclawChannelSessionSync';
 import {
@@ -681,6 +682,44 @@ test('length final does not overwrite an explicit stop while history is pending'
     message.type === 'system'
     && message.metadata?.isTruncated === true
   ))).toBe(false);
+});
+
+test('resolveOpenClawRuntimeErrorMessage surfaces a LobsterAI upstream billing failure as a model service issue', () => {
+  const metadata = {
+    provider: ProviderName.LobsteraiServer,
+    model: 'kimi-k2.6',
+    failoverReason: 'billing',
+    rawErrorPreview: 'Your account is suspended due to insufficient balance',
+  };
+  for (const message of ['LLM request failed.', 'lobsterai-server returned a billing error']) {
+    expect(resolveOpenClawRuntimeErrorMessage(message, metadata))
+      .toBe(t('coworkErrorModelServiceUnavailable'));
+  }
+  expect(resolveOpenClawRuntimeErrorMessage('LLM request failed.', {
+    provider: ProviderName.LobsteraiServer,
+    code: '50203',
+  })).toBe(t('coworkErrorModelServiceUnavailable'));
+});
+
+test('resolveOpenClawRuntimeErrorMessage preserves user quota evidence behind a billing wrapper', () => {
+  expect(resolveOpenClawRuntimeErrorMessage('lobsterai-server returned a billing error', {
+    provider: ProviderName.LobsteraiServer,
+    failoverReason: 'billing',
+    rawErrorPreview: '{"error":{"code":40202,"message":"本月积分已用完"}}',
+  })).toBe(t('coworkErrorQuotaExhausted'));
+});
+
+test('resolveOpenClawRuntimeErrorMessage preserves customer-managed provider billing guidance', () => {
+  expect(resolveOpenClawRuntimeErrorMessage('LLM request failed.', {
+    provider: ProviderName.Moonshot,
+    failoverReason: 'billing',
+    rawErrorPreview: 'insufficient balance',
+  })).toBe(t('coworkErrorInsufficientBalance'));
+});
+
+test('resolveOpenClawRuntimeErrorMessage does not classify persisted cooldowns as billing failures', () => {
+  expect(resolveOpenClawRuntimeErrorMessage('Inline API key for provider "lobsterai-server" is temporarily disabled after a provider auth/billing failure. Retry after about 300 minutes, or switch to a different auth profile/API key.'))
+    .toBe(t('coworkErrorProviderCooldown'));
 });
 
 test('resolveOpenClawRuntimeErrorMessage restores recent quota error hidden by OpenClaw generic error', () => {

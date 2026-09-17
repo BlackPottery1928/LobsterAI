@@ -5,6 +5,7 @@ export const OPENCLAW_LEGACY_DISCOVERY_KEY = 'bundledDiscovery';
 export const OPENCLAW_CLI_ERROR_TYPE = 'cli_error';
 
 export const OpenClawStartupCompatibilityMode = {
+  PrepareStartup: 'prepare-startup',
   MigrateConfig: 'migrate-config',
   RepairBindings: 'repair-bindings',
   RepairDreamingState: 'repair-dreaming-state',

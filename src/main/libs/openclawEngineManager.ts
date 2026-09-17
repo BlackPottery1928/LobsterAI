@@ -491,6 +491,11 @@ export class OpenClawEngineManager extends EventEmitter {
     return 'pid' in child && typeof child.pid === 'number' ? child.pid : null;
   }
 
+  /** Read-only diagnostics; avoids resolving runtime files or reading tokens. */
+  getGatewayProcessGeneration(): number {
+    return this.gatewayGeneration;
+  }
+
   /**
    * Called when the gateway announced it is restarting itself (WS close 1012
    * "service restart" after an OpenClaw config reload). While the window is
@@ -997,8 +1002,8 @@ export class OpenClawEngineManager extends EventEmitter {
       stateDir: this.stateDir, configPath: this.configPath, runtimeRoot: runtime.root!,
       electronNodeRuntimePath, env, mode,
     });
-    if (hasLegacyDiscovery) {
-      const compatibility = await this.startupCompatibilityRunner(OpenClawStartupCompatibilityMode.MigrateConfig);
+    if (hasLegacyDiscovery || fs.existsSync(path.join(this.stateDir, 'state', 'openclaw.sqlite'))) {
+      const compatibility = await this.startupCompatibilityRunner(OpenClawStartupCompatibilityMode.PrepareStartup);
       if (this.shutdownRequested) return this.getStatus();
       if (compatibility.status === OpenClawStartupMigrationStatus.Failed) {
         this.setStatus({
