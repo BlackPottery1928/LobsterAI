@@ -38,7 +38,7 @@ import { cleanupStaleThirdPartyPluginsFromBundledDir, listLocalOpenClawExtension
 import { migrateAllFtsOnlyMemoryIndexes } from './openclawMemoryIndexMigration';
 import { migrateLegacySessionStorageWithDoctor } from './openclawSessionLegacyMigration';
 import { extractOpenClawBindingSchemaFailure, extractOpenClawCliFailure, hasLegacyOpenClawDiscovery, isOpenClawBindingSchemaFailure, runOpenClawStartupCompatibility } from './openclawStartupCompatibility';
-import { migrateLegacyStateBeforeStartup } from './openclawStartupStateMigration';
+import { migrateLegacyStateBeforeStartup, stopStartupStateMigrations } from './openclawStartupStateMigration';
 import { ensureOpenClawWorkerShims, getMissingOpenClawWorkerTargets } from './openclawWorkerShims';
 import { appendPythonRuntimeToEnv } from './pythonRuntime';
 
@@ -489,6 +489,11 @@ export class OpenClawEngineManager extends EventEmitter {
       return null;
     }
     return 'pid' in child && typeof child.pid === 'number' ? child.pid : null;
+  }
+
+  /** Read-only diagnostics; avoids resolving runtime files or reading tokens. */
+  getGatewayProcessGeneration(): number {
+    return this.gatewayGeneration;
   }
 
   /**
@@ -997,8 +1002,8 @@ export class OpenClawEngineManager extends EventEmitter {
       stateDir: this.stateDir, configPath: this.configPath, runtimeRoot: runtime.root!,
       electronNodeRuntimePath, env, mode,
     });
-    if (hasLegacyDiscovery) {
-      const compatibility = await this.startupCompatibilityRunner(OpenClawStartupCompatibilityMode.MigrateConfig);
+    if (hasLegacyDiscovery || fs.existsSync(path.join(this.stateDir, 'state', 'openclaw.sqlite'))) {
+      const compatibility = await this.startupCompatibilityRunner(OpenClawStartupCompatibilityMode.PrepareStartup);
       if (this.shutdownRequested) return this.getStatus();
       if (compatibility.status === OpenClawStartupMigrationStatus.Failed) {
         this.setStatus({
@@ -1181,6 +1186,7 @@ export class OpenClawEngineManager extends EventEmitter {
 
     // Let an in-flight startup observe cancellation before allowing its
     // replacement to begin (startup may still be awaiting a probe/migration).
+    await stopStartupStateMigrations(this.stateDir);
     if (this.startGatewayPromise) await this.startGatewayPromise.catch(() => {});
     if (restarting && generation === this.gatewayLifecycleGeneration) return;
 
