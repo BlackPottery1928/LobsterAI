@@ -85,6 +85,7 @@ import {
   normalizeBrowserWebAccessConfig,
 } from '../shared/browserWebAccess/constants';
 import { ClipboardIpc } from '../shared/clipboard/constants';
+import { BACKGROUND_JOB_EVENT_CHANNEL, type CoworkBackgroundJobsEvent } from '../shared/cowork/backgroundJobs';
 import {
   type CoworkBrowserAnnotationMessageBatch,
   normalizeBrowserAnnotationBatches,
@@ -220,6 +221,7 @@ import { APP_NAME, APP_USER_MODEL_ID, DB_FILENAME } from './appConstants';
 import { createLocalFileProtocolResponse } from './artifactLocalFileProtocol';
 import { authQuotaGateStateFromQuota, AuthSubscriptionStatus, createDefaultAuthQuotaGateState, normalizeAuthQuota } from './authQuota';
 import { type AutoLaunchStatus, getAutoLaunchStatus, isAutoLaunched, setAutoLaunchEnabled } from './autoLaunchManager';
+import { BackgroundJobStore } from './backgroundJobStore';
 import { BrowserCredentialApprovalService } from './browserCredentials/browserCredentialApprovalService';
 import { BrowserCredentialService } from './browserCredentials/browserCredentialService';
 import { getRecentComputerUseLogEntries } from './computerUse/computerUseLogs';
@@ -270,6 +272,7 @@ import { registerActivityIpcHandlers } from './ipcHandlers/activity';
 import { registerAgentHandlers } from './ipcHandlers/agents';
 import { registerAsrIpcHandlers } from './ipcHandlers/asr';
 import { registerBrowserCredentialHandlers } from './ipcHandlers/browserCredentials/handlers';
+import { registerCoworkBackgroundJobHandlers } from './ipcHandlers/coworkBackgroundJob';
 import { registerCoworkSubagentHandlers } from './ipcHandlers/coworkSubagent';
 import { ensureDshEngineReady, registerDshHandlers } from './ipcHandlers/dsh/handlers';
 import { registerEnterpriseAccountHandlers } from './ipcHandlers/enterpriseAccount';
@@ -3582,6 +3585,13 @@ const bindCoworkRuntimeForwarder = (): void => {
     getDesktopNotificationManager().handleSessionStopped(sessionId);
   });
 
+  runtime.on('backgroundJobsChanged', (_sessionId: string, event: CoworkBackgroundJobsEvent) => {
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (win.isDestroyed()) return;
+      win.webContents.send(BACKGROUND_JOB_EVENT_CHANNEL, event);
+    });
+  });
+
   runtime.on('complete', (sessionId: string, claudeSessionId: string | null) => {
     finishTurnChanges(sessionId);
     mediaSelectionBySession.delete(sessionId);
@@ -3671,6 +3681,7 @@ const getCoworkEngineRouter = () => {
         },
         new SubagentRunStore(getStore().getDatabase()),
         new SubagentMessageStore(getStore().getDatabase()),
+        new BackgroundJobStore(getStore().getDatabase()),
       );
       // Wire up channel session sync for IM conversations via OpenClaw
       try {
@@ -10609,6 +10620,12 @@ if (!gotTheLock) {
 
   registerCoworkSubagentHandlers({
     getOpenClawRuntimeAdapter: () => openClawRuntimeAdapter,
+    getCoworkEngineRouter,
+  });
+
+  // ── Task panel background jobs IPC ─────────────────────────────────────
+
+  registerCoworkBackgroundJobHandlers({
     getCoworkEngineRouter,
   });
 

@@ -24,4 +24,6 @@ export const OpenClawGatewayMethod = {
   ChatAbort: 'chat.abort',
   ChatSend: 'chat.send',
   SessionsSubscribe: 'sessions.subscribe',
+  TasksCancel: 'tasks.cancel',
+  TasksList: 'tasks.list',
 } as const;

@@ -47,6 +47,7 @@ import {
   type BrowserRuntimeProfile,
 } from '../shared/browserWebAccess/constants';
 import { ClipboardIpc } from '../shared/clipboard/constants';
+import { BACKGROUND_JOB_EVENT_CHANNEL, type CoworkBackgroundJobsEvent } from '../shared/cowork/backgroundJobs';
 import type { CoworkBrowserAnnotationMessageBatch } from '../shared/cowork/browserAnnotations';
 import type {
   CoworkBtwAbortRequest,
@@ -643,6 +644,19 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke(CoworkIpcChannel.SubagentListByAgent, options),
     deleteSubagentSession: (options: { parentSessionId: string; runId: string }) =>
       ipcRenderer.invoke(CoworkIpcChannel.SubagentDelete, options),
+
+    // Task panel: background jobs
+    listBackgroundJobs: (sessionId: string) =>
+      ipcRenderer.invoke(CoworkIpcChannel.BackgroundJobList, { sessionId }),
+    killBackgroundJob: (options: { sessionId: string; jobId: string }) =>
+      ipcRenderer.invoke(CoworkIpcChannel.BackgroundJobKill, options),
+    clearSettledBackgroundJobs: (sessionId: string) =>
+      ipcRenderer.invoke(CoworkIpcChannel.BackgroundJobClearSettled, { sessionId }),
+    onBackgroundJobsEvent: (listener: (event: CoworkBackgroundJobsEvent) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, event: CoworkBackgroundJobsEvent) => listener(event);
+      ipcRenderer.on(BACKGROUND_JOB_EVENT_CHANNEL, handler);
+      return () => ipcRenderer.removeListener(BACKGROUND_JOB_EVENT_CHANNEL, handler);
+    },
 
     // Media task management
     cancelMediaTask: (taskId: string) =>

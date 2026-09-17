@@ -9,6 +9,7 @@ export { default as ArtifactPreviewCard } from './ArtifactPreviewCard';
 export { default as ArtifactRenderer } from './ArtifactRenderer';
 export { default as FileDirectoryView } from './FileDirectoryView';
 export { default as SubagentPanelContent } from './SubagentPanelContent';
+export { default as TaskPanelContent } from './TaskPanelContent';
 export {
   default as UserAttachmentPanelContent,
   type UserAttachmentPreviewPayload,

@@ -49,7 +49,7 @@ const SubagentStatusDot: React.FC<{ status: SubagentSessionSummary['status'] }> 
   />
 );
 
-const SubagentPanelRow: React.FC<{
+export const SubagentPanelRow: React.FC<{
   subagent: SubagentSessionSummary;
   agents: RootState['agent']['agents'];
   onSelectSubagent: (subagent: SubagentSessionSummary) => void;
