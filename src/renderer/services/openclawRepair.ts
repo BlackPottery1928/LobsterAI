@@ -4,6 +4,7 @@ import type { OpenClawGatewayRepairResult } from '../types/cowork';
 import { i18nService } from './i18n';
 
 const stageMessages: Record<OpenClawRepairStage, string> = {
+  [OpenClawRepairStage.LockRecovery]: 'openClawRepairLockRecoveryFailed',
   [OpenClawRepairStage.Snapshot]: 'openClawRepairSnapshotFailed',
   [OpenClawRepairStage.Preparation]: 'openClawRepairPreparationFailed',
   [OpenClawRepairStage.Doctor]: 'openClawRepairDoctorFailed',

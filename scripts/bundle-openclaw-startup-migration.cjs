@@ -21,6 +21,10 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedE
   if (!authOwner.includes('await params.persistConfig?.(params.cfg)')) {
     throw new Error('Startup auth migration requires openclaw-auth-migration-config-commit.patch; run openclaw:patch first.');
   }
+  const lockOwner = fs.readFileSync(path.join(openclawSrc, 'src/infra/gateway-lock.ts'), 'utf8');
+  if (!lockOwner.includes('inspectOwner: opts.inspectOwner')) {
+    throw new Error('Manual lock recovery requires zz-openclaw-lock-owner-recovery.patch; run openclaw:patch first.');
+  }
   const outputPath = path.join(runtimeDir, path.basename(selectedEntry));
   // Rebuild even when the gateway cache is current: this entry is maintained by
   // LobsterAI and must match the pinned upstream migration/schema implementation.
@@ -48,6 +52,7 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedE
       '#openclaw-config-io': path.join(openclawSrc, 'src/config/io.factory.ts'),
       '#openclaw-migration-lock': path.join(openclawSrc, 'src/infra/state-migrations.lock.ts'),
       '#openclaw-repair-lock': path.join(openclawSrc, 'src/commands/doctor-sqlite-maintenance-lock.ts'),
+      '#openclaw-gateway-lock': path.join(openclawSrc, 'src/infra/gateway-lock.ts'),
       '#openclaw-repair-schema-check': path.join(openclawSrc, 'src/state/openclaw-database-preflight.ts'),
       '#openclaw-repair-state-check': path.join(openclawSrc, 'src/state/openclaw-state-db-maintenance.ts'),
       '#openclaw-repair-agent-targets': path.join(openclawSrc, 'src/config/sessions/targets.ts'),

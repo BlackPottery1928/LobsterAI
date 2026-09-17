@@ -2,6 +2,7 @@ export const OPENCLAW_REPAIR_ENTRY = 'openclaw-gateway-repair.mjs';
 export const OPENCLAW_REPAIR_RESULT_PREFIX = 'LOBSTERAI_GATEWAY_REPAIR_RESULT=';
 
 export const OpenClawRepairPhase = {
+  LockRecovery: 'lock-recovery',
   Snapshot: 'snapshot',
   Recovery: 'recovery',
   Plugins: 'plugins',

@@ -3331,6 +3331,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
             LOBSTERAI_NPM_BIN_DIR: npmBinDir,
           },
         };
+        await runOpenClawCompatibilityRepair({ ...repairOptions, phase: OpenClawRepairPhase.LockRecovery });
         await runOpenClawCompatibilityRepair({ ...repairOptions, phase: OpenClawRepairPhase.Snapshot });
         await runOpenClawDoctorRepair(repairOptions);
         await runOpenClawCompatibilityRepair({ ...repairOptions, phase: OpenClawRepairPhase.Recovery });
