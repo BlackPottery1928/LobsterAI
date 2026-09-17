@@ -330,6 +330,13 @@ export const getToolInputSummary = (
       return getToolInputString(input, ['description', 'task']);
     case 'webfetch':
       return getToolInputString(input, ['url']);
+    case 'image':
+      return getToolInputString(input, ['path', 'file_path', 'filePath', 'url']);
+    case 'browser': {
+      const action = getToolInputString(input, ['action']);
+      const target = getToolInputString(input, ['url', 'name', 'selector', 'text']);
+      return [action, target ? truncatePreview(target, 60) : null].filter(Boolean).join(' · ') || null;
+    }
     case 'process': {
       const action = getToolInputString(input, ['action']);
       const sessionId = getToolInputString(input, ['sessionId', 'session_id']);
@@ -585,6 +592,18 @@ export const getTurnEndTimestamp = (turn: ConversationTurn): number | null => {
     consider(item.message.timestamp);
   }
   return latest;
+};
+
+// Failed tool steps in a turn. Once the process folds they are no longer
+// visible, so the duration line carries the count instead of hiding it.
+export const countTurnFailedSteps = (turn: ConversationTurn): number => {
+  let failed = 0;
+  for (const item of turn.assistantItems) {
+    if (item.type !== 'tool_group') continue;
+    const metadata = item.group.toolResult?.metadata;
+    if (metadata?.isError || metadata?.error) failed += 1;
+  }
+  return failed;
 };
 
 /** Localized duration for the collapsed-process line, e.g. "21分钟 45秒" / "21m 45s". */

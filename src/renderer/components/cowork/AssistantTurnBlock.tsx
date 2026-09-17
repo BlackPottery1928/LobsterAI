@@ -34,6 +34,7 @@ import {
   type ConsolidatedItem,
   consolidateMediaPolling,
   type ConversationTurn,
+  countTurnFailedSteps,
   COWORK_DETAIL_CONTENT_CLASS,
   COWORK_DETAIL_GUTTER_CLASS,
   formatElapsedDuration,
@@ -823,9 +824,15 @@ const AssistantTurnBlock: React.FC<{
   const processDurationMs = turnStartTimestamp != null && turnEndTimestamp != null
     ? turnEndTimestamp - turnStartTimestamp
     : null;
-  const processLabel = processDurationMs != null && processDurationMs >= 1000
+  const processBaseLabel = processDurationMs != null && processDurationMs >= 1000
     ? i18nService.t('coworkTurnProcessDuration').replace('{duration}', formatTurnDuration(processDurationMs))
     : i18nService.t('coworkTurnProcess');
+  // Failed steps fold with the rest of the process; the duration line reports
+  // how many there were so the fold never hides a failure silently.
+  const failedStepCount = countTurnFailedSteps(turn);
+  const processLabel = failedStepCount > 0
+    ? `${processBaseLabel} · ${i18nService.t('coworkTurnProcessFailedSteps').replace('{count}', String(failedStepCount))}`
+    : processBaseLabel;
 
   const handleProcessToggle = () => {
     const nextExpanded = !isProcessExpanded;
