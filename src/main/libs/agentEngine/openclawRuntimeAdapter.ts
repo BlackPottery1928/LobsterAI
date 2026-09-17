@@ -104,6 +104,7 @@ import {
   parseChannelSessionKey,
   parseManagedSessionKey,
 } from '../openclawChannelSessionSync';
+import { ConfigWorkloadState } from '../openclawConfigObservation';
 import {
   OPENCLAW_AGENT_TIMEOUT_SECONDS,
   type OpenClawProviderModelSource,
@@ -172,6 +173,7 @@ import {
   findCronRunHistoryLocalMatch,
   shouldReplaceLocalConversationWithCronHistory,
 } from './openclawCronRunHistorySync';
+import { OpenClawImWorkloadTracker } from './openclawImWorkloadTracker';
 import { OpenClawQuestionController } from './openclawQuestionController';
 import {
   buildOpenClawTranscriptOversizedError,
@@ -2576,6 +2578,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
    * cannot immediately overwrite their loading state with `completed`.
    */
   private readonly channelLifecycleRunBySessionKey = new Map<string, ChannelSessionLifecycleRun>();
+  private readonly configRestartImWorkloads = new OpenClawImWorkloadTracker();
   private readonly reportedChannelPromptRunIds = new Set<string>();
   private channelPollingTimer: ReturnType<typeof setInterval> | null = null;
   private channelEventReconcileTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3888,6 +3891,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     coworkSessionId: string;
     openClawSessionKey: string;
     row: Record<string, unknown>;
+    workloadPollRevision?: number;
   }): boolean {
     const { coworkSessionId, openClawSessionKey, row } = options;
     const session = this.store.getSession(coworkSessionId);
@@ -3895,6 +3899,18 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
 
     const rawStatus = typeof row.status === 'string' ? row.status.trim().toLowerCase() : '';
     const terminalStatus = resolveChannelSessionTerminalStatus(rawStatus);
+
+    if (parseChannelSessionKey(openClawSessionKey) && !this.isSessionInStopCooldown(coworkSessionId)) {
+      this.configRestartImWorkloads.poll({
+        revision: options.workloadPollRevision ?? this.configRestartImWorkloads.beginPoll(),
+        sessionKey: openClawSessionKey,
+        sessionId: coworkSessionId,
+        hasActiveRun: row.hasActiveRun,
+        terminal: terminalStatus !== null,
+        runId: typeof row.runId === 'string' ? row.runId.trim() : '',
+        lifecycleTtlMs: this.getChannelLifecycleRunTtlMs(),
+      });
+    }
 
     // A native IM run is announced by `sessions.changed`, but does not appear
     // in OpenClaw's chat-specific `hasActiveRun` tracker. Keep that explicit
@@ -3937,14 +3953,18 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     return true;
   }
 
+  private getChannelLifecycleRunTtlMs(): number {
+    const configuredTimeoutMs = Number.isFinite(this.agentTimeoutSeconds)
+      ? Math.max(1, this.agentTimeoutSeconds) * 1_000
+      : OPENCLAW_AGENT_TIMEOUT_SECONDS * 1_000;
+    return configuredTimeoutMs + OpenClawRuntimeAdapter.CHANNEL_LIFECYCLE_RUN_GRACE_MS;
+  }
+
   private getFreshChannelLifecycleRun(sessionKey: string): ChannelSessionLifecycleRun | null {
     const activeRun = this.channelLifecycleRunBySessionKey.get(sessionKey);
     if (!activeRun) return null;
 
-    const configuredTimeoutMs = Number.isFinite(this.agentTimeoutSeconds)
-      ? Math.max(1, this.agentTimeoutSeconds) * 1_000
-      : OPENCLAW_AGENT_TIMEOUT_SECONDS * 1_000;
-    const maxAgeMs = configuredTimeoutMs + OpenClawRuntimeAdapter.CHANNEL_LIFECYCLE_RUN_GRACE_MS;
+    const maxAgeMs = this.getChannelLifecycleRunTtlMs();
     if (Date.now() - activeRun.observedAtMs <= maxAgeMs) {
       return activeRun;
     }
@@ -3969,6 +3989,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   }
 
   clearChannelSessionCache(): void {
+    this.configRestartImWorkloads.reset();
     if (!this.channelSessionSync) {
       return;
     }
@@ -4449,6 +4470,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       return;
     }
     const client = this.gatewayClient;
+    const workloadPollRevision = this.configRestartImWorkloads.beginPoll();
     // Reuse the existing poll cadence for marker cleanup instead of creating
     // one timer per IM run. This bounds memory even if both a terminal event
     // and the corresponding terminal sessions.list row are lost.
@@ -4471,6 +4493,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         console.warn('[ChannelSync] pollChannelSessions: sessions.list returned non-array sessions:', typeof sessions, 'full result keys:', Object.keys(result as Record<string, unknown>));
         return;
       }
+      this.configRestartImWorkloads.completePoll(workloadPollRevision);
       let channelCount = 0;
       const newSessionsToSync: Array<{ sessionId: string; sessionKey: string }> = [];
       const newSessionIds: string[] = [];
@@ -4522,6 +4545,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
             coworkSessionId: sessionId,
             openClawSessionKey: key,
             row: row as Record<string, unknown>,
+            workloadPollRevision,
           });
           this.syncChannelSessionModelOverride({
             coworkSessionId: sessionId,
@@ -5205,6 +5229,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   }
 
   stopSession(sessionId: string): void {
+    this.configRestartImWorkloads.forgetSession(sessionId);
     const turn = this.activeTurns.get(sessionId);
     this.pendingGoalContinuations.delete(sessionId);
     // A yielded parent has no ActiveTurn while its children are still working.
@@ -5284,6 +5309,20 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
 
   hasActiveSessions(): boolean {
     return this.activeTurns.size > 0;
+  }
+
+  /** Extra IM evidence is used only by automatic config restart checks. */
+  getConfigRestartWorkloadSnapshot() {
+    const im = this.configRestartImWorkloads.snapshot(this.getChannelLifecycleRunTtlMs());
+    const activeTurns = this.activeTurns.size;
+    const connected = this.gatewayClient !== null;
+    const state = activeTurns > 0 || im.activeSessions > 0 ? ConfigWorkloadState.Busy
+      : !connected ? ConfigWorkloadState.Unknown : im.state;
+    return {
+      state, activeTurns, im, connected,
+      connectionGeneration: this.gatewayClientGeneration,
+      tickAgeMs: this.lastTickTimestamp > 0 ? Math.max(0, Date.now() - this.lastTickTimestamp) : null,
+    };
   }
 
   getSessionConfirmationMode(sessionId: string): 'modal' | 'text' | null {
@@ -6233,6 +6272,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         this.scheduleGatewayReconnect();
       },
       onEvent: (event: GatewayEventFrame) => {
+        if (clientGeneration !== this.gatewayClientGeneration) return;
         this.handleGatewayEvent(event);
       },
     });
@@ -6299,6 +6339,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     this.knownChannelSessionIds.clear();
     this.heartbeatSessionKeys.clear();
     this.channelLifecycleRunBySessionKey.clear();
+    this.configRestartImWorkloads.reset();
     this.stoppedSessions.clear();
     this.recentlyClosedRunIds.clear();
     this.terminalBtwRunIds.clear();
@@ -7493,6 +7534,9 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     }
 
     if (phase === AgentLifecyclePhase.Start) {
+      if (!this.isSessionInStopCooldown(sessionId)) {
+        this.configRestartImWorkloads.start(sessionKey, sessionId, runId);
+      }
       this.channelLifecycleRunBySessionKey.set(sessionKey, {
         runId,
         observedAtMs: Date.now(),
@@ -7506,6 +7550,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         this.reCreatedChannelSessionIds.add(sessionId);
       }
     } else {
+      this.configRestartImWorkloads.end(sessionKey, runId);
       this.channelLifecycleRunBySessionKey.delete(sessionKey);
     }
 
@@ -11939,6 +11984,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
    */
   onSessionDeleted(sessionId: string): void {
     this.discardPendingBtwRunsForSession(sessionId);
+    this.configRestartImWorkloads.forgetSession(sessionId);
     this.cronHistoryCursorBySession.delete(sessionId);
 
     // Remove sessionIdBySessionKey entries pointing to this session
