@@ -1,5 +1,7 @@
 .subscription-trial-overlay {
   padding: 24px;
+  background: rgb(17 20 35 / 40%);
+  backdrop-filter: blur(4px);
 }
 
 .subscription-trial-dialog {
@@ -68,7 +70,7 @@
 
 .subscription-trial-title {
   margin: 16px 0 4px;
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1.35;
   font-weight: 650;
   letter-spacing: -.7px;
@@ -76,7 +78,7 @@
 }
 
 .subscription-trial-price {
-  font-size: 48px;
+  font-size: 42px;
   letter-spacing: -2px;
   white-space: nowrap;
 }
@@ -189,8 +191,8 @@
 @media (max-width: 480px) {
   .subscription-trial-overlay { padding: 16px; }
   .subscription-trial-card { max-height: calc(100dvh - 32px); padding: 30px 24px 22px; }
-  .subscription-trial-title { font-size: 24px; }
-  .subscription-trial-price { font-size: 42px; }
+  .subscription-trial-title { font-size: 22px; }
+  .subscription-trial-price { font-size: 36px; }
   .subscription-trial-credits strong { font-size: 72px; }
   .subscription-trial-credits span { font-size: 24px; }
   .subscription-trial-subtitle { font-size: 17px; }

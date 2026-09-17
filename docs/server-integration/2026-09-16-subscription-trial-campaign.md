@@ -151,7 +151,7 @@ PricingView 挂载独立活动横幅，保留既有低余额优惠、充值活�
 
 新装用户完成引导和登录后展示；完成引导但未登录的状态持久保存，下次启动仍等待首次登录。未登录与已登录非订阅用户均由本客户端的本地记录按北京时间每日频控；活动到期通过本地定时器自动消失。
 
-活动弹窗避让引导、引擎启动、更新、权限及已有公共 Modal/对话框；其他弹窗关闭后再显示。身份变更时丢弃过期异步响应，团队隐藏，切回个人重新拉取。购买通过系统浏览器进入 `#/pricing?tab=subscription&banner=penny&trialCampaign=<code>`，保留 Portal 自身登录与协议确认。
+活动弹窗避让引导、引擎启动、更新、权限及已有公共 Modal/对话框；其他弹窗关闭后再显示。身份变更时丢弃过期异步响应，团队隐藏，切回个人重新拉取。购买通过系统浏览器进入 `#/pricing?tab=subscription&banner=penny&trialCampaign=<code>&trialCheckout=1`，定位 0.01 广告并自动打开订阅服务协议；网页未登录时先登录，返回后自动打开协议，同意后进入支付。
 
 ## 验证与发布
 
@@ -166,7 +166,7 @@ Portal 和 Electron 按 package.json 执行 npm run lint、npm run build。遵�
 
 - Portal 广告模板、样式和文案来自 `dingjiaye-penny-subscription-banner` 的 `82f0ccb`，仅复制广告相关实现，不合并该分支的套餐卡片或低余额优惠修改。
 - 每 3 秒轮播，鼠标悬停或键盘焦点在广告内时暂停，离开后重新计时。正式环境的 0.01 广告仍按服务端活动窗口、用户资格和个人身份展示，循环倒计时不会重置购买资格。团队积分包广告属于后续活动，当前开发与正式环境的主页轮播均不展示，保留模板和样式供后续启用。
-- 客户端弹窗进入 `#/pricing?tab=subscription&banner=penny&trialCampaign=<code>`；`banner=penny` 只选中广告，不自动发起购买。旧的 `trialCampaign` 定位参数继续兼容。活动接口较晚返回时，资格确认后切至 0.01 广告；不可参与的账号不强行显示。
+- 客户端弹窗进入 `#/pricing?tab=subscription&banner=penny&trialCampaign=<code>&trialCheckout=1`；`banner=penny` 选中广告，`trialCheckout=1` 自动进入协议确认（未登录先登录），仅在用户点击「同意并继续」后下单。单独的 `banner=penny` 仍只定位广告。旧的 `trialCampaign` 定位参数继续兼容。活动接口较晚返回时，资格确认后切至 0.01 广告；不可参与的账号不强行显示。
 - 左下角 0.01 广告建议将链接配置为 `#/pricing?tab=subscription&banner=penny`（前面加当前环境 Portal 地址）。客户端也会为带 `trialCampaign` 参数或活动描述含 `0.01` 的 Portal 定价链接补齐目标参数，并保留原有来源参数。其他广告链接不变；本次未修改线上广告配置。
 - 点击「立即解锁」仍走当前协议确认和支付流程；未登录时返回地址附加 `trialCheckout=1`，登录返回后继续确认。
 - 本地开发直接访问 `https://local.youdao.com:5180/` 即显示充值与 0.01 两张广告，无需 `previewBanner` 参数；`/?banner=penny` 可验证默认选中 0.01。示例展示仅在开发环境生效，其倒计时不会用于下单或资格判断。正式构建仍使用活动接口控制 0.01 广告的资格与窗口。

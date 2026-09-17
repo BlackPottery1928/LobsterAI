@@ -91,14 +91,16 @@ test('enterprise console urls use the selected enterprise context', () => {
 });
 
 
-test('trial popup targets the penny slide in both environments', () => {
+test('trial popup targets the penny slide and opens checkout in both environments', () => {
   for (const testMode of [false, true]) {
     mockTestMode(testMode);
-    const url = new URL(getPortalSubscriptionTrialUrl('trial/2026'));
+    const url = new URL(getPortalSubscriptionTrialUrl('trial/2026', { checkout: true }));
     expect(url.hostname).toBe(testMode ? 'lobsterai.inner.youdao.com' : 'lobsterai.youdao.com');
     const route = new URL(url.hash.slice(1), url.origin);
     expect(route.searchParams.get('banner')).toBe('penny');
     expect(route.searchParams.get('trialCampaign')).toBe('trial/2026');
+    expect(route.searchParams.get('trialCheckout')).toBe('1');
+    expect(getPortalSubscriptionTrialUrl('trial/2026')).not.toContain('trialCheckout');
     expect(route.searchParams.get('tab')).toBe('subscription');
   }
 });

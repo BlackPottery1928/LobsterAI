@@ -6,17 +6,17 @@ export type LanguageType = 'zh' | 'en';
 // 语言文本映射
 const translations: Record<LanguageType, Record<string, string>> = {
   zh: {
-    subscriptionTrialTitlePrefix: '限时',
+    subscriptionTrialTitlePrefix: '新订阅用户',
     subscriptionTrialTitleSuffix: '解锁',
     subscriptionTrialCreditUnit: '积分！',
     subscriptionTrialSubtitle: '畅享 7 天标准版权益',
     subscriptionTrialAction: '立即解锁',
     subscriptionTrialRenewal: '到期后自动续订，可随时取消',
-    subscriptionTrialEligibilityRule: '参与资格：当前未订阅的个人用户可参与，每个账号每活动限成功购买一次。',
+    subscriptionTrialEligibilityRule: '参与资格：仅限从未订阅过的新用户可购买。',
     subscriptionTrialBenefitsRule: '活动内容：支付 0.01 元，获得 1,000 积分及 7 天标准版权益。',
-    subscriptionTrialExpiryRule: '积分有效期：支付当天不计，活动积分于第 7 天日末失效（北京时间）。',
+    subscriptionTrialExpiryRule: '积分有效期：活动积分有效期为 7 天，到期后未使用的积分失效。',
     subscriptionTrialUpgradeRule: '升级限制：体验期内暂不支持套餐升级。',
-    subscriptionTrialRenewalRule: '续订规则：支付当天不计，第 7 天自动续订 49 元/月标准版，可随时取消自动续订。',
+    subscriptionTrialRenewalRule: '续订规则：7 天权益到期后自动续订 49 元订阅标准版，可随时取消自动续订。',
 
     coworkNativeQuestionOther: '其他回答',
     coworkNativeQuestionAnswer: '请输入你的回答',
@@ -3903,17 +3903,17 @@ const translations: Record<LanguageType, Record<string, string>> = {
     emailDeleting: '删除中...',
   },
   en: {
-    subscriptionTrialTitlePrefix: 'Only',
+    subscriptionTrialTitlePrefix: 'New subscribers pay',
     subscriptionTrialTitleSuffix: 'to unlock',
     subscriptionTrialCreditUnit: 'credits!',
     subscriptionTrialSubtitle: 'Enjoy 7 days of Standard benefits',
     subscriptionTrialAction: 'Unlock now',
     subscriptionTrialRenewal: 'Automatically renews. Cancel anytime.',
-    subscriptionTrialEligibilityRule: 'Eligibility: personal users without an active subscription. One successful purchase per account per campaign.',
+    subscriptionTrialEligibilityRule: 'Eligibility: only new users who have never subscribed can purchase this offer.',
     subscriptionTrialBenefitsRule: 'Offer: pay ¥0.01 for 1,000 credits and 7 days of Standard benefits.',
-    subscriptionTrialExpiryRule: 'Credit validity: the payment day is excluded. Trial credits expire at the end of day 7 (China time).',
+    subscriptionTrialExpiryRule: 'Credit validity: trial credits are valid for 7 days. Unused credits expire when the period ends.',
     subscriptionTrialUpgradeRule: 'Upgrades: plan upgrades are unavailable during the trial.',
-    subscriptionTrialRenewalRule: 'Renewal: excluding the payment day, Standard renews on day 7 at ¥49/month. Cancel auto-renewal anytime.',
+    subscriptionTrialRenewalRule: 'Renewal: Standard renews for ¥49 when the 7-day trial ends. Cancel auto-renewal anytime.',
 
     coworkNativeQuestionOther: 'Other answer',
     coworkNativeQuestionAnswer: 'Enter your answer',

@@ -258,6 +258,7 @@ const App: React.FC = () => {
   const [isUpdateCardExpanded, setIsUpdateCardExpanded] = useState(false);
   const [isUserInitiatedUpdateFlowActive, setIsUserInitiatedUpdateFlowActive] = useState(false);
   const [privacyAgreed, setPrivacyAgreed] = useState<boolean | null>(null);
+  const [trialTaskCreatedSignal, setTrialTaskCreatedSignal] = useState(0);
   const [newUserOnboardingStep, setNewUserOnboardingStep] =
     useState<NewUserOnboardingStepType>(NewUserOnboardingStep.NewTask);
   const [isNewUserOnboardingDismissed, setIsNewUserOnboardingDismissed] = useState(false);
@@ -908,6 +909,7 @@ const App: React.FC = () => {
   }, [isSidebarCollapsed, mainView]);
 
   const handleNewChat = useCallback(() => {
+    setTrialTaskCreatedSignal(value => value + 1);
     // Only clear when already on home (no session) — preserve __home__ draft when returning from a session
     const shouldClearInput = mainView === 'cowork' && !currentSessionId;
     coworkService.clearSession({ restoreAgentSkills: true });
@@ -2100,6 +2102,7 @@ const App: React.FC = () => {
       )}
       <SubscriptionTrialCampaign
         privacyAgreed={privacyAgreed}
+        taskCreatedSignal={trialTaskCreatedSignal}
         enabled={privacyAgreed === true && !isEnterpriseAccount && !isOverlayActive && hasResolvedEngineStartupOverlayState && !isEngineStartupOverlayVisible}
       />
       <StartupCreditCampaign

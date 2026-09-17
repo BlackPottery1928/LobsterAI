@@ -12,8 +12,9 @@ import type { RootState } from '../store';
 import Modal from './common/Modal';
 import { reportSubscriptionTrialUnlockClick } from './subscriptionTrialAnalytics';
 import {
+  beijingDayStart,
   getSubscriptionTrialPopupKey,
-  nextBeijingDay,
+  nextBeijingWeek,
   readSubscriptionTrialPopupState,
   saveSubscriptionTrialPopupState,
   type SubscriptionTrialPopupState,
@@ -32,7 +33,7 @@ const otherDialogOpen = (): boolean => Array.from(document.querySelectorAll(DIAL
   && node.getClientRects().length > 0
 ));
 
-interface Props { enabled: boolean; privacyAgreed: boolean | null }
+interface Props { enabled: boolean; privacyAgreed: boolean | null; taskCreatedSignal: number }
 interface PendingPopup {
   owner: string;
   state: SubscriptionTrialState;
@@ -49,7 +50,7 @@ const isAvailable = (state: SubscriptionTrialState | null): boolean => Boolean(
   && state.serverTimeEpochMs < state.endAtEpochMs,
 );
 
-const SubscriptionTrialCampaign: React.FC<Props> = ({ enabled, privacyAgreed }) => {
+const SubscriptionTrialCampaign: React.FC<Props> = ({ enabled, privacyAgreed, taskCreatedSignal }) => {
   const { isLoggedIn, isLoading, user, quota, accountGeneration } = useSelector((state: RootState) => state.auth);
   const enterprise = useSelector(selectIsEnterpriseAccount);
   const subscribed = isLoggedIn && quota?.subscriptionStatus === AuthSubscriptionStatus.Active;
@@ -70,6 +71,12 @@ const SubscriptionTrialCampaign: React.FC<Props> = ({ enabled, privacyAgreed }) 
   const runRef = useRef<() => void>(() => undefined);
   const diagnosticRef = useRef('');
   const openingRef = useRef(false);
+  const storageWrites = useRef<Promise<void>>(Promise.resolve());
+  const persist = (key: string, state: SubscriptionTrialPopupState): void => {
+    storageWrites.current = storageWrites.current.catch(() => undefined)
+      .then(() => saveSubscriptionTrialPopupState(key, state));
+    void storageWrites.current.catch(error => console.warn('[SubscriptionTrial] Could not persist popup state', error));
+  };
   const diagnose = (reason: string): void => {
     if (diagnosticRef.current === reason) return;
     diagnosticRef.current = reason;
@@ -145,18 +152,24 @@ const SubscriptionTrialCampaign: React.FC<Props> = ({ enabled, privacyAgreed }) 
         const saved = await readSubscriptionTrialPopupState(key);
         if (!current()) return;
         const nextShowAt = Math.max(saved?.nextShowAt ?? 0, shownInSession.current.get(key) ?? 0);
-        if (state.serverTimeEpochMs < nextShowAt) { diagnose('client_shown_today'); return; }
+        if ((saved?.dismissCount ?? 0) >= 3) { diagnose('dismissed_three_times'); return; }
+        if (state.serverTimeEpochMs < nextShowAt) { diagnose('client_shown_this_week'); return; }
         if (!enabledRef.current || otherDialogOpen()) { diagnose('waiting_for_other_dialog'); return; }
+        const firstShownDay = saved?.firstShownDay ?? beijingDayStart(state.serverTimeEpochMs);
         setPopup({
           owner, state, key, receivedAt, receivedWallTime,
-          local: { nextShowAt: nextBeijingDay(state.serverTimeEpochMs), expiresAt },
+          local: {
+            nextShowAt: nextBeijingWeek(firstShownDay, state.serverTimeEpochMs), expiresAt,
+            firstShownDay, dismissCount: saved?.dismissCount ?? 0, cadenceVersion: 2,
+          },
         });
       } finally { fetching = false; }
     };
     const run = () => { void load().catch(() => { if (current()) diagnose('request_failed'); }); };
     runRef.current = run;
     run();
-    const timer = window.setInterval(run, 30000);
+    // Keep an open popup in sync; an idle client waits for a new task or focus before the next weekly display.
+    const timer = window.setInterval(() => { if (pendingRef.current) run(); }, 30000);
     window.addEventListener('focus', run);
     return () => {
       disposed = true;
@@ -168,6 +181,7 @@ const SubscriptionTrialCampaign: React.FC<Props> = ({ enabled, privacyAgreed }) 
 
   // Overlay changes wake the existing request loop without resetting local frequency.
   useEffect(() => { if (enabled) runRef.current(); }, [enabled]);
+  useEffect(() => { if (taskCreatedSignal > 0) runRef.current(); }, [taskCreatedSignal]);
   const pendingServerTime = pending ? popupTime(pending) : 0;
   const visible = enabled && !isLoading && privacyAgreed === true && !requiresLogin && !otherOpen
     && !!pending && pending.owner === owner && !enterprise && !subscribed
@@ -176,9 +190,7 @@ const SubscriptionTrialCampaign: React.FC<Props> = ({ enabled, privacyAgreed }) 
     if (!visible || !pending) return;
     // Count only an actually rendered popup. Login, logout and account changes share this device key.
     shownInSession.current.set(pending.key, pending.local.nextShowAt);
-    void saveSubscriptionTrialPopupState(pending.key, pending.local).catch(error => {
-      console.warn('[SubscriptionTrial] Could not persist local popup expiry', error);
-    });
+    persist(pending.key, pending.local);
     diagnose('shown');
   }, [visible, pending]);
 
@@ -208,6 +220,14 @@ const SubscriptionTrialCampaign: React.FC<Props> = ({ enabled, privacyAgreed }) 
   }, [pending]);
 
   const close = () => setPopup(null);
+  const dismiss = () => {
+    const current = pendingRef.current;
+    if (!current || !visible) return;
+    const local = { ...current.local, dismissCount: Math.min(3, current.local.dismissCount + 1) };
+    shownInSession.current.set(current.key, local.nextShowAt);
+    setPopup(null);
+    persist(current.key, local);
+  };
   const buy = async () => {
     if (!pending || openingRef.current || !visible) return;
     const code = pending.state.campaignCode;
@@ -218,15 +238,15 @@ const SubscriptionTrialCampaign: React.FC<Props> = ({ enabled, privacyAgreed }) 
       const state = await window.electron.subscriptionTrial.status();
       if (ownerRef.current !== owner) return;
       if (!state || !isAvailable(state) || state.campaignCode !== code) { close(); return; }
-      const result = await window.electron.shell.openExternal(getPortalSubscriptionTrialUrl(code));
+      const result = await window.electron.shell.openExternal(getPortalSubscriptionTrialUrl(code, { checkout: true }));
       if (result?.success) close();
     } finally { openingRef.current = false; setOpening(false); }
   };
   if (!visible) return null;
   return (
     <Modal
-      onClose={close}
-      onEscape={close}
+      onClose={dismiss}
+      onEscape={dismiss}
       overlayClassName="subscription-trial-overlay non-draggable fixed inset-0 z-[210] flex items-center justify-center modal-backdrop"
       className="subscription-trial-dialog"
     >
@@ -238,7 +258,7 @@ const SubscriptionTrialCampaign: React.FC<Props> = ({ enabled, privacyAgreed }) 
         aria-describedby="subscription-trial-subtitle"
         className="subscription-trial-card"
       >
-        <button type="button" onClick={close} aria-label={i18nService.t('close')} className="subscription-trial-close">×</button>
+        <button type="button" onClick={dismiss} aria-label={i18nService.t('close')} className="subscription-trial-close">×</button>
         <h2 id="subscription-trial-title" className="subscription-trial-title">
           {i18nService.t('subscriptionTrialTitlePrefix')}{' '}
           <span className="subscription-trial-price"><span className="subscription-trial-currency">¥</span>0.01</span>{' '}

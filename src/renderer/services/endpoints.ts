@@ -73,9 +73,10 @@ export const getPortalPricingUrl = (
   return `${getPortalBase()}/pricing${suffix}`;
 };
 const PENNY_BANNER_TARGET = 'penny';
-export const getPortalSubscriptionTrialUrl = (campaignCode?: string) => {
+export const getPortalSubscriptionTrialUrl = (campaignCode?: string, options: { checkout?: boolean } = {}) => {
   const query = new URLSearchParams({ tab: 'subscription', banner: PENNY_BANNER_TARGET });
   if (campaignCode) query.set('trialCampaign', campaignCode);
+  if (options.checkout) query.set('trialCheckout', '1');
   return `${getPortalBase()}/pricing?${query}`;
 };
 
