@@ -2606,6 +2606,7 @@ const getOpenClawConfigSync = (): OpenClawConfigSync => {
           return null;
         }
       },
+      isWeixinQrLoginActive: () => imGatewayManager?.isWeixinQrLoginActive() ?? false,
       getIMSettings: () => {
         try {
           return getIMGatewayManager().getConfig().settings;
@@ -3433,7 +3434,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         });
       });
       repairStage = OpenClawRepairStage.Gateway;
-      const started = await manager.startGateway('manual-repair');
+      const started = await manager.startGateway('manual-repair', { retryBlocked: true });
       // Reconnection can await a token refresh that itself needs config sync.
       // Release config writers after repair/startup, before awaiting the client.
       openClawManualRepairActive = false;
@@ -3871,12 +3872,13 @@ const getIMGatewayManager = () => {
       },
       syncOpenClawConfig: async (
         reason?: string,
-        options?: { restartGatewayIfRunning?: boolean },
+        options?: { restartGatewayIfRunning?: boolean; requireSuccess?: boolean },
       ) => {
-        await syncOpenClawConfig({
+        const result = await syncOpenClawConfig({
           reason: reason || 'im-gateway-sync',
           restartGatewayIfRunning: options?.restartGatewayIfRunning,
         });
+        if (options?.requireSuccess && !result.success) throw new Error(result.error || t('openClawConfigSyncFailed'));
       },
       ensureOpenClawGatewayConnected: async () => {
         const configApplyStatus = await waitForOpenClawConfigApply('IM gateway client connection');
@@ -8705,7 +8707,7 @@ if (!gotTheLock) {
     }
     try {
       const manager = getOpenClawEngineManager();
-      restartGatewayPromise = manager.restartGateway('ipc-manual');
+      restartGatewayPromise = manager.restartGateway('ipc-manual', { retryBlocked: true });
       const status = await restartGatewayPromise;
       return {
         success: status.phase === 'running' || status.phase === 'ready',

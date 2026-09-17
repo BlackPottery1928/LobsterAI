@@ -7137,7 +7137,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
    * Resets the reconnect counter and triggers an immediate reconnect or health check.
    */
   onSystemResume(): void {
-    if (this.gatewayReconnectSuppressed) {
+    if (this.gatewayReconnectSuppressed || this.engineManager.isGatewayStartupBlocked?.()) {
       console.log('[GatewayReconnect] skipped system resume reconnect because gateway reconnect is suppressed');
       return;
     }
@@ -7156,7 +7156,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
    * Called from onClose when the connection drops unexpectedly after a successful handshake.
    */
   private scheduleGatewayReconnect(): void {
-    if (this.gatewayReconnectSuppressed) {
+    if (this.gatewayReconnectSuppressed || this.engineManager.isGatewayStartupBlocked?.()) {
       console.log('[GatewayReconnect] skipped reconnect scheduling because gateway reconnect is suppressed');
       return;
     }
@@ -7178,7 +7178,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   }
 
   private async attemptGatewayReconnect(): Promise<void> {
-    if (this.gatewayReconnectSuppressed) {
+    if (this.gatewayReconnectSuppressed || this.engineManager.isGatewayStartupBlocked?.()) {
       console.log('[GatewayReconnect] skipped reconnect attempt because gateway reconnect is suppressed');
       return;
     }
