@@ -20,3 +20,9 @@ test('shows the failure stage, source and diagnostic location without implying a
 test('older repair responses retain their actual error', () => {
   expect(resolveOpenClawRepairError({ success: false, error: 'Existing repair error' })).toBe('Existing repair error');
 });
+
+test('lock recovery failures state that backup and later repairs have not run', () => {
+  vi.spyOn(i18nService, 't').mockImplementation(key => key);
+  expect(resolveOpenClawRepairError({ success: false, failedStage: OpenClawRepairStage.LockRecovery,
+    error: 'Owner identity unavailable' })).toContain('openClawRepairLockRecoveryFailed');
+});

@@ -50,6 +50,7 @@ const RETAINED_PATCHES = [
   'openclaw-windows-process-identity.patch',
   'openclaw-workspace-attestation-quarantine.patch',
   'zz-openclaw-error-detail-preview.patch',
+  'zz-openclaw-lock-owner-recovery.patch',
   'zz-openclaw-task-cwd-system-prompt.patch',
 ] as const;
 

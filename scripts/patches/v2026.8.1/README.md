@@ -1,5 +1,31 @@
 # OpenClaw v2026.8.1 patch notes
 
+## Manual lock-owner recovery
+
+`zz-openclaw-lock-owner-recovery.patch` adds an optional asynchronous
+`inspectOwner` hook to native gateway lock acquisition. LobsterAI's manual
+repair helper uses it to distinguish stale PID references from live owners.
+Native SQLite coordination and the file lock manager's remove-if-unchanged
+checks remain authoritative; other callers retain the default owner policy.
+
+The patch also uses `.NET Process.StartTime` for Windows process creation
+identity and gives gateway lock queries a 5-second budget. An unavailable
+identity remains unknown. LobsterAI may stop an orphan only after verifying
+its executable, runtime entry, state/config ownership, creation identity,
+parent exit and protection window; healthy gateways stay protected.
+
+Rebuild startup/repair helpers before the opt-in Windows integration checks:
+
+```powershell
+$env:LOBSTERAI_TEST_LOCK_RECOVERY='1'
+$env:OPENCLAW_LOCK_RECOVERY_SOURCE='<patched-openclaw-checkout>'
+npm test -- openclawLockRecovery.runtime
+```
+
+The build rejects a source checkout missing the hook. Keep this patch until
+the pinned upstream provides an equivalent native manual-recovery boundary.
+See [the design and acceptance record](../../../specs/bugfixes/openclaw-lock-owner-recovery/2026-09-17-lock-owner-recovery-design.md).
+
 ## LobsterAI provider cooldown
 
 `openclaw-lobsterai-provider-cooldown.patch` adds `lobsterai-server` to the
