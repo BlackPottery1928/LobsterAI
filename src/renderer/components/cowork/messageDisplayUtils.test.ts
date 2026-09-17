@@ -8,6 +8,7 @@ import {
   canFoldTurnProcess,
   chunkConsolidatedItemsForDisplay,
   type ConsolidatedItem,
+  countTurnCompletedSteps,
   formatElapsedDuration,
   formatStructuredText,
   formatTurnDuration,
@@ -16,6 +17,7 @@ import {
   getActivityGroupSummary,
   getActivityIndicatorStatusText,
   getActivityStepDisplay,
+  getThinkingPhaseLabels,
   getToolResultCollapsedDisplay,
   getToolResultDisplay,
   getTurnActivityFingerprint,
@@ -530,4 +532,33 @@ test('media polling groups count their polls as steps', () => {
   const summary = getActivityGroupSummary([mediaItem, activityToolItem('tool-1')]);
 
   expect(summary.stepCount).toBe(4);
+});
+
+test('thinking phase labels start with the plain thinking label so the first render is unchanged', () => {
+  const phases = getThinkingPhaseLabels();
+  expect(phases[0]).toBe(getActivityIndicatorStatusText());
+  expect(phases.length).toBeGreaterThan(1);
+  expect(new Set(phases).size).toBe(phases.length);
+});
+
+test('completed step count only includes tool groups with a final result', () => {
+  const group = (id: string, result?: { isStreaming?: boolean; isFinal?: boolean } | null) => ({
+    type: 'tool_group' as const,
+    group: {
+      type: 'tool_group' as const,
+      toolUse: { id, type: 'tool_use' as const, content: '', timestamp: 1, metadata: { toolName: 'exec' } },
+      ...(result === undefined ? {} : { toolResult: result === null ? null : { id: `${id}-r`, type: 'tool_result' as const, content: 'ok', timestamp: 2, metadata: result } }),
+    },
+  });
+  const turn = {
+    id: 'turn', userMessage: null,
+    assistantItems: [
+      group('done', { isFinal: true }),
+      group('legacy', {}),
+      group('streaming', { isStreaming: true, isFinal: false }),
+      group('pending'),
+      { type: 'assistant' as const, message: { id: 'a', type: 'assistant' as const, content: 'text', timestamp: 3 } },
+    ],
+  };
+  expect(countTurnCompletedSteps(turn)).toBe(2);
 });
