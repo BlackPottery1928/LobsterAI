@@ -81,6 +81,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Session titles (created by ChannelSessionSync)
     coworkDefaultSessionTitle: '新对话',
+    coworkTurnChangesTitle: '本轮工作区变更',
+    coworkWorkspaceChangesTitle: '工作区变更',
     cronSessionPrefix: '定时',
     channelPrefixFeishu: '飞书',
     channelPrefixDingtalk: '钉钉',
@@ -455,6 +457,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Session titles
     coworkDefaultSessionTitle: 'New Chat',
+    coworkTurnChangesTitle: 'Changes during this turn',
+    coworkWorkspaceChangesTitle: 'Workspace changes',
     cronSessionPrefix: 'Cron',
     channelPrefixFeishu: 'Feishu',
     channelPrefixDingtalk: 'DingTalk',

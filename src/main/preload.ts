@@ -13,6 +13,8 @@ import { AppSettingsIpc } from '../shared/appSettings/constants';
 import { AppUpdateIpc } from '../shared/appUpdate/constants';
 import { ArtifactPreviewIpc } from '../shared/artifactPreview/constants';
 import { MarkdownFileIpc, type SaveMarkdownFileRequest } from '../shared/artifactPreview/markdownEditing';
+import { ReviewIpc, type ReviewScopeRequest } from '../shared/artifactPreview/reviewScopes';
+import type { ReviewSourceRequest } from '../shared/artifactPreview/reviewSource';
 import {
   AsrIpcChannel,
   type AsrRealtimeSessionRequest,
@@ -809,6 +811,16 @@ contextBridge.exposeInMainWorld('electron', {
       const handler = (_event: any, data: { sessionId: string }) => callback(data);
       ipcRenderer.on(CoworkIpcChannel.OpenSessionFromNotification, handler);
       return () => ipcRenderer.removeListener(CoworkIpcChannel.OpenSessionFromNotification, handler);
+    },
+  },
+  workspaceReview: {
+    read: (input: ReviewScopeRequest) => ipcRenderer.invoke(ReviewIpc.Read, input),
+    source: (input: ReviewSourceRequest) => ipcRenderer.invoke(ReviewIpc.Source, input),
+    latest: (sessionId: string) => ipcRenderer.invoke(ReviewIpc.Latest, sessionId),
+    onChanged: (listener: (sessionId: string) => void) => {
+      const handler = (_event: unknown, sessionId: string) => listener(sessionId);
+      ipcRenderer.on(ReviewIpc.Changed, handler);
+      return () => ipcRenderer.removeListener(ReviewIpc.Changed, handler);
     },
   },
   dialog: {

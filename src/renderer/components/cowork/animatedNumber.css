@@ -1,0 +1,14 @@
+/* Codex-style odometer digits. The 0–9 strip lives in ::before so it never enters textContent.
+   Every box is exactly one line tall (1lh) so digits sit on the same baseline as the text around them. */
+.cowork-odometer { white-space: nowrap; }
+.cowork-odometer-digits { display: inline-block; height: 1lh; vertical-align: top; }
+.cowork-odometer-digit { display: inline-block; width: 1ch; height: 1lh; overflow: hidden; vertical-align: top; text-align: center; font-variant-numeric: tabular-nums; }
+.cowork-odometer-digit::before {
+  content: "0\A 1\A 2\A 3\A 4\A 5\A 6\A 7\A 8\A 9";
+  display: block; white-space: pre; line-height: 1lh;
+  transform: translateY(calc(var(--odo, 0) * -1lh));
+  transition: transform 480ms cubic-bezier(.2, .8, .2, 1);
+  will-change: transform;
+}
+.cowork-odometer-value { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .cowork-odometer-digit::before { transition: none; } }

@@ -1,3 +1,4 @@
+import type { WorkspaceChangesSummary } from '../../shared/artifactPreview/workspace';
 import type { ShareDeploymentProjectCandidate } from '../../shared/shareDeployment/constants';
 
 export const ArtifactTypeValue = {
@@ -58,6 +59,9 @@ export interface Artifact {
   url?: string;
   localService?: LocalServiceArtifactMetadata;
   contentVersion?: number;
+  /** Scroll a workspace review to this file; the nonce lets the same file be focused again. */
+  reviewFocus?: { path: string; nonce: number };
+  workspaceChanges?: WorkspaceChangesSummary;
   remoteUrl?: string;
   mediaOrigin?: GeneratedVideoArtifactOrigin;
   legacyGeneratedVideoCandidate?: boolean;
