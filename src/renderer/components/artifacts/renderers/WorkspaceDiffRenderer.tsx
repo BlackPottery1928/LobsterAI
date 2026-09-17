@@ -302,7 +302,7 @@ export default function WorkspaceDiffRenderer({ artifact: suppliedArtifact, sele
   const [reviewResult, setReviewResult] = useState<{ source: string; artifact: Artifact }>();
   const sourceKey = `${suppliedArtifact.sessionId}:${suppliedArtifact.id}`;
   const artifact = reviewResult?.source === sourceKey ? reviewResult.artifact : suppliedArtifact;
-  const currentScope = artifact.workspaceChanges?.review?.scope ?? (artifact.id.startsWith('turn-changes:') ? ReviewScope.Turn : ReviewScope.Repository);
+  const currentScope = artifact.workspaceChanges?.review?.scope ?? ReviewScope.Repository;
   const [requestedScope, setRequestedScope] = useState<ReviewScope>();
   const [reference, setReference] = useState('');
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -346,11 +346,6 @@ export default function WorkspaceDiffRenderer({ artifact: suppliedArtifact, sele
   const identity = `${scope}@${revision}`;
   const [navigation, setNavigation] = useState<{ scope: string; id: string; sequence: number } | null>(null);
   const [visibleFile, setVisibleFile] = useState<{ scope: string; id: string } | null>(null);
-  const reviewFocus = suppliedArtifact.reviewFocus;
-  useEffect(() => {
-    const target = reviewFocus && files.find(file => file.path === reviewFocus.path);
-    if (target) { setNavigation({ scope, id: target.id, sequence: reviewFocus.nonce }); setVisibleFile({ scope, id: target.id }); }
-  }, [reviewFocus, scope, files]);
   const scrollFrame = useRef<number>();
   useEffect(() => () => { if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current); }, []);
   const [treePreference, setTreePreference] = useState<{ scope: string; open: boolean } | null>(null);
@@ -404,7 +399,7 @@ export default function WorkspaceDiffRenderer({ artifact: suppliedArtifact, sele
       {reviewError && <p role="alert" className="workspace-diff-notice">{reviewError}</p>}
       {artifact.workspaceChanges?.review?.baseRevision && <p className="workspace-diff-notice" title={artifact.workspaceChanges.review.baseRevision}>{t('workspaceDiffBase')} {artifact.workspaceChanges.review.baseRevision.slice(0, 12)}{artifact.workspaceChanges.review.reference ? ` · ${artifact.workspaceChanges.review.reference}` : ''}</p>}
       {(truncated || summary?.statsIncomplete) && <p className="workspace-diff-notice" role="status">
-        {t(summary?.captureIncomplete ? 'coworkTurnCaptureIncomplete' : truncated ? summary ? 'workspaceDiffTruncated' : 'workspaceDiffReadTruncated' : 'workspaceDiffIncomplete')}
+        {t(truncated ? summary ? 'workspaceDiffTruncated' : 'workspaceDiffReadTruncated' : 'workspaceDiffIncomplete')}
       </p>}
       <div className="workspace-diff-main">
         <div ref={containerRef} onMouseUp={handleMouseUp} onScroll={event => {

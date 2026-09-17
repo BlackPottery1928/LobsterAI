@@ -47,7 +47,6 @@ import { type AppUpdateActiveWorkloads, AppUpdateIpc } from '../shared/appUpdate
 import { ArtifactBrowserPartition, ArtifactPreviewIpc, ArtifactPreviewProtocol } from '../shared/artifactPreview/constants';
 import { ReviewIpc, ReviewScope, type ReviewScopeRequest } from '../shared/artifactPreview/reviewScopes';
 import type { ReviewSourceRequest } from '../shared/artifactPreview/reviewSource';
-import { isTurnChangesArtifact } from '../shared/artifactPreview/turnChanges';
 import { buildWorkspaceChangesArtifact } from '../shared/artifactPreview/workspaceChanges';
 import { createAccountOwnerKey } from '../shared/auth/accountOwner';
 import {
@@ -228,7 +227,6 @@ import { getRecentComputerUseLogEntries } from './computerUse/computerUseLogs';
 import { readEnvironmentSnapshot } from './conversation/environmentSnapshot';
 import { WorkspaceReviewSourceStore } from './conversation/reviewSource';
 import { isScopedReview, ScopedReviewStore } from './conversation/scopedReview';
-import { TurnChangesStore } from './conversation/turnChanges';
 import { type CoworkForkContextMessage, type CoworkMessage, CoworkStore } from './coworkStore';
 import {
   buildEnterpriseAccountRequestHeaders,
@@ -2464,28 +2462,6 @@ const getCoworkStore = () => {
   return coworkStore;
 };
 
-let turnChangesStore: TurnChangesStore | null = null;
-const getTurnChangesStore = (): TurnChangesStore => turnChangesStore ??= new TurnChangesStore(
-  getStore().getDatabase(),
-  path.join(app.getPath('userData'), 'workspace-review'),
-  () => t('coworkTurnChangesTitle'),
-);
-/** Snapshot the workspace before a turn is admitted. Never blocks the turn when the baseline is unavailable. */
-const beginTurnChanges = async (sessionId: string, dispatchId: string, cwd: string): Promise<void> => {
-  try {
-    await getTurnChangesStore().begin({ id: dispatchId, coworkSessionId: sessionId, userMessageId: dispatchId }, cwd);
-  } catch (error) {
-    console.warn('[CoworkReview] baseline unavailable; continuing without a turn review:', error);
-  }
-};
-const finishTurnChanges = (sessionId: string): void => {
-  void turnChangesStore?.finish(sessionId).then(() => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send(ReviewIpc.Changed, sessionId);
-    }
-  }).catch(error => console.warn('[CoworkReview] failed to finalize turn changes:', error));
-};
-
 let agentManager: AgentManager | null = null;
 const getAgentManager = () => {
   if (!agentManager) {
@@ -3581,7 +3557,6 @@ const bindCoworkRuntimeForwarder = (): void => {
   });
 
   runtime.on('sessionStopped', (sessionId: string) => {
-    finishTurnChanges(sessionId);
     getDesktopNotificationManager().handleSessionStopped(sessionId);
   });
 
@@ -3593,7 +3568,6 @@ const bindCoworkRuntimeForwarder = (): void => {
   });
 
   runtime.on('complete', (sessionId: string, claudeSessionId: string | null) => {
-    finishTurnChanges(sessionId);
     mediaSelectionBySession.delete(sessionId);
     mediaTurnAccountScopeBySession.delete(sessionId);
     skinRuntimeController?.handleRuntimeComplete(sessionId);
@@ -3619,7 +3593,6 @@ const bindCoworkRuntimeForwarder = (): void => {
   });
 
   runtime.on('error', (sessionId: string, error: string) => {
-    finishTurnChanges(sessionId);
     mediaSelectionBySession.delete(sessionId);
     mediaTurnAccountScopeBySession.delete(sessionId);
     skinRuntimeController?.handleRuntimeError(sessionId);
@@ -9388,12 +9361,11 @@ if (!gotTheLock) {
           browserAnnotations,
           imageAttachmentPreviews,
         });
-        const userMessage = coworkStoreInstance.addMessage(session.id, {
+        coworkStoreInstance.addMessage(session.id, {
           type: 'user',
           content: prompt,
           metadata: messageMetadata,
         });
-        await beginTurnChanges(session.id, userMessage.id, taskWorkingDirectory);
 
         coworkStoreInstance.updateSession(session.id, { status: 'running' });
 
@@ -9589,9 +9561,6 @@ if (!gotTheLock) {
           });
         }
 
-        if (existingSession) {
-          await beginTurnChanges(options.sessionId, crypto.randomUUID(), existingSession.cwd);
-        }
         console.log(
           '[CoworkFirstResponseTiming] continue IPC dispatched to runtime.',
           `Session ${options.sessionId}.`,
@@ -9941,7 +9910,6 @@ if (!gotTheLock) {
     if (!input || typeof input.sessionId !== 'string' || !Object.values(ReviewScope).includes(input.scope)) return null;
     const session = getCoworkStore().getSession(input.sessionId, 0);
     if (!session) return null;
-    if (input.scope === ReviewScope.Turn) return getTurnChangesStore().latest(input.sessionId);
     if (input.scope === ReviewScope.Repository) {
       return buildWorkspaceChangesArtifact(input.sessionId, t('coworkWorkspaceChangesTitle'), await readEnvironmentSnapshot(session.cwd));
     }
@@ -9950,21 +9918,11 @@ if (!gotTheLock) {
   ipcMain.handle(ReviewIpc.Source, (_event, input: ReviewSourceRequest) => {
     if (typeof input?.artifactId !== 'string' || typeof input.sessionId !== 'string' || !getCoworkStore().getSession(input.sessionId, 0)) return null;
     if (isScopedReview(input.artifactId)) return scopedReviews.readSource(input);
-    return isTurnChangesArtifact(input.artifactId) ? getTurnChangesStore().source(input) : reviewSources.read(input);
-  });
-  ipcMain.handle(ReviewIpc.Latest, async (_event, sessionId: string) => {
-    try {
-      if (typeof sessionId !== 'string' || !getCoworkStore().getSession(sessionId, 0)) return null;
-      return await getTurnChangesStore().latest(sessionId);
-    } catch (error) {
-      console.warn('[CoworkReview] latest turn review unavailable:', error);
-      return null;
-    }
+    return reviewSources.read(input);
   });
 
   ipcMain.handle(CoworkIpcChannel.StopSession, async (_event, sessionId: string) => {
     try {
-      turnChangesStore?.cancelPending(sessionId);
       const runtime = getCoworkEngineRouter();
       runtime.stopSession(sessionId);
       return { success: true };
@@ -10089,7 +10047,6 @@ if (!gotTheLock) {
   ipcMain.handle(CoworkIpcChannel.DeleteSession, async (_event, sessionId: string) => {
     try {
       getCoworkEngineRouter().stopSession(sessionId);
-      void turnChangesStore?.remove(sessionId);
       const coworkStoreInstance = getCoworkStore();
       coworkStoreInstance.deleteSession(sessionId);
       mediaSelectionBySession.delete(sessionId);
@@ -10131,7 +10088,6 @@ if (!gotTheLock) {
       const runtime = getCoworkEngineRouter();
       sessionIds.forEach(sessionId => {
         runtime.stopSession(sessionId);
-        void turnChangesStore?.remove(sessionId);
       });
       const coworkStoreInstance = getCoworkStore();
       coworkStoreInstance.deleteSessions(sessionIds);

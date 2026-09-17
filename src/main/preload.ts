@@ -830,12 +830,6 @@ contextBridge.exposeInMainWorld('electron', {
   workspaceReview: {
     read: (input: ReviewScopeRequest) => ipcRenderer.invoke(ReviewIpc.Read, input),
     source: (input: ReviewSourceRequest) => ipcRenderer.invoke(ReviewIpc.Source, input),
-    latest: (sessionId: string) => ipcRenderer.invoke(ReviewIpc.Latest, sessionId),
-    onChanged: (listener: (sessionId: string) => void) => {
-      const handler = (_event: unknown, sessionId: string) => listener(sessionId);
-      ipcRenderer.on(ReviewIpc.Changed, handler);
-      return () => ipcRenderer.removeListener(ReviewIpc.Changed, handler);
-    },
   },
   dialog: {
     selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),

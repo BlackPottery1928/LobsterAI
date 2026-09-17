@@ -64,6 +64,8 @@ import { coworkService } from '../../services/cowork';
 import { i18nService } from '../../services/i18n';
 import { getInstalledKitSkillIds } from '../../services/kitCapability';
 import { readLocalServiceProjectDirectoryCandidate } from '../../services/localServiceProjectDirectoryCache';
+import { getSubagentWaitPhase, SubagentWaitPhase } from '../../services/subagentWaitState';
+import { getTaskPanelMainAgentStatus } from '../../services/taskPanelState';
 import { RootState } from '../../store';
 import {
   selectCurrentMessagesLength,
@@ -185,7 +187,6 @@ import {
   scheduleConversationSearchSettle,
 } from './conversationSearchNavigation';
 import CoworkBtwFloatingPanel from './CoworkBtwFloatingPanel';
-import CoworkChangesBadge from './CoworkChangesBadge';
 import CoworkConversationSearch from './CoworkConversationSearch';
 import CoworkPromptInput, { type CoworkPromptInputRef } from './CoworkPromptInput';
 import QuestionDock from './interactions/QuestionDock';
@@ -214,10 +215,8 @@ import {
 import SubagentSpawnCard from './SubagentSpawnCard';
 import { useBackgroundJobs } from './useBackgroundJobs';
 import { useCoworkConversationSearch } from './useCoworkConversationSearch';
-import { useCoworkTurnReview } from './useCoworkTurnReview';
 import UserMessageContent from './UserMessageContent';
 import UserMessageItem from './UserMessageItem';
-import { useSyncTurnReview } from './useSyncTurnReview';
 interface CoworkSessionDetailProps {
   onManageSkills?: () => void;
   onManageKits?: () => void;
@@ -1571,17 +1570,6 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
 
   // Clear lazy-render height cache when session changes
   const sessionId = currentSession?.id;
-  const turnReview = useCoworkTurnReview(currentSession, !remoteManaged);
-  useSyncTurnReview(sessionId, turnReview.latest);
-  const handleReviewTurnChanges = useCallback((path?: string) => {
-    const artifact = turnReview.latest;
-    if (!artifact || artifact.sessionId !== sessionId) return;
-    dispatch(addArtifact({
-      sessionId: artifact.sessionId,
-      artifact: { ...artifact, title: i18nService.t('coworkTurnChangesTitle'), reviewFocus: path ? { path, nonce: Date.now() } : undefined },
-    }));
-    dispatch(openArtifactPreviewTab({ sessionId: artifact.sessionId, artifactId: artifact.id }));
-  }, [sessionId, turnReview.latest, dispatch]);
   const handleGoalCommand = useCallback((command: string) => {
     if (!currentSession?.id) return Promise.resolve(false);
     const goalAction = command.split(/\s+/, 2)[1] ?? 'unknown';
@@ -2180,6 +2168,17 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
   const [artifactPanelMinWidth, setArtifactPanelMinWidth] = useState(MIN_PANEL_WIDTH);
   const [artifactPanelMaxWidth, setArtifactPanelMaxWidth] = useState(MAX_PANEL_WIDTH);
   const [subagents, setSubagents] = useState<SubagentSessionSummary[]>([]);
+  const subagentWaitPhase = useMemo(
+    () => getSubagentWaitPhase(currentSession?.messages ?? [], subagents),
+    [currentSession?.messages, subagents],
+  );
+  const activityStatusOverride = isContextMaintenance
+    ? i18nService.t('coworkContextMaintenanceRunning')
+    : subagentWaitPhase === SubagentWaitPhase.Children
+      ? i18nService.t('coworkActivityLiveWaitSubagents')
+      : subagentWaitPhase === SubagentWaitPhase.Summary
+        ? i18nService.t('coworkActivityWaitSubagentSummary')
+        : null;
   const [subagentsLoading, setSubagentsLoading] = useState(false);
   const [selectedSubagent, setSelectedSubagent] = useState<SubagentSessionSummary | null>(null);
   const [contentRowWidth, setContentRowWidth] = useState(0);
@@ -6151,7 +6150,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
             localServiceDirectory={currentSession?.cwd}
             showActivityIndicator
             activityStatusOverride={
-              isContextMaintenance ? i18nService.t('coworkContextMaintenanceRunning') : null
+              activityStatusOverride
             }
             showCopyButtons={!isStreaming}
             completedGoal={
@@ -6249,7 +6248,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
                 }}
                 showActivityIndicator={showActivityIndicator}
                 activityStatusOverride={
-                  isContextMaintenance ? i18nService.t('coworkContextMaintenanceRunning') : null
+                  activityStatusOverride
                 }
                 showCopyButtons={!isStreaming || !isLastTurn}
                 hiddenSystemMessageId={enterpriseQuotaPromptMessageId}
@@ -7066,21 +7065,18 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
           </div>,
           document.body
         )}
-        {!exportImageProgress && (shouldShowScrollToBottom || (turnReview.latest?.workspaceChanges?.files.length ?? 0) > 0) && (
+        {!exportImageProgress && shouldShowScrollToBottom && (
           <div className="pointer-events-none absolute bottom-4 left-0 right-0 z-20 flex items-center justify-center gap-2 px-3">
-            <CoworkChangesBadge snapshot={turnReview.latest?.workspaceChanges ?? null} onReview={handleReviewTurnChanges} />
-            {shouldShowScrollToBottom && (
-              <button
-                type="button"
-                onClick={handleScrollToBottom}
-                onWheel={handleScrollToBottomWheel}
-                className="pointer-events-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground/85 shadow-[0_2px_10px_rgba(15,23,42,0.12)] transition-colors hover:bg-surface-raised hover:text-foreground dark:shadow-[0_2px_14px_rgba(0,0,0,0.36)]"
-                aria-label={i18nService.t('coworkScrollToBottom')}
-                title={i18nService.t('coworkScrollToBottom')}
-              >
-                <ArrowDownIcon className="h-4 w-4 stroke-[2.1]" />
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleScrollToBottom}
+              onWheel={handleScrollToBottomWheel}
+              className="pointer-events-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground/85 shadow-[0_2px_10px_rgba(15,23,42,0.12)] transition-colors hover:bg-surface-raised hover:text-foreground dark:shadow-[0_2px_14px_rgba(0,0,0,0.36)]"
+              aria-label={i18nService.t('coworkScrollToBottom')}
+              title={i18nService.t('coworkScrollToBottom')}
+            >
+              <ArrowDownIcon className="h-4 w-4 stroke-[2.1]" />
+            </button>
           </div>
         )}
       </div>
@@ -7448,12 +7444,15 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
               )}
               taskPanel={(
                 <TaskPanelContent
-                  sessionTitle={currentSession.title ?? ''}
-                  mainAgentRunning={isSessionBusy}
+                  mainAgentId={currentSession.agentId}
+                  mainAgentStatus={getTaskPanelMainAgentStatus({ isSessionBusy, isContextMaintenance, subagentWaitPhase })}
                   subagents={subagents}
                   subagentsLoading={subagentsLoading}
                   onSelectSubagent={handleSelectSubagent}
-                  onOpenSubagents={handleActivateArtifactSubagentTab}
+                  onOpenSubagents={() => {
+                    setSelectedSubagent(null);
+                    handleActivateArtifactSubagentTab();
+                  }}
                   jobs={backgroundJobs}
                   jobsLoading={backgroundJobsLoading}
                   onKillJob={handleKillBackgroundJob}

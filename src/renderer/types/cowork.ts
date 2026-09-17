@@ -348,6 +348,13 @@ export interface CoworkForkSessionOptions {
 export type { CoworkBackgroundJob, CoworkBackgroundJobsEvent } from '../../shared/cowork/backgroundJobs';
 
 // Subagent session summary for sidebar display
+export const SubagentSessionStatus = {
+  Running: 'running',
+  Done: 'done',
+  Error: 'error',
+} as const;
+export type SubagentSessionStatus = typeof SubagentSessionStatus[keyof typeof SubagentSessionStatus];
+
 export interface SubagentSessionSummary {
   id: string;
   agentId: string | null;
@@ -359,7 +366,7 @@ export interface SubagentSessionSummary {
   parentAgentId?: string | null;
   parentTitle?: string | null;
   parentUpdatedAt?: number | null;
-  status: 'running' | 'done' | 'error';
+  status: SubagentSessionStatus;
   createdAt: number;
   endedAt: number | null;
 }

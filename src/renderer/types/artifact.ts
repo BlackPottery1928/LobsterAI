@@ -59,8 +59,6 @@ export interface Artifact {
   url?: string;
   localService?: LocalServiceArtifactMetadata;
   contentVersion?: number;
-  /** Scroll a workspace review to this file; the nonce lets the same file be focused again. */
-  reviewFocus?: { path: string; nonce: number };
   workspaceChanges?: WorkspaceChangesSummary;
   remoteUrl?: string;
   mediaOrigin?: GeneratedVideoArtifactOrigin;

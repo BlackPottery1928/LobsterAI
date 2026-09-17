@@ -2,15 +2,19 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector } from 'react-redux';
 
 import { i18nService } from '@/services/i18n';
+import { TaskPanelMainAgentStatus } from '@/services/taskPanelState';
 import type { RootState } from '@/store';
 import type { CoworkBackgroundJob, SubagentSessionSummary } from '@/types/cowork';
+import { getAgentDisplayName, isDefaultAgentProfileName } from '@/utils/agentDisplay';
 
 import { BackgroundJobStatus, isLiveBackgroundJobStatus } from '../../../shared/cowork/backgroundJobs';
+import AgentAvatarIcon from '../agent/AgentAvatarIcon';
+import SubagentIcon from '../icons/SubagentIcon';
 import { SubagentPanelRow } from './SubagentPanelContent';
 
 interface TaskPanelContentProps {
-  sessionTitle: string;
-  mainAgentRunning: boolean;
+  mainAgentId: string;
+  mainAgentStatus: TaskPanelMainAgentStatus;
   subagents: SubagentSessionSummary[];
   subagentsLoading?: boolean;
   onSelectSubagent: (subagent: SubagentSessionSummary) => void;
@@ -22,6 +26,25 @@ interface TaskPanelContentProps {
   onCopyJob?: (job: CoworkBackgroundJob) => void;
   onClearSettledJobs?: () => Promise<void> | void;
 }
+
+const MAIN_AGENT_STATUS_PRESENTATION: Record<TaskPanelMainAgentStatus, { labelKey: string; className: string }> = {
+  [TaskPanelMainAgentStatus.Running]: {
+    labelKey: 'taskPanelMainAgentRunning',
+    className: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+  },
+  [TaskPanelMainAgentStatus.WaitingSubagents]: {
+    labelKey: 'taskPanelMainAgentWaitingSubagents',
+    className: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+  },
+  [TaskPanelMainAgentStatus.WaitingSummary]: {
+    labelKey: 'taskPanelMainAgentWaitingSummary',
+    className: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+  },
+  [TaskPanelMainAgentStatus.Idle]: {
+    labelKey: 'taskPanelMainAgentIdle',
+    className: 'bg-surface text-secondary',
+  },
+};
 
 const JOB_STATUS_KEY: Record<CoworkBackgroundJob['status'], string> = {
   [BackgroundJobStatus.Running]: 'taskPanelJobStatusRunning',
@@ -98,13 +121,6 @@ const SectionHeader: React.FC<{
         </button>
       )}
     </span>
-  </div>
-);
-
-const EmptyHint: React.FC<{ title: string; hint: string }> = ({ title, hint }) => (
-  <div className="px-4 py-6 text-center">
-    <div className="text-sm text-secondary">{title}</div>
-    <div className="mt-1 text-xs text-muted">{hint}</div>
   </div>
 );
 
@@ -208,8 +224,8 @@ const BackgroundJobRow: React.FC<{
 };
 
 const TaskPanelContent: React.FC<TaskPanelContentProps> = ({
-  sessionTitle,
-  mainAgentRunning,
+  mainAgentId,
+  mainAgentStatus,
   subagents,
   subagentsLoading = false,
   onSelectSubagent,
@@ -221,6 +237,11 @@ const TaskPanelContent: React.FC<TaskPanelContentProps> = ({
   onClearSettledJobs,
 }) => {
   const agents = useSelector((state: RootState) => state.agent.agents);
+  const mainAgent = agents.find(agent => agent.id === mainAgentId);
+  const mainAgentName = mainAgent && !isDefaultAgentProfileName(mainAgent)
+    ? getAgentDisplayName(mainAgent)
+    : i18nService.t('taskPanelMainAgent');
+  const mainAgentPresentation = MAIN_AGENT_STATUS_PRESENTATION[mainAgentStatus];
   const orderedJobs = useMemo(() => sortTaskPanelJobs(jobs), [jobs]);
   const liveCount = orderedJobs.filter(job => isLiveBackgroundJobStatus(job.status)).length;
   const settledCount = orderedJobs.length - liveCount;
@@ -232,43 +253,44 @@ const TaskPanelContent: React.FC<TaskPanelContentProps> = ({
 
   return (
     <div className="flex h-full flex-col overflow-hidden" data-task-panel>
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-4">
-        <h2 className="shrink-0 text-sm font-medium text-foreground">{i18nService.t('taskPanelTitle')}</h2>
-        {sessionTitle && (
-          <>
-            <span className="text-secondary">·</span>
-            <span className="truncate text-sm text-secondary" title={sessionTitle}>{sessionTitle}</span>
-          </>
+      <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-4">
+        {mainAgent?.icon?.trim() ? (
+          <AgentAvatarIcon
+            value={mainAgent.icon}
+            className="h-8 w-8 bg-surface"
+            iconClassName="h-4 w-4"
+            legacyClassName="text-base"
+          />
+        ) : (
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface text-secondary">
+            <SubagentIcon className="h-4 w-4" />
+          </span>
         )}
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground" title={mainAgentName}>
+          {mainAgentName}
+        </span>
+        <span
+          className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-1 text-xs ${mainAgentPresentation.className}`}
+          data-task-panel-main-agent-status={mainAgentStatus}
+          role="status"
+        >
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full bg-current ${mainAgentStatus === TaskPanelMainAgentStatus.Running ? 'animate-pulse' : ''}`}
+            aria-hidden="true"
+          />
+          {i18nService.t(mainAgentPresentation.labelKey)}
+        </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <section>
-          <div className="flex items-center gap-3 px-4 py-3">
-            <span
-              className={`inline-block h-2 w-2 shrink-0 rounded-full ${mainAgentRunning ? 'bg-emerald-500 animate-pulse' : 'bg-emerald-500/60'}`}
-              aria-hidden="true"
-            />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium text-foreground">{sessionTitle || i18nService.t('taskPanelMainAgent')}</div>
-              <div className="text-xs text-muted" data-task-panel-main-agent-status={mainAgentRunning ? 'running' : 'idle'}>
-                {i18nService.t('taskPanelMainAgent')} · {i18nService.t(mainAgentRunning ? 'taskPanelMainAgentRunning' : 'taskPanelMainAgentIdle')}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section>
           <SectionHeader
             title={i18nService.t('taskPanelSubagents')}
-            aside={subagents.length > 0 ? String(subagents.length) : undefined}
+            aside={subagents.length > 0
+              ? String(subagents.length)
+              : i18nService.t(subagentsLoading ? 'loading' : 'taskPanelSubagentsEmpty')}
             action={onOpenSubagents && subagents.length > 0 ? { label: i18nService.t('taskPanelViewAllSubagents'), onClick: onOpenSubagents } : undefined}
           />
-          {subagents.length === 0 ? (
-            <EmptyHint
-              title={subagentsLoading ? i18nService.t('loading') : i18nService.t('taskPanelSubagentsEmpty')}
-              hint={i18nService.t('taskPanelSubagentsHint')}
-            />
-          ) : (
+          {subagents.length > 0 && (
             <div className="divide-y divide-border">
               {subagents.map(subagent => (
                 <SubagentPanelRow
@@ -285,15 +307,12 @@ const TaskPanelContent: React.FC<TaskPanelContentProps> = ({
         <section>
           <SectionHeader
             title={i18nService.t('taskPanelBackgroundJobs')}
-            aside={orderedJobs.length > 0 ? jobCountLabel : undefined}
+            aside={orderedJobs.length > 0
+              ? jobCountLabel
+              : i18nService.t(jobsLoading ? 'loading' : 'taskPanelBackgroundJobsEmpty')}
             action={onClearSettledJobs && settledCount > 0 ? { label: i18nService.t('taskPanelClearSettled'), onClick: () => { void onClearSettledJobs(); } } : undefined}
           />
-          {orderedJobs.length === 0 ? (
-            <EmptyHint
-              title={jobsLoading ? i18nService.t('loading') : i18nService.t('taskPanelBackgroundJobsEmpty')}
-              hint={i18nService.t('taskPanelBackgroundJobsHint')}
-            />
-          ) : (
+          {orderedJobs.length > 0 && (
             <div className="divide-y divide-border">
               {orderedJobs.map(job => (
                 <BackgroundJobRow key={job.id} job={job} now={now} onKill={onKillJob} onCopy={onCopyJob} />

@@ -1304,8 +1304,6 @@ interface IElectronAPI {
   workspaceReview: {
     read: (input: ReviewScopeRequest) => Promise<ResolvedArtifactOutput | null>;
     source: (input: ReviewSourceRequest) => Promise<ReviewSourceResponse | null>;
-    latest: (sessionId: string) => Promise<ResolvedArtifactOutput | null>;
-    onChanged: (listener: (sessionId: string) => void) => () => void;
   };
   dialog: {
     selectDirectory: () => Promise<{ success: boolean; path: string | null }>;

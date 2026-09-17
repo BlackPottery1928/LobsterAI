@@ -54,6 +54,7 @@ import {
   ContinuityCapsuleSource,
   type CoworkContinuityCapsule,
 } from './libs/agentEngine/coworkContinuityCapsule';
+import { VISIBLE_COWORK_SESSION_SQL } from './libs/agentEngine/subagent/sessionVisibility';
 import {
   type SessionProjection,
   type SessionProjectionChanges,
@@ -1652,11 +1653,11 @@ export class CoworkStore {
   countSessions(agentId?: string): number {
     if (agentId) {
       const row = this.db
-        .prepare("SELECT COUNT(*) as count FROM cowork_sessions WHERE COALESCE(NULLIF(TRIM(agent_id), ''), 'main') = ?")
+        .prepare(`SELECT COUNT(*) as count FROM cowork_sessions s WHERE COALESCE(NULLIF(TRIM(s.agent_id), ''), 'main') = ? AND ${VISIBLE_COWORK_SESSION_SQL}`)
         .get(agentId) as { count: number } | undefined;
       return row?.count || 0;
     }
-    const row = this.db.prepare('SELECT COUNT(*) as count FROM cowork_sessions').get() as
+    const row = this.db.prepare(`SELECT COUNT(*) as count FROM cowork_sessions s WHERE ${VISIBLE_COWORK_SESSION_SQL}`).get() as
       | { count: number }
       | undefined;
     return row?.count || 0;
@@ -1671,6 +1672,7 @@ export class CoworkStore {
         SELECT ${summaryColumns}
         FROM cowork_sessions s
         WHERE COALESCE(NULLIF(TRIM(s.agent_id), ''), 'main') = ?
+          AND ${VISIBLE_COWORK_SESSION_SQL}
         ORDER BY s.pinned DESC,
           CASE WHEN s.pinned = 1 THEN COALESCE(s.pin_order, s.updated_at, s.created_at) END ASC,
           CASE WHEN s.pinned = 0 THEN s.updated_at END DESC,
@@ -1684,6 +1686,7 @@ export class CoworkStore {
         `
         SELECT ${summaryColumns}
         FROM cowork_sessions s
+        WHERE ${VISIBLE_COWORK_SESSION_SQL}
         ORDER BY s.pinned DESC,
           CASE WHEN s.pinned = 1 THEN COALESCE(s.pin_order, s.updated_at, s.created_at) END ASC,
           CASE WHEN s.pinned = 0 THEN s.updated_at END DESC,
@@ -1707,9 +1710,10 @@ export class CoworkStore {
         .prepare(
           `
           SELECT COUNT(*) as count
-          FROM cowork_sessions
-          WHERE title LIKE ? ESCAPE '\\'
-            AND COALESCE(NULLIF(TRIM(agent_id), ''), 'main') = ?
+          FROM cowork_sessions s
+          WHERE s.title LIKE ? ESCAPE '\\'
+          AND ${VISIBLE_COWORK_SESSION_SQL}
+            AND COALESCE(NULLIF(TRIM(s.agent_id), ''), 'main') = ?
         `,
         )
         .get(pattern, options.agentId) as { count: number } | undefined;
@@ -1720,8 +1724,9 @@ export class CoworkStore {
       .prepare(
         `
         SELECT COUNT(*) as count
-        FROM cowork_sessions
-        WHERE title LIKE ? ESCAPE '\\'
+        FROM cowork_sessions s
+        WHERE s.title LIKE ? ESCAPE '\\'
+          AND ${VISIBLE_COWORK_SESSION_SQL}
       `,
       )
       .get(pattern) as { count: number } | undefined;
@@ -1743,6 +1748,7 @@ export class CoworkStore {
         SELECT ${summaryColumns}
         FROM cowork_sessions s
         WHERE s.title LIKE ? ESCAPE '\\'
+          AND ${VISIBLE_COWORK_SESSION_SQL}
           AND COALESCE(NULLIF(TRIM(s.agent_id), ''), 'main') = ?
         ORDER BY s.pinned DESC,
           CASE WHEN s.pinned = 1 THEN COALESCE(s.pin_order, s.updated_at, s.created_at) END ASC,
@@ -1758,6 +1764,7 @@ export class CoworkStore {
         SELECT ${summaryColumns}
         FROM cowork_sessions s
         WHERE s.title LIKE ? ESCAPE '\\'
+          AND ${VISIBLE_COWORK_SESSION_SQL}
         ORDER BY s.pinned DESC,
           CASE WHEN s.pinned = 1 THEN COALESCE(s.pin_order, s.updated_at, s.created_at) END ASC,
           CASE WHEN s.pinned = 0 THEN s.updated_at END DESC,
