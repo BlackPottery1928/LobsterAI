@@ -49,6 +49,7 @@ const RETAINED_PATCHES = [
   'openclaw-subagent-settle-failure-event.patch',
   'openclaw-transcript-replay-validation.patch',
   'openclaw-view-image-task-cwd.patch',
+  'openclaw-web-login-channel-routing.patch',
   'openclaw-windows-file-path-redaction.patch',
   'openclaw-windows-process-identity.patch',
   'openclaw-workspace-attestation-quarantine.patch',

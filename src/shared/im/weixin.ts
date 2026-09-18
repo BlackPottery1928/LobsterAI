@@ -6,6 +6,12 @@ export const WeixinPlugin = {
 
 export const WEIXIN_QR_ACTIVATION_TIMEOUT_MS = 10 * 60_000;
 
+export const WeixinQrLoginTimeout = {
+  Start: 5 * 60_000,
+  Wait: 8 * 60_000,
+  RpcGrace: 10_000,
+} as const;
+
 /** Stable, redacted diagnostics emitted by the pinned Weixin plugin patch. */
 export const WeixinDeliveryError = {
   Rejected: 'WEIXIN_SEND_REJECTED',

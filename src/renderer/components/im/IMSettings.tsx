@@ -769,13 +769,15 @@ const IMSettings: React.FC = () => {
         return;
       }
 
-      setWeixinQrUrl(startResult.qrDataUrl);
-      setWeixinQrStatus('showing');
       if (!startResult.sessionKey) {
         setWeixinQrStatus('error');
-        setWeixinQrError(i18nService.t('imWeixinQrFailed'));
+        setWeixinQrError(i18nService.t('imWeixinQrInvalidResponse'));
         return;
       }
+      setWeixinQrUrl(startResult.qrDataUrl);
+      setWeixinQrStatus('showing');
+      // Starting a rescan may have stopped the previous channel connection.
+      void imService.loadStatus();
 
       // QR expires in ~2 minutes. Show error and let user retry.
       if (weixinTimerRef.current) clearTimeout(weixinTimerRef.current);
@@ -811,6 +813,9 @@ const IMSettings: React.FC = () => {
       if (weixinTimerRef.current) { clearTimeout(weixinTimerRef.current); weixinTimerRef.current = null; }
       setWeixinQrStatus('error');
       setWeixinQrError(String(err));
+    } finally {
+      // A failed rescan and the existing account's connection are independent.
+      if (isCurrentRequest()) await imService.loadStatus();
     }
   };
 
@@ -2902,7 +2907,10 @@ const IMSettings: React.FC = () => {
                     {weixinQrStatus === 'error' && weixinQrError && (
                       <div className="flex items-center justify-center gap-1.5 text-xs text-red-500 bg-red-500/10 px-3 py-2 rounded-lg">
                         <XCircleIcon className="h-4 w-4 flex-shrink-0" />
-                        {weixinQrError}
+                        <span>
+                          {i18nService.t('imWeixinQrFailed')}
+                          {weixinQrError !== i18nService.t('imWeixinQrFailed') && `: ${weixinQrError}`}
+                        </span>
                       </div>
                     )}
                   </>
