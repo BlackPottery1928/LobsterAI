@@ -9,6 +9,7 @@ import type { OpenClawDreamingRecoverySummary } from '../../shared/openclawEngin
 import { OpenClawStartupCompatibilityMode } from '../../shared/openclawEngine/startupCompatibility';
 import { OpenClawStartupMigrationStatus } from '../../shared/openclawEngine/startupMigration';
 import { OPENCLAW_STARTUP_MIGRATION_REFUSAL } from './openclawDreamingStartupFailure';
+import { OpenClawGatewaySignal } from './openclawGatewayProcess';
 
 vi.mock('electron', () => ({
   app: { getAppPath: () => process.cwd(), isPackaged: false },
@@ -93,6 +94,7 @@ function makeSupervisor() {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.spyOn(process, 'kill').mockReturnValue(true);
   vi.spyOn(console, 'debug').mockImplementation(() => {});
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -444,12 +446,36 @@ describe('OpenClaw gateway restart supervision', () => {
     const start = vi.spyOn(manager, 'startGateway');
     const pending = manager.restartGateway('mcp-change');
     const rejected = expect(pending).rejects.toThrow('did not exit after SIGKILL');
-    await vi.advanceTimersByTimeAsync(8_000);
+    await vi.advanceTimersByTimeAsync(process.platform === 'win32' ? 36_000 : 8_000);
     await rejected;
 
     expect(internals.gatewayProcess).toBe(child);
     expect(start).not.toHaveBeenCalled();
     expect(phases).toEqual([OpenClawEnginePhase.Starting, OpenClawEnginePhase.Error]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test.skipIf(process.platform !== 'win32')('restarts after native exit confirmation and ignores the old delayed close', async () => {
+    const { manager, internals, child, phases } = makeSupervisor();
+    const replacement = makeChild();
+    const start = vi.spyOn(manager, 'startGateway').mockImplementation(async () => {
+      internals.gatewayProcess = replacement;
+      internals.setStatus({ phase: OpenClawEnginePhase.Running, version: '2026.8.1', canRetry: false });
+      return manager.getStatus();
+    });
+    const pending = manager.restartGateway('config-delivery-fallback');
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(start).not.toHaveBeenCalled();
+    vi.mocked(process.kill).mockImplementation(() => {
+      throw Object.assign(new Error('No such process'), { code: 'ESRCH' });
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(pending).resolves.toMatchObject({ phase: OpenClawEnginePhase.Running });
+    child.emit('exit', null, OpenClawGatewaySignal.Kill);
+    child.emit('close', null, OpenClawGatewaySignal.Kill);
+    expect(internals.gatewayProcess).toBe(replacement);
+    expect(start).toHaveBeenCalledOnce();
+    expect(phases).toEqual([OpenClawEnginePhase.Starting, OpenClawEnginePhase.Running]);
     expect(vi.getTimerCount()).toBe(0);
   });
 

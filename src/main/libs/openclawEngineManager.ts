@@ -1781,7 +1781,7 @@ export class OpenClawEngineManager extends EventEmitter {
     return null;
   }
 
-  private ensureGatewayToken(): string {
+  ensureGatewayToken(): string {
     try {
       const existing = fs.readFileSync(this.gatewayTokenPath, 'utf8').trim();
       if (existing) {
