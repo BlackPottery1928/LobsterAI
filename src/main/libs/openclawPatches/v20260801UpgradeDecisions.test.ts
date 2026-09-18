@@ -51,6 +51,7 @@ const RETAINED_PATCHES = [
   'openclaw-workspace-attestation-quarantine.patch',
   'zz-openclaw-error-detail-preview.patch',
   'zz-openclaw-lock-owner-recovery.patch',
+  'zz-openclaw-marketplace-clone-retry.patch',
   'zz-openclaw-task-cwd-system-prompt.patch',
 ] as const;
 
