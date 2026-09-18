@@ -1821,6 +1821,10 @@ const buildManagedBrowserProxyExtraArgs = (browserWebAccess: BrowserWebAccessCon
   return proxyUrl ? [`${CHROME_PROXY_SERVER_ARG_PREFIX}${proxyUrl}`] : [];
 };
 
+const getSyncedFeishuInstances = (instances: FeishuInstanceConfig[]): FeishuInstanceConfig[] => (
+  instances.filter(instance => instance.enabled && instance.appId)
+);
+
 type OpenClawConfigSyncDeps = {
   engineManager: OpenClawEngineManager;
   getCoworkConfig: () => CoworkConfig;
@@ -2864,7 +2868,7 @@ export class OpenClawConfigSync {
     }
 
     // Sync Feishu OpenClaw channel config (via @larksuite/openclaw-lark) — multi-instance via accounts
-    const enabledFeishuInstances = feishuInstances.filter(i => i.enabled && i.appId);
+    const enabledFeishuInstances = getSyncedFeishuInstances(feishuInstances);
     if (enabledFeishuInstances.length > 0) {
       const buildFeishuAccountConfig = (
         inst: (typeof enabledFeishuInstances)[0],
@@ -3400,9 +3404,10 @@ export class OpenClawConfigSync {
       }
     }
 
-    // Feishu — per-instance secrets (must match sync() indexing: enabled instances only)
+    // Preserve the same account slots as sync(), including incomplete credentials.
+    // Skipping an empty secret would assign the next account's secret to this one.
     const feishuInstances = this.getFeishuInstances();
-    const enabledFeishu = feishuInstances.filter(i => i.enabled && i.appSecret);
+    const enabledFeishu = getSyncedFeishuInstances(feishuInstances);
     for (let idx = 0; idx < enabledFeishu.length; idx++) {
       if (idx === 0) {
         env.LOBSTER_FEISHU_APP_SECRET = enabledFeishu[idx].appSecret;
