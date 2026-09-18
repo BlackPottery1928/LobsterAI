@@ -2023,6 +2023,19 @@ test('disconnectGatewayClient suppresses automatic gateway reconnect until manua
   expect(adapter.gatewayReconnectSuppressed).toBe(false);
 });
 
+test('terminal plugin failures stop reconnect scheduling, queued attempts and wake-from-sleep retries', async () => {
+  const adapter = new OpenClawRuntimeAdapter({} as never, {
+    isGatewayStartupBlocked: () => true,
+  } as never);
+  const connect = vi.spyOn(adapter, 'connectGatewayIfNeeded').mockResolvedValue();
+  adapter.scheduleGatewayReconnect();
+  expect(adapter.gatewayReconnectTimer).toBeNull();
+  await adapter.attemptGatewayReconnect();
+  adapter.onSystemResume();
+  expect(connect).not.toHaveBeenCalled();
+  expect(adapter.gatewayReconnectTimer).toBeNull();
+});
+
 test('a successful gateway hello clears reconnect suppression on the normal ensure path', async () => {
   let callbacks: Record<string, unknown> = {};
   class TestGatewayClient {

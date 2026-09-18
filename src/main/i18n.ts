@@ -298,6 +298,9 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Weixin
     imWeixinNotEnabled: '微信渠道当前未启用。',
+    imWeixinQrSessionExpired: '本次微信扫码已结束，请重新获取二维码。',
+    imWeixinGatewayUnavailable: 'AI 引擎尚未连接，请启动引擎后重新扫码。',
+    openClawConfigSyncFailed: 'AI 引擎配置同步失败，请重试。',
     imWeixinEnableSuggestion: '请启用微信渠道后重新测试连通性。',
     imWeixinConfigReady: '微信配置已就绪。',
     imWeixinOpenClawHint:
@@ -716,6 +719,9 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Weixin
     imWeixinNotEnabled: 'WeChat channel is not currently enabled.',
+    imWeixinQrSessionExpired: 'This WeChat login session has ended. Please request a new QR code.',
+    imWeixinGatewayUnavailable: 'The AI engine is not connected. Start the engine and try scanning again.',
+    openClawConfigSyncFailed: 'Failed to sync the AI engine configuration. Please try again.',
     imWeixinEnableSuggestion: 'Please enable the WeChat channel and test connectivity again.',
     imWeixinConfigReady: 'WeChat configuration is ready.',
     imWeixinOpenClawHint:
