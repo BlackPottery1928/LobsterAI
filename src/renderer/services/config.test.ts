@@ -1,4 +1,4 @@
-import { ProviderName } from '@shared/providers';
+import { ApiFormat, ProviderName } from '@shared/providers';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { type AppConfig, CODE_FONT_SIZE_MIGRATION_VERSION, CONFIG_KEYS, defaultConfig, FontPreferences, resolveArtifactAutoPreviewEnabled, ShortcutAction, UI_FONT_SIZE_MIGRATION_VERSION } from '../config';
@@ -421,6 +421,61 @@ describe('configService provider migrations', () => {
     const savedConfig = storeData[CONFIG_KEYS.APP_CONFIG] as AppConfig;
     expect(savedConfig.providers?.[ProviderName.DeepSeek].models?.map(model => model.id))
       .toEqual(['DeepSeek-V4-Flash']);
+  });
+
+  // [INTRA-ONLY] …and its connection config comes from the build config too.
+  test('replaces a stored DeepSeek connection config with the build config', async () => {
+    const storedConfig: AppConfig = {
+      ...defaultConfig,
+      providers: {
+        ...defaultConfig.providers,
+        [ProviderName.DeepSeek]: {
+          ...defaultConfig.providers![ProviderName.DeepSeek],
+          enabled: true,
+          apiKey: 'sk-user-supplied',
+          baseUrl: 'https://api.deepseek.com',
+          apiFormat: ApiFormat.Anthropic,
+          models: [{ id: 'deepseek-reasoner', name: 'Stale', supportsImage: false }],
+        },
+      },
+    };
+    const { configService, storeData } = await loadConfigServiceWithStoredConfig(storedConfig);
+
+    await configService.init();
+
+    const buildDeepSeek = defaultConfig.providers![ProviderName.DeepSeek];
+    const savedDeepSeek = (storeData[CONFIG_KEYS.APP_CONFIG] as AppConfig)
+      .providers?.[ProviderName.DeepSeek];
+    expect(savedDeepSeek?.apiKey).toBe(buildDeepSeek.apiKey);
+    expect(savedDeepSeek?.baseUrl).toBe(buildDeepSeek.baseUrl);
+    expect(savedDeepSeek?.apiFormat).toBe(buildDeepSeek.apiFormat);
+    expect(savedDeepSeek?.models?.map(model => model.id)).toEqual(['DeepSeek-V4-Flash']);
+    // `enabled` stays the user's call.
+    expect(savedDeepSeek?.enabled).toBe(true);
+  });
+
+  test('drops a user-edited DeepSeek connection config on save', async () => {
+    const { configService, storeData } = await loadConfigServiceWithStoredConfig(defaultConfig);
+
+    await configService.updateConfig({
+      providers: {
+        ...defaultConfig.providers,
+        [ProviderName.DeepSeek]: {
+          ...defaultConfig.providers![ProviderName.DeepSeek],
+          enabled: true,
+          apiKey: 'sk-user-supplied',
+          baseUrl: 'https://api.deepseek.com',
+          apiFormat: ApiFormat.Anthropic,
+        },
+      },
+    });
+
+    const buildDeepSeek = defaultConfig.providers![ProviderName.DeepSeek];
+    const savedDeepSeek = (storeData[CONFIG_KEYS.APP_CONFIG] as AppConfig)
+      .providers?.[ProviderName.DeepSeek];
+    expect(savedDeepSeek?.apiKey).toBe(buildDeepSeek.apiKey);
+    expect(savedDeepSeek?.baseUrl).toBe(buildDeepSeek.baseUrl);
+    expect(savedDeepSeek?.apiFormat).toBe(buildDeepSeek.apiFormat);
   });
 
   test('preserves old MiMo models while injecting V2.5 models and 1M contexts', async () => {

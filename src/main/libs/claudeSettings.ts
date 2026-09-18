@@ -1,4 +1,4 @@
-import { type ApiFormat,type ProviderConfig, ProviderName, ProviderRegistry, resolveCodingPlanBaseUrl } from '../../shared/providers';
+import { type ApiFormat,applyDefinitionOwnedProviders,type ProviderConfig, ProviderName, ProviderRegistry, resolveCodingPlanBaseUrl } from '../../shared/providers';
 import {
   type LobsterAIRequestCapability,
   parseLobsterAIRequestCapabilities,
@@ -445,6 +445,22 @@ const getStore = (): SqliteStore | null => {
   return storeGetter();
 };
 
+/**
+ * [INTRA-ONLY] Read `app_config` with the build-owned provider overrides
+ * (see shared/providers/constants.ts `DEFINITION_OWNED_PROVIDER_IDS`) applied.
+ * Every provider read in this module goes through here, so the overrides reach
+ * `resolveMatchedProvider`, `resolveAllEnabledProviderConfigs` and
+ * `resolveAllProviderApiKeys` — and from them the OpenClaw gateway config that
+ * the conversation actually runs against.
+ */
+const readAppConfig = (sqliteStore: SqliteStore): AppConfig | null => {
+  const appConfig = sqliteStore.get<AppConfig>('app_config');
+  if (!appConfig) {
+    return null;
+  }
+  return { ...appConfig, providers: applyDefinitionOwnedProviders(appConfig.providers) };
+};
+
 type MatchedProvider = {
   providerName: string;
   providerConfig: LocalProviderConfig;
@@ -696,7 +712,7 @@ export function resolveCurrentApiConfig(target: OpenAICompatProxyTarget = 'local
     };
   }
 
-  const appConfig = sqliteStore.get<AppConfig>('app_config');
+  const appConfig = readAppConfig(sqliteStore);
   if (!appConfig) {
     return {
       config: null,
@@ -806,7 +822,7 @@ export function resolveRawApiConfig(): ApiConfigResolution {
     console.debug('[ClaudeSettings] resolveRawApiConfig: store is null, storeGetter not set yet');
     return { config: null, error: 'Store is not initialized.' };
   }
-  const appConfig = sqliteStore.get<AppConfig>('app_config');
+  const appConfig = readAppConfig(sqliteStore);
   if (!appConfig) {
     console.debug('[ClaudeSettings] resolveRawApiConfig: app_config not found in store');
     return { config: null, error: 'Application config not found.' };
@@ -901,7 +917,7 @@ export function resolveAllProviderApiKeys(): Record<string, string> {
   // All configured custom providers
   const sqliteStore = getStore();
   if (!sqliteStore) return result;
-  const appConfig = sqliteStore.get<AppConfig>('app_config');
+  const appConfig = readAppConfig(sqliteStore);
   if (!appConfig?.providers) return result;
 
   for (const [providerName, providerConfig] of Object.entries(appConfig.providers)) {
@@ -985,7 +1001,7 @@ export function listProviderSourceEntries(): ProviderSourceEntry[] {
 export function resolveAllEnabledProviderConfigs(): ProviderRawConfig[] {
   const sqliteStore = getStore();
   if (!sqliteStore) return [];
-  const appConfig = sqliteStore.get<AppConfig>('app_config');
+  const appConfig = readAppConfig(sqliteStore);
   if (!appConfig?.providers) return [];
 
   const result: ProviderRawConfig[] = [];

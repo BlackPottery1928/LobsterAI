@@ -83,10 +83,10 @@ test('defaultConfig disables usage analytics by default', () => {
   expect(defaultConfig.usageAnalyticsEnabled).toBe(false);
 });
 
-test('defaultConfig gives DeepSeek V4 models 1M context', () => {
-  expect(defaultConfig.providers?.[ProviderName.DeepSeek]?.models?.slice(0, 2)).toEqual([
-    { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', supportsImage: false, supportsThinking: true, contextWindow: 1_000_000 },
-    { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', supportsImage: false, supportsThinking: true, contextWindow: 1_000_000 },
+// [INTRA-ONLY] DeepSeek's catalogue is the single model served by the intranet proxy.
+test('defaultConfig gives DeepSeek the proxy-served model with 1M context', () => {
+  expect(defaultConfig.providers?.[ProviderName.DeepSeek]?.models).toEqual([
+    { id: 'DeepSeek-V4-Flash', name: 'DeepSeek V4 Flash', supportsImage: false, supportsThinking: true, contextWindow: 1_000_000 },
   ]);
 });
 

@@ -1,5 +1,6 @@
 import {
   ApiFormat,
+  applyDefinitionOwnedProviderConfig,
   applyModelRuntimeProfileMetadata,
   ModelRuntimeProfileSource,
   normalizeModelIdForComparison as getProviderModelIdentity,
@@ -97,27 +98,16 @@ const normalizeProviderApiFormat = (providerKey: string, apiFormat: unknown): 'a
   return ApiFormat.Anthropic;
 };
 
-// [INTRA-ONLY] DeepSeek's model list is owned by the build config
-// (`src/shared/providers/constants.ts`), not the stored `app_config` row: this
-// build points it at an intranet proxy serving a fixed catalogue.
-// `normalizeProviderModels` is the only way provider models enter the renderer
-// config, so forcing there also covers Settings writes.
-const CONFIG_OWNED_PROVIDER_MODELS = new Set<string>([ProviderName.DeepSeek]);
-
-const resolveProviderModelsSource = (
-  providerKey: string,
-  models: ProviderConfig['models'],
-): ProviderConfig['models'] => (
-  CONFIG_OWNED_PROVIDER_MODELS.has(providerKey)
-    ? defaultConfig.providers?.[providerKey]?.models?.map(model => ({ ...model }))
-    : models
-);
-
+// [INTRA-ONLY] Definition-owned providers (see shared/providers/constants.ts
+// `DEFINITION_OWNED_PROVIDER_IDS`) get their models forced by
+// `applyDefinitionOwnedProviderConfig` before this runs, so this is the only
+// way provider models enter the renderer config and one call site covers both
+// the config load and Settings writes.
 const normalizeProviderModels = (
   providerKey: string,
   models: ProviderConfig['models'],
   providerContext: Pick<ProviderConfig, 'apiFormat'>,
-): ProviderConfig['models'] => resolveProviderModelsSource(providerKey, models)?.map(model => {
+): ProviderConfig['models'] => models?.map(model => {
   const {
     compatibilityMode: _legacyCompatibilityMode,
     ...modelWithoutCompatibilityMode
@@ -188,7 +178,9 @@ const normalizeProvidersConfig = (providers: AppConfig['providers']): AppConfig[
   }
 
   return Object.fromEntries(
-    Object.entries(providers).map(([providerKey, providerConfig]) => {
+    Object.entries(providers).map(([providerKey, storedProviderConfig]) => {
+      // [INTRA-ONLY] Build-owned providers ignore whatever the Settings form submitted.
+      const providerConfig = applyDefinitionOwnedProviderConfig(providerKey, storedProviderConfig);
       const baseUrl = normalizeProviderBaseUrl(providerKey, providerConfig.baseUrl);
       const apiFormat = normalizeProviderApiFormat(providerKey, providerConfig.apiFormat);
       return [
@@ -579,10 +571,12 @@ const hydrateStoredConfig = (storedConfig: AppConfig): AppConfig => {
         }).map(([providerKey, providerConfig]) => [
           providerKey,
           (() => {
-            const mergedProvider = {
+            // [INTRA-ONLY] Forced before the model migrations below so they run
+            // against the build catalogue, not the stored one.
+            const mergedProvider = applyDefinitionOwnedProviderConfig(providerKey, {
               ...((defaultConfig.providers as Record<string, unknown>)?.[providerKey] as Record<string, unknown> ?? {}),
               ...providerConfig,
-            };
+            });
             // Filter out removed models
             const removedIds = REMOVED_PROVIDER_MODELS[providerKey];
             if (removedIds && mergedProvider.models) {
