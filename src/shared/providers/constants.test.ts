@@ -2,10 +2,17 @@ import { describe,expect, test } from 'vitest';
 
 import {
   ApiFormat,
+  applyDefinitionOwnedProviderConfig,
+  applyDefinitionOwnedProviders,
+  isDefinitionOwnedProvider,
   OpenClawProviderId,
   ProviderName,
   ProviderRegistry,
 } from './constants';
+
+// [INTRA-ONLY] This build points DeepSeek at a fixed intranet proxy serving a
+// fixed catalogue. Single literal home for the assertions below.
+const DEEPSEEK_INTRANET_BASE_URL = 'http://10.133.4.205:5050/desktop-agent-provider';
 
 describe('ProviderName constants', () => {
   test('contains expected provider keys', () => {
@@ -35,7 +42,7 @@ describe('ProviderRegistry', () => {
   test('deepseek and xiaomi default to OpenAI-compatible endpoints', () => {
     const deepseek = ProviderRegistry.get(ProviderName.DeepSeek);
     expect(deepseek?.defaultApiFormat).toBe(ApiFormat.OpenAI);
-    expect(deepseek?.defaultBaseUrl).toBe('https://api.deepseek.com');
+    expect(deepseek?.defaultBaseUrl).toBe(DEEPSEEK_INTRANET_BASE_URL);
 
     const xiaomi = ProviderRegistry.get(ProviderName.Xiaomi);
     expect(xiaomi?.defaultApiFormat).toBe(ApiFormat.OpenAI);
@@ -71,11 +78,10 @@ describe('ProviderRegistry', () => {
     });
   });
 
-  test('deepseek v4 default models use 1M context', () => {
+  test('deepseek exposes the single proxy-served model with 1M context', () => {
     const deepseek = ProviderRegistry.get(ProviderName.DeepSeek);
-    expect(deepseek?.defaultModels.slice(0, 2)).toEqual([
-      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', supportsImage: false, supportsThinking: true, contextWindow: 1_000_000 },
-      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', supportsImage: false, supportsThinking: true, contextWindow: 1_000_000 },
+    expect(deepseek?.defaultModels).toEqual([
+      { id: 'DeepSeek-V4-Flash', name: 'DeepSeek V4 Flash', supportsImage: false, supportsThinking: true, contextWindow: 1_000_000 },
     ]);
   });
 
@@ -127,9 +133,7 @@ describe('ProviderRegistry', () => {
 
   test('resolveModelSupportsThinking preserves known reasoning model metadata', () => {
     const knownReasoningModels: Array<[string, string]> = [
-      [ProviderName.DeepSeek, 'deepseek-v4-pro'],
-      [ProviderName.DeepSeek, 'deepseek-v4-flash'],
-      [ProviderName.DeepSeek, 'deepseek-reasoner'],
+      [ProviderName.DeepSeek, 'DeepSeek-V4-Flash'],
       [ProviderName.Moonshot, 'kimi-k2.6'],
       [ProviderName.Moonshot, 'kimi-k2.5'],
       [ProviderName.Moonshot, 'kimi-k3'],
@@ -173,9 +177,9 @@ describe('ProviderRegistry', () => {
   });
 
   test('resolveModelContextWindow fills known defaults without overriding user values', () => {
-    expect(ProviderRegistry.resolveModelContextWindow(ProviderName.DeepSeek, 'deepseek-v4-flash')).toBe(1_000_000);
-    expect(ProviderRegistry.resolveModelContextWindow('custom_0', 'deepseek-v4-pro')).toBe(1_000_000);
-    expect(ProviderRegistry.resolveModelContextWindow(ProviderName.DeepSeek, 'deepseek-v4-pro', 200_000)).toBe(200_000);
+    expect(ProviderRegistry.resolveModelContextWindow(ProviderName.DeepSeek, 'DeepSeek-V4-Flash')).toBe(1_000_000);
+    expect(ProviderRegistry.resolveModelContextWindow('custom_0', 'deepseek-v4-flash')).toBe(1_000_000);
+    expect(ProviderRegistry.resolveModelContextWindow(ProviderName.DeepSeek, 'DeepSeek-V4-Flash', 200_000)).toBe(200_000);
     expect(ProviderRegistry.resolveModelContextWindow(ProviderName.OpenAI, 'gpt-5.6-sol')).toBe(1_050_000);
     expect(ProviderRegistry.resolveModelContextWindow(ProviderName.Xai, 'grok-4.5')).toBe(500_000);
   });
@@ -289,7 +293,7 @@ describe('ProviderRegistry', () => {
 
   describe('getSwitchableBaseUrl', () => {
     test('returns anthropic url for providers with switchableBaseUrls', () => {
-      expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.DeepSeek, 'anthropic')).toBe('https://api.deepseek.com/anthropic');
+      expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.DeepSeek, 'anthropic')).toBe(DEEPSEEK_INTRANET_BASE_URL);
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Moonshot, 'anthropic')).toBe('https://api.moonshot.cn/anthropic');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Zhipu, 'anthropic')).toBe('https://open.bigmodel.cn/api/anthropic');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Minimax, 'anthropic')).toBe('https://api.minimaxi.com/anthropic');
@@ -298,7 +302,7 @@ describe('ProviderRegistry', () => {
     });
 
     test('returns openai url for providers with switchableBaseUrls', () => {
-      expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.DeepSeek, 'openai')).toBe('https://api.deepseek.com');
+      expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.DeepSeek, 'openai')).toBe(DEEPSEEK_INTRANET_BASE_URL);
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Moonshot, 'openai')).toBe('https://api.moonshot.cn/v1');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Zhipu, 'openai')).toBe('https://open.bigmodel.cn/api/paas/v4');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Minimax, 'openai')).toBe('https://api.minimaxi.com/v1');
@@ -312,5 +316,68 @@ describe('ProviderRegistry', () => {
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Gemini, 'openai')).toBeUndefined();
       expect(ProviderRegistry.getSwitchableBaseUrl('unknown', 'anthropic')).toBeUndefined();
     });
+  });
+});
+
+describe('definition-owned providers', () => {
+  test('only DeepSeek is owned by the build config', () => {
+    expect(isDefinitionOwnedProvider(ProviderName.DeepSeek)).toBe(true);
+    for (const id of ProviderRegistry.providerIds) {
+      if (id === ProviderName.DeepSeek) continue;
+      expect(isDefinitionOwnedProvider(id)).toBe(false);
+    }
+    expect(isDefinitionOwnedProvider('custom_0')).toBe(false);
+  });
+
+  test('forces the connection fields and leaves the rest alone', () => {
+    const stored = {
+      enabled: false,
+      apiKey: 'sk-stale',
+      baseUrl: 'https://api.deepseek.com',
+      apiFormat: ApiFormat.Anthropic,
+      codingPlanEnabled: true,
+      displayName: 'My DeepSeek',
+      models: [{ id: 'deepseek-reasoner', name: 'Stale', supportsImage: false }],
+    };
+
+    const applied = applyDefinitionOwnedProviderConfig(ProviderName.DeepSeek, stored);
+
+    expect(applied.baseUrl).toBe(DEEPSEEK_INTRANET_BASE_URL);
+    expect(applied.apiKey).toBe('sk-7s9KpR2GzN5dQv8Bc4jXtF6mYh3aLw1U-TEST');
+    expect(applied.apiFormat).toBe(ApiFormat.OpenAI);
+    expect(applied.models?.map(model => model.id)).toEqual(['DeepSeek-V4-Flash']);
+    // Untouched: the user's enable/disable and labelling intent survives.
+    expect(applied.enabled).toBe(false);
+    expect(applied.codingPlanEnabled).toBe(true);
+    expect(applied.displayName).toBe('My DeepSeek');
+  });
+
+  test('returns a fresh model array that cannot corrupt the registry', () => {
+    const applied = applyDefinitionOwnedProviderConfig(ProviderName.DeepSeek, {
+      models: [{ id: 'stale', name: 'Stale', supportsImage: false }],
+    });
+
+    applied.models[0].name = 'mutated';
+
+    expect(ProviderRegistry.get(ProviderName.DeepSeek)?.defaultModels[0].name).toBe('DeepSeek V4 Flash');
+  });
+
+  test('passes other providers through untouched', () => {
+    const stored = { apiKey: 'sk-mine', baseUrl: 'https://api.moonshot.cn/v1', enabled: true };
+    expect(applyDefinitionOwnedProviderConfig(ProviderName.Moonshot, stored)).toBe(stored);
+  });
+
+  test('map-level overlay never injects a provider the stored config lacks', () => {
+    const providers = {
+      [ProviderName.Moonshot]: { apiKey: 'sk-mine', baseUrl: 'https://api.moonshot.cn/v1' },
+      [ProviderName.DeepSeek]: { apiKey: 'sk-stale', baseUrl: 'https://api.deepseek.com' },
+    };
+
+    const applied = applyDefinitionOwnedProviders(providers)!;
+
+    expect(Object.keys(applied)).toEqual([ProviderName.Moonshot, ProviderName.DeepSeek]);
+    expect(applied[ProviderName.Moonshot]).toBe(providers[ProviderName.Moonshot]);
+    expect(applied[ProviderName.DeepSeek].baseUrl).toBe(DEEPSEEK_INTRANET_BASE_URL);
+    expect(applyDefinitionOwnedProviders(undefined)).toBeUndefined();
   });
 });

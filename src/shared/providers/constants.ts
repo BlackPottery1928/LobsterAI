@@ -900,3 +900,69 @@ class ProviderRegistryImpl {
 }
 
 export const ProviderRegistry = new ProviderRegistryImpl(PROVIDER_DEFINITIONS);
+
+// ═══════════════════════════════════════════════════════
+// 6. [INTRA-ONLY] Definition-owned providers
+// ═══════════════════════════════════════════════════════
+
+/**
+ * [INTRA-ONLY] Providers whose runtime config is owned by this build's
+ * PROVIDER_DEFINITIONS rather than the persisted `app_config` row. This build
+ * points DeepSeek at a fixed intranet proxy serving a fixed catalogue, so a
+ * stored override can only ever be a dead route.
+ *
+ * Applied at every read of the persisted provider map, in both processes:
+ *   - renderer: src/renderer/services/config.ts (config load + Settings writes)
+ *   - main:     src/main/libs/claudeSettings.ts (chat / OpenClaw gateway config)
+ * Delete this section together with its call sites when the intranet
+ * deployment goes away.
+ */
+const DEFINITION_OWNED_PROVIDER_IDS: ReadonlySet<string> = new Set([ProviderName.DeepSeek]);
+
+/** Whether a provider's config is owned by PROVIDER_DEFINITIONS. */
+export const isDefinitionOwnedProvider = (providerKey: string): boolean =>
+  DEFINITION_OWNED_PROVIDER_IDS.has(providerKey);
+
+/**
+ * Overlay the build-owned config onto one provider entry. Only the connection
+ * fields are overlaid — `enabled`, `codingPlanEnabled` and OAuth credentials
+ * keep the caller's values.
+ */
+export const applyDefinitionOwnedProviderConfig = <T extends object>(
+  providerKey: string,
+  providerConfig: T,
+): T => {
+  if (!isDefinitionOwnedProvider(providerKey)) {
+    return providerConfig;
+  }
+  const def = ProviderRegistry.get(providerKey);
+  if (!def) {
+    return providerConfig;
+  }
+  return {
+    ...providerConfig,
+    baseUrl: def.defaultBaseUrl,
+    apiKey: def.defaultApiKey ?? '',
+    apiFormat: def.defaultApiFormat,
+    models: def.defaultModels.map(model => ({ ...model })),
+  };
+};
+
+/**
+ * Overlay the build-owned config across a persisted provider map. A provider
+ * the stored config does not have is never injected, so the user's
+ * enable/disable intent survives.
+ */
+export const applyDefinitionOwnedProviders = <T extends object>(
+  providers: Record<string, T> | undefined,
+): Record<string, T> | undefined => {
+  if (!providers) {
+    return providers;
+  }
+  return Object.fromEntries(
+    Object.entries(providers).map(([providerKey, providerConfig]) => [
+      providerKey,
+      applyDefinitionOwnedProviderConfig(providerKey, providerConfig),
+    ]),
+  );
+};
