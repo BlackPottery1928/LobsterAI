@@ -17,7 +17,7 @@ import {
 // `app_config` row must never win, or a stale row sends the conversation to a
 // dead route.
 const DEEPSEEK_INTRANET_BASE_URL = 'http://10.133.4.205:5050/desktop-agent-provider';
-const DEEPSEEK_BUILD_API_KEY = 'sk-7s9KpR2GzN5dQv8Bc4jXtF6mYh3aLw1U-TEST';
+const DEEPSEEK_BUILD_API_KEY = 'sk-g3COlon528Z9KO117DJQGA';
 
 const setStoredConfig = (
   providers: Record<string, unknown>,

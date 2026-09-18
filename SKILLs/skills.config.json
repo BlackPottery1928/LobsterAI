@@ -30,6 +30,10 @@
     "technology-news-search": { "order": 224, "enabled": false },
     "youdaonote": { "order": 298, "enabled": true },
     "skill-vetter": { "order": 299, "enabled": true },
-    "skill-creator": { "order": 300, "enabled": true }
+    "skill-creator": { "order": 300, "enabled": true },
+    "contextweave-interactive-architecture": { "order": 301, "enabled": true },
+    "public-document-layout": { "order": 302, "enabled": true },
+    "self-improving-agent": { "order": 303, "enabled": true },
+    "unclecheng-reduce-ai-perception-v2": { "order": 304, "enabled": true }
   }
 }

@@ -57,7 +57,7 @@ Cowork 是 LobsterAI 的产品与会话层，OpenClaw 是底层运行时和网�
 
 ### 技能
 
-LobsterAI 在 `SKILLs/skills.config.json` 中配置了 28 个内置技能，包括 Web 搜索、Word 文档、Excel 表格、PowerPoint、PDF 处理、Remotion 视频生成、浏览器自动化、图片/视频生成、股票研究、内容写作、邮件、天气和技能创建等。
+LobsterAI 在 `SKILLs/skills.config.json` 中配置了 33 个内置技能，包括 Web 搜索、Word 文档、Excel 表格、PowerPoint、PDF 处理、Remotion 视频生成、浏览器自动化、图片/视频生成、股票研究、内容写作、邮件、天气和技能创建等。
 
 ### MCP 服务
 
