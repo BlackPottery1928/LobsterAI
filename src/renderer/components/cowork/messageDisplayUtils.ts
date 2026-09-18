@@ -433,6 +433,34 @@ export const getActivityIndicatorStatusText = (
   return i18nService.t(hasContent ? 'coworkProcessing' : 'coworkThinking');
 };
 
+/**
+ * Phase words shown while the model is silent, rotated by the activity indicator so the
+ * status keeps moving instead of sitting on "Thinking" for a minute. The first entry is
+ * always the plain thinking label, so the initial render matches getActivityIndicatorStatusText.
+ */
+export const getThinkingPhaseLabels = (): string[] => {
+  const phases = i18nService.t('coworkThinkingPhases')
+    .split('|')
+    .map(phase => phase.trim())
+    .filter(Boolean);
+  return phases.length > 0 ? phases : [i18nService.t('coworkThinking')];
+};
+
+const isToolGroupSettled = (group: ToolGroupItem): boolean => {
+  const meta = group.toolResult?.metadata;
+  if (!group.toolResult) return false;
+  return !(meta?.isStreaming && !meta?.isFinal);
+};
+
+/** Tool steps of this turn that already have a final result; shown next to the live timer. */
+export const countTurnCompletedSteps = (turn: ConversationTurn): number => {
+  let count = 0;
+  for (const item of turn.assistantItems) {
+    if (item.type === 'tool_group' && isToolGroupSettled(item.group)) count += 1;
+  }
+  return count;
+};
+
 export const formatElapsedDuration = (elapsedMs: number): string => {
   const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
   if (totalSeconds < 60) {

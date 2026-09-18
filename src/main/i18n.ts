@@ -122,6 +122,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkErrorEnterprisePoolExhausted: '当前团队积分池已用完。',
     coworkErrorEnterpriseCreditBatchesExpired: '当前团队积分批次已全部过期。',
     coworkErrorInsufficientBalance: 'API 余额不足，请充值后重试。',
+    coworkErrorModelServiceUnavailable: '该模型服务暂不可用，请切换模型或稍后重试。',
+    coworkErrorProviderCooldown: '模型凭据暂时处于冷却期，请稍后重试或切换其他服务商。',
     coworkErrorInputTooLong: '输入内容过长，超出模型上下文限制。',
     coworkErrorMessageTooLarge:
       '本次消息过大，请减少附件、压缩图片或拆分提交。（单次整体需小于 30MB）',
@@ -298,6 +300,9 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Weixin
     imWeixinNotEnabled: '微信渠道当前未启用。',
+    imWeixinQrSessionExpired: '本次微信扫码已结束，请重新获取二维码。',
+    imWeixinGatewayUnavailable: 'AI 引擎尚未连接，请启动引擎后重新扫码。',
+    openClawConfigSyncFailed: 'AI 引擎配置同步失败，请重试。',
     imWeixinEnableSuggestion: '请启用微信渠道后重新测试连通性。',
     imWeixinConfigReady: '微信配置已就绪。',
     imWeixinOpenClawHint:
@@ -509,6 +514,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkErrorEnterprisePoolExhausted: 'The current team credit pool has been used up.',
     coworkErrorEnterpriseCreditBatchesExpired: 'All credit batches for the current team have expired.',
     coworkErrorInsufficientBalance: 'Insufficient API balance. Please top up and try again.',
+    coworkErrorModelServiceUnavailable: 'This model service is temporarily unavailable. Switch models or try again later.',
+    coworkErrorProviderCooldown: 'The model credentials are temporarily in cooldown. Try again later or switch providers.',
     coworkErrorInputTooLong: 'Input too long, exceeding model context limit.',
     coworkErrorMessageTooLarge:
       'This message is too large. Reduce attachments, compress images, or split it up. (Keep each message under about 30 MB.)',
@@ -716,6 +723,9 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Weixin
     imWeixinNotEnabled: 'WeChat channel is not currently enabled.',
+    imWeixinQrSessionExpired: 'This WeChat login session has ended. Please request a new QR code.',
+    imWeixinGatewayUnavailable: 'The AI engine is not connected. Start the engine and try scanning again.',
+    openClawConfigSyncFailed: 'Failed to sync the AI engine configuration. Please try again.',
     imWeixinEnableSuggestion: 'Please enable the WeChat channel and test connectivity again.',
     imWeixinConfigReady: 'WeChat configuration is ready.',
     imWeixinOpenClawHint:

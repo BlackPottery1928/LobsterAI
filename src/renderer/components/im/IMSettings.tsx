@@ -434,6 +434,7 @@ const IMSettings: React.FC = () => {
   const [weixinAllowFromInput, setWeixinAllowFromInput] = useState<string>('');
   const [isWeixinDmPolicyMenuOpen, setIsWeixinDmPolicyMenuOpen] = useState(false);
   const weixinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const weixinLoginRequestRef = useRef(0);
   const weixinDmPolicyMenuRef = useRef<HTMLDivElement>(null);
   const [_localIp, setLocalIp] = useState<string>('');
   const isMountedRef = useRef(true);
@@ -754,11 +755,13 @@ const IMSettings: React.FC = () => {
   };
 
   const handleWeixinQrLogin = async () => {
+    const requestId = ++weixinLoginRequestRef.current;
+    const isCurrentRequest = () => isMountedRef.current && requestId === weixinLoginRequestRef.current;
     setWeixinQrStatus('loading');
     setWeixinQrError('');
     try {
       const startResult = await window.electron.im.weixinQrLoginStart();
-      if (!isMountedRef.current) return;
+      if (!isCurrentRequest()) return;
 
       if (!startResult.success || !startResult.qrDataUrl) {
         setWeixinQrStatus('error');
@@ -777,7 +780,7 @@ const IMSettings: React.FC = () => {
       // QR expires in ~2 minutes. Show error and let user retry.
       if (weixinTimerRef.current) clearTimeout(weixinTimerRef.current);
       weixinTimerRef.current = setTimeout(() => {
-        if (!isMountedRef.current) return;
+        if (!isCurrentRequest()) return;
         setWeixinQrStatus('error');
         setWeixinQrError(i18nService.t('imWeixinQrExpired'));
       }, 120000);
@@ -785,8 +788,8 @@ const IMSettings: React.FC = () => {
       // Start polling for scan result
       setWeixinQrStatus('waiting');
       const waitResult = await window.electron.im.weixinQrLoginWait(startResult.sessionKey);
+      if (!isCurrentRequest()) return;
       if (weixinTimerRef.current) { clearTimeout(weixinTimerRef.current); weixinTimerRef.current = null; }
-      if (!isMountedRef.current) return;
 
       if (waitResult.success && (waitResult.connected || waitResult.alreadyConnected)) {
         const accountId = waitResult.accountId || weixinAccountId;
@@ -804,8 +807,8 @@ const IMSettings: React.FC = () => {
         setWeixinQrError(waitResult.message || i18nService.t('imWeixinQrFailed'));
       }
     } catch (err) {
+      if (!isCurrentRequest()) return;
       if (weixinTimerRef.current) { clearTimeout(weixinTimerRef.current); weixinTimerRef.current = null; }
-      if (!isMountedRef.current) return;
       setWeixinQrStatus('error');
       setWeixinQrError(String(err));
     }
