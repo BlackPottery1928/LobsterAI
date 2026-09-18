@@ -30,6 +30,7 @@ import { recoverInstallerResourcesFromTar } from './installerResourceRecovery';
 import { mergeNoProxyValue } from './noProxyEnv';
 import { getCodexHomeDir } from './openaiCodexAuth';
 import { migrateLegacyCronStorageWithDoctor } from './openclawCronLegacyMigration';
+import { getOpenClawDailyLogCandidates } from './openclawDailyLogs';
 import { readDreamingRecoverySummary } from './openclawDreamingRecovery';
 import { createDreamingStartupFailureCollector } from './openclawDreamingStartupFailure';
 import { cleanupStaleGatewayLocks, GatewayLockCleanupAction } from './openclawGatewayLock';
@@ -566,32 +567,14 @@ export class OpenClawEngineManager extends EventEmitter {
     this.gatewayLogPrunedDateKey = dateKey;
   }
 
-  /**
-   * Resolve the directory where the OpenClaw gateway writes its daily rolling
-   * logs (openclaw-YYYY-MM-DD.log).  Returns null when no candidate exists.
-   */
-  getOpenClawDailyLogDir(): string | null {
-    if (process.platform === 'win32') {
-      const runtime = this.resolveRuntimeMetadata();
-      if (runtime.root) {
-        const drive = path.parse(runtime.root).root;
-        const preferred = path.join(drive, 'tmp', 'openclaw');
-        if (fs.existsSync(preferred)) return preferred;
-      }
-      const fallback = path.join(os.tmpdir(), 'openclaw');
-      return fs.existsSync(fallback) ? fallback : null;
-    }
-
-    // macOS / Linux
-    if (fs.existsSync('/tmp/openclaw')) return '/tmp/openclaw';
-    try {
-      const uid = process.getuid?.();
-      if (uid != null) {
-        const fallback = path.join(os.tmpdir(), `openclaw-${uid}`);
-        if (fs.existsSync(fallback)) return fallback;
-      }
-    } catch { /* getuid unavailable */ }
-    return null;
+  /** Include the active runtime temp path and legacy locations in diagnostics. */
+  getOpenClawDailyLogDirs(): string[] {
+    return getOpenClawDailyLogCandidates({
+      platform: process.platform,
+      tmpDir: os.tmpdir(),
+      runtimeRoot: this.resolveRuntimeMetadata().root,
+      uid: process.getuid?.(),
+    });
   }
 
   getGatewayConnectionInfo(): OpenClawGatewayConnectionInfo {
