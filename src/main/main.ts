@@ -310,6 +310,7 @@ import {
 } from './libs/appQuitConfirmation';
 import { hideAppWindowsForQuit } from './libs/appQuitWindows';
 import { AppUpdateCoordinator, INSTALLATION_UUID_KEY } from './libs/appUpdateCoordinator';
+import { AppUpdateGrayClient, type AppUpdateGraySession } from './libs/appUpdateGrayClient';
 import { AuthCallbackRouter } from './libs/authCallbackRouter';
 import {
   appendCallbackReturnTo,
@@ -2164,6 +2165,7 @@ let coworkRuntimeForwarderBound = false;
 let memoryMigrationDone = false;
 let preventSleepBlockerId: number | null = null;
 let appUpdateCoordinator: AppUpdateCoordinator | null = null;
+let resolveAppUpdateGraySession: () => AppUpdateGraySession | null = () => null;
 let mainLogReporter: MainLogReporter | null = null;
 let libraryIndexService: LibraryIndexService | null = null;
 let unsubscribeLibrarySessionChanges: (() => void) | null = null;
@@ -2284,7 +2286,13 @@ const formatAutoLaunchStatusForLog = (status: AutoLaunchStatus): string => {
 
 const getAppUpdateCoordinator = (): AppUpdateCoordinator => {
   if (!appUpdateCoordinator) {
-    appUpdateCoordinator = new AppUpdateCoordinator(getStore());
+    appUpdateCoordinator = new AppUpdateCoordinator(getStore(), new AppUpdateGrayClient({
+      getSession: () => resolveAppUpdateGraySession(),
+      getServerBaseUrl: getServerApiBaseUrl,
+      fetch: (url, options) => session.defaultSession.fetch(url, options),
+      platform: process.platform,
+      arch: process.arch,
+    }));
   }
   return appUpdateCoordinator;
 };
@@ -5561,6 +5569,13 @@ if (!gotTheLock) {
     if (!getAuthTokens()) return null;
     const scope = getCurrentMediaAccountScope();
     return `${scope?.ownerAccountKey ?? 'unresolved'}:${authAccountGeneration}`;
+  };
+
+  resolveAppUpdateGraySession = () => {
+    const tokens = getAuthTokens();
+    if (!tokens || !getCurrentMediaAccountScope()) return null;
+    const sessionKey = getAuthSessionKey();
+    return sessionKey ? { sessionKey, accessToken: tokens.accessToken, headers: getEnterpriseAccountHeaders() } : null;
   };
 
   const authSessionManager = new AuthSessionManager({
