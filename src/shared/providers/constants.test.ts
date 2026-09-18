@@ -12,7 +12,7 @@ import {
 
 // [INTRA-ONLY] This build points DeepSeek at a fixed intranet proxy serving a
 // fixed catalogue. Single literal home for the assertions below.
-const DEEPSEEK_INTRANET_BASE_URL = 'http://10.133.4.205:5050/desktop-agent-provider';
+const DEEPSEEK_INTRANET_BASE_URL = 'http://higressai.app.cz:5555/desktop-agent-provider/v1';
 
 describe('ProviderName constants', () => {
   test('contains expected provider keys', () => {

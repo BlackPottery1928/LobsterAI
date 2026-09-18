@@ -25,7 +25,9 @@
  * (usable for dev runs, but a Finder-launched .app on macOS does not inherit the
  * shell environment, so the compiled value is the production mechanism).
  */
-export const INTRANET_BASE_URL = 'http://10.133.4.205:5050';
+// export const INTRANET_BASE_URL = 'http://10.133.4.205:5050';
+
+export const INTRANET_BASE_URL = 'http://higressai.app.cz:5555';
 
 export const INTRANET_BASE_URL_ENV = 'LOBSTER_INTRANET_BASE_URL';
 
