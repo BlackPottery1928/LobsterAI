@@ -1,5 +1,33 @@
 # OpenClaw v2026.8.1 patch notes
 
+## Marketplace clone failures during startup
+
+`zz-openclaw-marketplace-clone-retry.patch` gives a failed marketplace source
+`git clone` a typed error code before any plugin artifact is published. The
+update path preserves the error code in its outcome. Doctor retains the install
+record and reports this acquisition failure as a notice with retry guidance,
+instead of turning an unavailable source repository into a global readiness
+failure. Other install warnings are unchanged; no error-message matching is used.
+
+The existing payload smoke check still runs. A corrupt or missing payload with
+a verified install path remains quarantined for that boot; an active record
+without an install path remains fatal. Security scan, capability consent,
+unclassified repair failures, and unknown-owner verification failures retain
+their blocking behavior. Failed acquisition cannot publish its partial clone.
+The patch neither deletes user plugin records nor changes plugin enable flags.
+
+Validate with the upstream `marketplace`, `update`,
+`missing-configured-plugin-install`, and `post-core-plugin-convergence` suites,
+then rebuild the runtime. The LobsterAI startup compatibility helper separately
+maps only retired `gateway.reload.mode` values `hot` and `restart` to `hybrid`
+and removes only `gateway.reload.debounceMs` / `deferralTimeoutMs`, matching
+the pinned Doctor's explicit retired-field rules. It uses an exact original
+backup and the canonical config writer. Unknown config errors remain blocked
+without removing their fields, and auth migration logs their paths without values.
+
+Remove the patch when the pinned upstream carries the same typed acquisition
+failure routing and passes the retained payload and unknown-owner regressions.
+
 ## Manual lock-owner recovery
 
 `zz-openclaw-lock-owner-recovery.patch` adds an optional asynchronous

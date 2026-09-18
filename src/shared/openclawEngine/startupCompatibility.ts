@@ -17,3 +17,12 @@ export const OpenClawBundledDiscoveryMode = {
   Compat: 'compat',
   Allowlist: 'allowlist',
 } as const;
+
+export const OpenClawGatewayReloadMode = {
+  Off: 'off',
+  Hybrid: 'hybrid',
+  LegacyHot: 'hot',
+  LegacyRestart: 'restart',
+} as const;
+
+export const OPENCLAW_RETIRED_GATEWAY_RELOAD_KEYS = ['debounceMs', 'deferralTimeoutMs'] as const;
