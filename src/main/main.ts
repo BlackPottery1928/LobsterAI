@@ -45,6 +45,9 @@ import { AppIpcChannel } from '../shared/app/constants';
 import { AppSettingsAutoLaunchErrorCode, AppSettingsIpc } from '../shared/appSettings/constants';
 import { type AppUpdateActiveWorkloads, AppUpdateIpc } from '../shared/appUpdate/constants';
 import { ArtifactBrowserPartition, ArtifactPreviewIpc, ArtifactPreviewProtocol } from '../shared/artifactPreview/constants';
+import { ReviewIpc, ReviewScope, type ReviewScopeRequest } from '../shared/artifactPreview/reviewScopes';
+import type { ReviewSourceRequest } from '../shared/artifactPreview/reviewSource';
+import { buildWorkspaceChangesArtifact } from '../shared/artifactPreview/workspaceChanges';
 import { createAccountOwnerKey } from '../shared/auth/accountOwner';
 import {
   AuthIpcChannel,
@@ -81,6 +84,7 @@ import {
   normalizeBrowserWebAccessConfig,
 } from '../shared/browserWebAccess/constants';
 import { ClipboardIpc } from '../shared/clipboard/constants';
+import { BACKGROUND_JOB_EVENT_CHANNEL, type CoworkBackgroundJobsEvent } from '../shared/cowork/backgroundJobs';
 import {
   type CoworkBrowserAnnotationMessageBatch,
   normalizeBrowserAnnotationBatches,
@@ -216,9 +220,13 @@ import { APP_NAME, APP_USER_MODEL_ID, DB_FILENAME } from './appConstants';
 import { createLocalFileProtocolResponse } from './artifactLocalFileProtocol';
 import { authQuotaGateStateFromQuota, AuthSubscriptionStatus, createDefaultAuthQuotaGateState, normalizeAuthQuota } from './authQuota';
 import { type AutoLaunchStatus, getAutoLaunchStatus, isAutoLaunched, setAutoLaunchEnabled } from './autoLaunchManager';
+import { BackgroundJobStore } from './backgroundJobStore';
 import { BrowserCredentialApprovalService } from './browserCredentials/browserCredentialApprovalService';
 import { BrowserCredentialService } from './browserCredentials/browserCredentialService';
 import { getRecentComputerUseLogEntries } from './computerUse/computerUseLogs';
+import { readEnvironmentSnapshot } from './conversation/environmentSnapshot';
+import { WorkspaceReviewSourceStore } from './conversation/reviewSource';
+import { isScopedReview, ScopedReviewStore } from './conversation/scopedReview';
 import { type CoworkForkContextMessage, type CoworkMessage, CoworkStore } from './coworkStore';
 import {
   buildEnterpriseAccountRequestHeaders,
@@ -262,6 +270,7 @@ import { registerActivityIpcHandlers } from './ipcHandlers/activity';
 import { registerAgentHandlers } from './ipcHandlers/agents';
 import { registerAsrIpcHandlers } from './ipcHandlers/asr';
 import { registerBrowserCredentialHandlers } from './ipcHandlers/browserCredentials/handlers';
+import { registerCoworkBackgroundJobHandlers } from './ipcHandlers/coworkBackgroundJob';
 import { registerCoworkSubagentHandlers } from './ipcHandlers/coworkSubagent';
 import { ensureDshEngineReady, registerDshHandlers } from './ipcHandlers/dsh/handlers';
 import { registerEnterpriseAccountHandlers } from './ipcHandlers/enterpriseAccount';
@@ -2608,6 +2617,7 @@ const getOpenClawConfigSync = (): OpenClawConfigSync => {
           return null;
         }
       },
+      isWeixinQrLoginActive: () => imGatewayManager?.isWeixinQrLoginActive() ?? false,
       getIMSettings: () => {
         try {
           return getIMGatewayManager().getConfig().settings;
@@ -3435,7 +3445,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         });
       });
       repairStage = OpenClawRepairStage.Gateway;
-      const started = await manager.startGateway('manual-repair');
+      const started = await manager.startGateway('manual-repair', { retryBlocked: true });
       // Reconnection can await a token refresh that itself needs config sync.
       // Release config writers after repair/startup, before awaiting the client.
       openClawManualRepairActive = false;
@@ -3648,6 +3658,13 @@ const bindCoworkRuntimeForwarder = (): void => {
     getDesktopNotificationManager().handleSessionStopped(sessionId);
   });
 
+  runtime.on('backgroundJobsChanged', (_sessionId: string, event: CoworkBackgroundJobsEvent) => {
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (win.isDestroyed()) return;
+      win.webContents.send(BACKGROUND_JOB_EVENT_CHANNEL, event);
+    });
+  });
+
   runtime.on('complete', (sessionId: string, claudeSessionId: string | null) => {
     mediaSelectionBySession.delete(sessionId);
     mediaTurnAccountScopeBySession.delete(sessionId);
@@ -3735,6 +3752,7 @@ const getCoworkEngineRouter = () => {
         },
         new SubagentRunStore(getStore().getDatabase()),
         new SubagentMessageStore(getStore().getDatabase()),
+        new BackgroundJobStore(getStore().getDatabase()),
       );
       // Wire up channel session sync for IM conversations via OpenClaw
       try {
@@ -3873,12 +3891,13 @@ const getIMGatewayManager = () => {
       },
       syncOpenClawConfig: async (
         reason?: string,
-        options?: { restartGatewayIfRunning?: boolean },
+        options?: { restartGatewayIfRunning?: boolean; requireSuccess?: boolean },
       ) => {
-        await syncOpenClawConfig({
+        const result = await syncOpenClawConfig({
           reason: reason || 'im-gateway-sync',
           restartGatewayIfRunning: options?.restartGatewayIfRunning,
         });
+        if (options?.requireSuccess && !result.success) throw new Error(result.error || t('openClawConfigSyncFailed'));
       },
       ensureOpenClawGatewayConnected: async () => {
         const configApplyStatus = await waitForOpenClawConfigApply('IM gateway client connection');
@@ -8748,7 +8767,7 @@ if (!gotTheLock) {
     }
     try {
       const manager = getOpenClawEngineManager();
-      restartGatewayPromise = manager.restartGateway('ipc-manual');
+      restartGatewayPromise = manager.restartGateway('ipc-manual', { retryBlocked: true });
       const status = await restartGatewayPromise;
       return {
         success: status.phase === 'running' || status.phase === 'ready',
@@ -10029,6 +10048,23 @@ if (!gotTheLock) {
     }
   });
 
+  const reviewSources = new WorkspaceReviewSourceStore(sessionId => getCoworkStore().getSession(sessionId, 0)?.cwd);
+  const scopedReviews = new ScopedReviewStore(sessionId => getCoworkStore().getSession(sessionId, 0)?.cwd);
+  ipcMain.handle(ReviewIpc.Read, async (_event, input: ReviewScopeRequest) => {
+    if (!input || typeof input.sessionId !== 'string' || !Object.values(ReviewScope).includes(input.scope)) return null;
+    const session = getCoworkStore().getSession(input.sessionId, 0);
+    if (!session) return null;
+    if (input.scope === ReviewScope.Repository) {
+      return buildWorkspaceChangesArtifact(input.sessionId, t('coworkWorkspaceChangesTitle'), await readEnvironmentSnapshot(session.cwd));
+    }
+    return scopedReviews.create(input);
+  });
+  ipcMain.handle(ReviewIpc.Source, (_event, input: ReviewSourceRequest) => {
+    if (typeof input?.artifactId !== 'string' || typeof input.sessionId !== 'string' || !getCoworkStore().getSession(input.sessionId, 0)) return null;
+    if (isScopedReview(input.artifactId)) return scopedReviews.readSource(input);
+    return reviewSources.read(input);
+  });
+
   ipcMain.handle(CoworkIpcChannel.StopSession, async (_event, sessionId: string) => {
     try {
       const runtime = getCoworkEngineRouter();
@@ -10687,6 +10723,12 @@ if (!gotTheLock) {
     getCoworkEngineRouter,
   });
 
+  // ── Task panel background jobs IPC ─────────────────────────────────────
+
+  registerCoworkBackgroundJobHandlers({
+    getCoworkEngineRouter,
+  });
+
   ipcMain.handle(CoworkIpcChannel.CancelMediaTask, async (_event, taskId: string) => {
     try {
       const requestAccountScope = getCurrentMediaAccountScope();
@@ -10746,16 +10788,15 @@ if (!gotTheLock) {
         // AskUserQuestion plugin responses go to the bridge server, not the runtime
         if (options.requestId) {
           const result = options.result;
+          const updatedInput = result.behavior === 'allow' && result.updatedInput && typeof result.updatedInput === 'object'
+            ? (result.updatedInput as Record<string, unknown>)
+            : undefined;
           const askUserResponse: AskUserResponse = {
             behavior: result.behavior === 'allow' ? 'allow' : 'deny',
-            answers:
-              result.behavior === 'allow' &&
-              result.updatedInput &&
-              typeof result.updatedInput === 'object'
-                ? ((result.updatedInput as Record<string, unknown>).answers as
-                    | Record<string, string>
-                    | undefined)
-                : undefined,
+            answers: updatedInput?.answers as Record<string, string> | undefined,
+            skippedQuestionIds: Array.isArray(updatedInput?.skippedQuestionIds)
+              ? (updatedInput.skippedQuestionIds as string[])
+              : undefined,
           };
           getMcpRuntime().resolveAskUser(options.requestId, askUserResponse);
         }

@@ -69,6 +69,7 @@ export const OpenClawEngineErrorCode = {
   StartupCompatibilityFailed: 'startup_compatibility_failed',
   MemoryDreamingMigrationFailed: 'memory_dreaming_migration_failed',
   AgentMediaMigrationRequired: 'agent_media_migration_required',
+  PluginVerificationFailed: 'plugin_verification_failed',
 } as const;
 
 export type OpenClawEngineErrorCode =

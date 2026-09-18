@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 import { EventEmitter } from 'events';
 
 import { classifyErrorKey } from '../../common/coworkErrorClassify';
+import { WeixinPlugin } from '../../shared/im/weixin';
 import type { CoworkStore } from '../coworkStore';
 import { t } from '../i18n';
 import type { CoworkRuntime } from '../libs/agentEngine/types';
@@ -37,9 +38,10 @@ import {
   IMMessage,
   Platform,
 } from './types';
+import { WeixinPluginActivation } from './weixinPluginActivation';
 
 const DINGTALK_OPENCLAW_CHANNEL = 'dingtalk-connector';
-const WEIXIN_OPENCLAW_CHANNEL = 'openclaw-weixin';
+const WEIXIN_OPENCLAW_CHANNEL = WeixinPlugin.Id;
 const WEIXIN_ALREADY_CONNECTED_MESSAGE = '已连接过此 OpenClaw';
 
 const CONNECTIVITY_TIMEOUT_MS = 10_000;
@@ -120,7 +122,7 @@ export interface IMGatewayManagerOptions {
   ensureCoworkReady?: () => Promise<void>;
   syncOpenClawConfig?: (
     reason?: string,
-    options?: { restartGatewayIfRunning?: boolean },
+    options?: { restartGatewayIfRunning?: boolean; requireSuccess?: boolean },
   ) => Promise<void>;
   ensureOpenClawGatewayConnected?: () => Promise<void>;
   getOpenClawGatewayClient?: () => GatewayClientLike | null;
@@ -134,6 +136,11 @@ export interface IMGatewayManagerOptions {
 }
 
 export class IMGatewayManager extends EventEmitter {
+  private readonly weixinPluginActivation = new WeixinPluginActivation(async () => {
+    if (!this.getConfig().weixin?.enabled) {
+      await this.syncOpenClawConfig?.('weixin-qr-plugin-activation', { restartGatewayIfRunning: true, requireSuccess: true });
+    }
+  });
   private nimGateway: NimGateway;
   private imStore: IMStore;
   private chatHandler: IMChatHandler | null = null;
@@ -142,7 +149,7 @@ export class IMGatewayManager extends EventEmitter {
   private getSkillsPrompt: (() => Promise<string | null>) | null = null;
   private ensureCoworkReady: (() => Promise<void>) | null = null;
   private syncOpenClawConfig:
-    | ((reason?: string, options?: { restartGatewayIfRunning?: boolean }) => Promise<void>)
+    | ((reason?: string, options?: { restartGatewayIfRunning?: boolean; requireSuccess?: boolean }) => Promise<void>)
     | null = null;
   private ensureOpenClawGatewayConnected: (() => Promise<void>) | null = null;
   private getOpenClawGatewayClient: (() => GatewayClientLike | null) | null = null;
@@ -401,6 +408,7 @@ export class IMGatewayManager extends EventEmitter {
   ): void {
     const previousConfig = this.imStore.getConfig();
     this.imStore.setConfig(config);
+    if (config.weixin?.enabled === false) this.weixinPluginActivation.cancel();
 
     // Update chat handler if settings changed
     if (config.settings) {
@@ -1095,6 +1103,7 @@ export class IMGatewayManager extends EventEmitter {
   }
 
   async stopAll(): Promise<void> {
+    this.weixinPluginActivation.cancel();
     // All platforms run via OpenClaw; nothing to stop directly
   }
 
@@ -1642,22 +1651,22 @@ export class IMGatewayManager extends EventEmitter {
    * Returns the QR code data URL and a session key for polling.
    */
   async weixinQrLoginStart(): Promise<WeixinQrLoginStartResult> {
-    const client = this.getOpenClawGatewayClient?.();
-    if (!client) {
+    return this.weixinPluginActivation.start(async () => {
       await this.ensureOpenClawGatewayReady?.();
-      const retryClient = this.getOpenClawGatewayClient?.();
-      if (!retryClient) {
-        return { message: 'OpenClaw Gateway is not running. Please start OpenClaw engine first.' };
-      }
-      return this.doWeixinQrLoginStart(retryClient);
-    }
-    return this.doWeixinQrLoginStart(client);
+      const client = this.getOpenClawGatewayClient?.();
+      if (!client) throw new Error(t('imWeixinGatewayUnavailable'));
+      return this.doWeixinQrLoginStart(client);
+    });
+  }
+
+  isWeixinQrLoginActive(): boolean {
+    return this.weixinPluginActivation.isActive();
   }
 
   private async doWeixinQrLoginStart(client: GatewayClientLike): Promise<WeixinQrLoginStartResult> {
     try {
       const result = await client.request<WeixinQrLoginStartResult>(
-        'web.login.start',
+        WeixinPlugin.LoginStart,
         { force: true, timeoutMs: 300000, verbose: true },
       );
       console.log('[IMGatewayManager] Weixin QR login start result:', result.message);
@@ -1672,13 +1681,17 @@ export class IMGatewayManager extends EventEmitter {
    * Wait for Weixin QR code scan completion via OpenClaw Gateway RPC.
    */
   async weixinQrLoginWait(sessionKey?: string): Promise<WeixinQrLoginWaitResult> {
+    return this.weixinPluginActivation.wait(sessionKey, assertCurrent => this.waitForWeixinQrLogin(sessionKey, assertCurrent));
+  }
+
+  private async waitForWeixinQrLogin(sessionKey: string | undefined, assertCurrent: () => void): Promise<WeixinQrLoginWaitResult> {
     const client = this.getOpenClawGatewayClient?.();
     if (!client) {
       return { connected: false, message: 'OpenClaw Gateway is not connected.' };
     }
     try {
       const result = await client.request<WeixinQrLoginWaitResult>(
-        'web.login.wait',
+        WeixinPlugin.LoginWait,
         // OpenClaw's current web.login.wait schema has no sessionKey field, so
         // the QR flow still has to pass the plugin session key through accountId.
         { timeoutMs: 480000, ...(sessionKey ? { accountId: sessionKey } : {}) },
@@ -1688,6 +1701,7 @@ export class IMGatewayManager extends EventEmitter {
       const configuredAccountId = this.getConfig().weixin?.accountId?.trim() || undefined;
       const resolvedAccountId = result.accountId
         ?? (alreadyConnected ? configuredAccountId ?? await this.resolveWeixinRuntimeAccountId(client) : undefined);
+      assertCurrent();
       console.log('[IMGatewayManager] Weixin QR login wait completed:', JSON.stringify({
         connected: result.connected,
         alreadyConnected,

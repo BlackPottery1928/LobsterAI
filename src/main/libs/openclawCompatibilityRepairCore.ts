@@ -9,6 +9,7 @@ import {
   type OpenClawCompatibilityRepairReport, OpenClawRepairPhase, OpenClawRepairPluginSource,
   type OpenClawRepairSnapshotManifest,
 } from '../../shared/openclawEngine/repair';
+import { isMissingUnaliasedPluginPath, isPreviousManagedPluginPath } from './openclawPluginRepairPaths';
 
 type Config = Record<string, unknown>;
 export interface RepairInstallRecord {
@@ -244,13 +245,20 @@ async function repairPlugins(options: CompatibilityRepairOptions, report: OpenCl
       && record.installPath === plugin.root && record.sourcePath === plugin.root;
     if (!isPriorRepair && record.source !== OpenClawRepairPluginSource.Npm) continue;
     // A matching ID alone does not make a user plugin a bundled plugin.
-    if (!isPriorRepair && record.resolvedName !== plugin.packageName && record.spec !== plugin.packageName
-      && !record.spec?.startsWith(`${plugin.packageName}@`)) continue;
+    const packageIdentities = [record.resolvedName, record.spec, record.resolvedSpec]
+      .filter((value): value is string => typeof value === 'string' && value.length > 0);
+    if (!isPriorRepair && (!packageIdentities.length || !packageIdentities.every(value =>
+      value === plugin.packageName || value.startsWith(`${plugin.packageName}@`)))) continue;
     if (record.installPath && !isPriorRepair) {
-      // External/user-managed installs are outside this repair's backup scope.
-      if (!path.resolve(record.installPath).startsWith(path.resolve(options.stateDir) + path.sep)) continue;
-      assertOwnedRepairPath(options.stateDir, record.installPath);
-      try { await owners.validatePlugin(plugin.id, record.installPath); continue; } catch { /* restore the shipped payload */ }
+      if (path.resolve(record.installPath).startsWith(path.resolve(options.stateDir) + path.sep)) {
+        assertOwnedRepairPath(options.stateDir, record.installPath);
+        try { await owners.validatePlugin(plugin.id, record.installPath); continue; } catch { /* restore the shipped payload */ }
+      } else {
+        // Only replace the ledger entry for a missing managed install from a
+        // previous profile. Never mutate external files or adopt custom installs.
+        if (!isPreviousManagedPluginPath({ ...options, installPath: record.installPath, pluginId: plugin.id, packageName: plugin.packageName })
+          || !isMissingUnaliasedPluginPath(record.installPath)) continue;
+      }
     }
     const manifest = readConfig(path.join(plugin.root, 'package.json'));
     const pluginManifest = readConfig(path.join(plugin.root, 'openclaw.plugin.json'));
