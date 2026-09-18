@@ -5,6 +5,8 @@ import { useSelector } from 'react-redux';
 
 import { getPortalPricingUrl } from '../services/endpoints';
 import { i18nService } from '../services/i18n';
+import { type LogEventAction, LogReporterAction } from '../services/logReporter';
+import { LowCreditOfferVariant, reportLowCreditPurchaseEvent } from '../services/lowCreditPurchaseAnalytics';
 import {
   formatPurchaseOfferDiscount,
   getPurchaseOfferDiscountRate,
@@ -14,6 +16,7 @@ import {
 import type { RootState } from '../store';
 import type { LowCreditPurchaseOffer } from '../store/slices/authSlice';
 import PurchaseOfferCountdown from './PurchaseOfferCountdown';
+import { useLowCreditOfferExposure } from './useLowCreditOfferExposure';
 
 interface LowCreditPurchaseOfferCardProps {
   offer: LowCreditPurchaseOffer;
@@ -60,10 +63,40 @@ const LowCreditPurchaseOfferCard: React.FC<LowCreditPurchaseOfferCardProps> = ({
   const balance = Math.max(0, offer.creditsRemaining ?? 0);
   const percentage = Math.max(0, Math.min(100,
     (balance / Math.max(offer.thresholdCredits ?? 500, 1)) * 100));
+  const displayVariant = isFirstPurchase
+    ? LowCreditOfferVariant.FirstPurchase
+    : showReturningOffer
+      ? LowCreditOfferVariant.LimitedDiscount
+      : LowCreditOfferVariant.NoDiscount;
+  const exposureKey = [
+    displayVariant,
+    displayVariant === LowCreditOfferVariant.NoDiscount ? '' : offer.campaignCode,
+    displayVariant === LowCreditOfferVariant.NoDiscount ? '' : offer.offerToken,
+    displayVariant === LowCreditOfferVariant.NoDiscount ? '' : offer.windowCount,
+    balance === 0,
+  ].join(':');
+  const report = (action: LogEventAction, offerTokenAttached?: boolean): void => {
+    reportLowCreditPurchaseEvent(action, {
+      offer,
+      variant: displayVariant,
+      creditsRemaining: balance,
+      boostDiscountRate: boostRate,
+      subscriptionDiscountRate: subscriptionRate,
+      subscriptionButtonVisible: showSubscriptionButton,
+      offerTokenAttached,
+    });
+  };
+  const { elementRef, ensureExposure } = useLowCreditOfferExposure(exposureKey, () => {
+    report(LogReporterAction.LowCreditSidebarOfferExposure);
+  });
 
   const openPortal = async (tab: 'subscription' | 'boost') => {
     const rate = tab === 'boost' ? boostRate : subscriptionRate;
     const applyOffer = isPurchaseOfferActive(offer) && variant !== 'normal' && rate !== null;
+    ensureExposure();
+    report(tab === 'boost'
+      ? LogReporterAction.LowCreditSidebarRechargeClick
+      : LogReporterAction.LowCreditSidebarSubscriptionClick, applyOffer);
     try {
       const result = await window.electron?.shell?.openExternal(getPortalPricingUrl(undefined, {
         offerToken: applyOffer ? offer.offerToken ?? undefined : undefined,
@@ -77,12 +110,17 @@ const LowCreditPurchaseOfferCard: React.FC<LowCreditPurchaseOfferCardProps> = ({
 
   return (
     <div
+      ref={elementRef}
       className={`relative w-full min-w-0 animate-fade-in-up rounded-xl border border-black/[0.06] bg-white px-3 pb-4 pt-5 text-foreground shadow-[0_4px_16px_rgba(0,0,0,0.12),0_1px_4px_rgba(0,0,0,0.06)] dark:border-white/10 dark:bg-background ${className}`}
       style={style}
     >
       <button
         type="button"
-        onClick={onClose}
+        onClick={() => {
+          ensureExposure();
+          report(LogReporterAction.LowCreditSidebarCloseClick);
+          onClose();
+        }}
         className="absolute right-2 top-2 rounded-md p-1 text-secondary transition-colors hover:bg-black/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:hover:bg-white/10"
         aria-label={i18nService.t('lowCreditOfferClose')}
       >

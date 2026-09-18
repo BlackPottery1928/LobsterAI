@@ -17,6 +17,8 @@ import purchaseOfferLimitedBadge from '../../assets/purchase-offer-limited.svg';
 import { dedupeArtifactsForDisplay } from '../../services/artifactParser';
 import { getPortalPricingUrl } from '../../services/endpoints';
 import { i18nService } from '../../services/i18n';
+import { type LogEventAction, LogReporterAction } from '../../services/logReporter';
+import { LowCreditOfferVariant, reportLowCreditPurchaseEvent } from '../../services/lowCreditPurchaseAnalytics';
 import {
   formatPurchaseOfferDiscount,
   getPurchaseOfferDiscountRate,
@@ -35,6 +37,7 @@ import ExclamationTriangleIcon from '../icons/ExclamationTriangleIcon';
 import InformationCircleIcon from '../icons/InformationCircleIcon';
 import MarkdownContent from '../MarkdownContent';
 import PurchaseOfferCountdown from '../PurchaseOfferCountdown';
+import { useLowCreditOfferExposure } from '../useLowCreditOfferExposure';
 import ActivityGroupBlock from './ActivityGroupBlock';
 import AssistantMessageItem from './AssistantMessageItem';
 import { reportConversationBlockAction } from './conversationAnalytics';
@@ -294,7 +297,7 @@ const logCreditQuotaBannerEvent = (
   }
 };
 
-const CreditQuotaExhaustedBanner: React.FC<{ offer: LowCreditPurchaseOffer | null }> = ({ offer }) => {
+const CreditQuotaExhaustedBanner: React.FC<{ offer: LowCreditPurchaseOffer | null; creditsRemaining: number }> = ({ offer, creditsRemaining }) => {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const currentTime = Date.now();
@@ -311,12 +314,39 @@ const CreditQuotaExhaustedBanner: React.FC<{ offer: LowCreditPurchaseOffer | nul
     : null;
   const hasOffer = isPurchaseOfferActive(offer, now) && rate !== null;
   const isFirstPurchase = hasOffer && offer?.offerType === 'first_purchase';
+  const displayVariant = !hasOffer
+    ? LowCreditOfferVariant.NoDiscount
+    : isFirstPurchase
+      ? LowCreditOfferVariant.FirstPurchase
+      : LowCreditOfferVariant.LimitedDiscount;
+  const exposureKey = [
+    displayVariant,
+    displayVariant === LowCreditOfferVariant.NoDiscount ? '' : offer?.campaignCode,
+    displayVariant === LowCreditOfferVariant.NoDiscount ? '' : offer?.offerToken,
+    displayVariant === LowCreditOfferVariant.NoDiscount ? '' : offer?.windowCount,
+  ].join(':');
+  const report = (action: LogEventAction, offerTokenAttached?: boolean): void => {
+    reportLowCreditPurchaseEvent(action, {
+      offer,
+      variant: displayVariant,
+      creditsRemaining,
+      boostDiscountRate: hasOffer && portalTab === 'boost' ? rate : undefined,
+      subscriptionDiscountRate: hasOffer && portalTab === 'subscription' ? rate : undefined,
+      portalTab,
+      offerTokenAttached,
+    });
+  };
+  const { elementRef, ensureExposure } = useLowCreditOfferExposure(exposureKey, () => {
+    report(LogReporterAction.LowCreditTaskOfferExposure);
+  });
   const handlePurchase = async () => {
     const active = isPurchaseOfferActive(offer) && rate !== null;
     const pricingUrl = getPortalPricingUrl(undefined, {
       offerToken: active ? offer?.offerToken ?? undefined : undefined,
       tab: portalTab,
     });
+    ensureExposure();
+    report(LogReporterAction.LowCreditTaskPurchaseClick, active);
     logCreditQuotaBannerEvent('debug', 'purchase action clicked');
     try {
       const result = await window.electron?.shell?.openExternal(pricingUrl);
@@ -332,7 +362,7 @@ const CreditQuotaExhaustedBanner: React.FC<{ offer: LowCreditPurchaseOffer | nul
   };
 
   return (
-    <div className="rounded-xl bg-surface px-4 py-3 shadow-sm">
+    <div ref={elementRef} className="rounded-xl bg-surface px-4 py-3 shadow-sm">
       <div className="flex items-center gap-3">
         {hasOffer ? (
           <div className="relative h-14 w-14 shrink-0">
@@ -642,7 +672,7 @@ const AssistantTurnBlock: React.FC<{
     if (isCreditQuotaExhaustedKey(errorKey)) {
       return hideCreditQuotaBanner
         ? null
-        : <CreditQuotaExhaustedBanner offer={creditQuotaSnapshot.purchaseOffer} />;
+        : <CreditQuotaExhaustedBanner offer={creditQuotaSnapshot.purchaseOffer} creditsRemaining={creditQuotaSnapshot.creditsRemaining} />;
     }
     const displayContent = getSystemMessageDisplayContent(message, normalizedContent);
     const content = mapDisplayText ? mapDisplayText(displayContent) : displayContent;
