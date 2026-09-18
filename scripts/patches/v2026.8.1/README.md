@@ -178,3 +178,70 @@ Upstream inspection is fixed at main commit
 upgrade tag, update patch manifests/validators and this record, then rebuild;
 a closed PR, patch conflict, or global rejection listener alone is not evidence
 that all three fixes are obsolete.
+
+## Reappeared workspace setup state
+
+`openclaw-workspace-setup-recovery.patch` handles a retired setup JSON file that
+reappears after a completed migration. This can block both startup migration and
+Doctor with `legacy workspace setup conflicts with canonical SQLite state`, even
+when the canonical setup state still matches its previous migration receipt.
+The workspace migration owner handles recovery under its existing stopped-Gateway
+lock, so startup and one-click repair use the same rules.
+
+Recovery requires the same canonical workspace identity, a completed receipt
+that confirms the previous source was removed, and a matching canonical setup
+fingerprint. The incoming file must pass the existing version, field and
+timestamp validation and contain only milestones already present in SQLite.
+Different milestone timestamps in that narrow case are archived without changing
+the canonical workspace row or bootstrap, identity, memory and session files.
+Other conflicts retain the existing migration checks.
+
+Before cleanup, the owner saves the original bytes in an independent regular file
+under `OPENCLAW_STATE_DIR/workspace-setup-quarantine/<source-key-hash>/<sha256>.json`,
+verifies its size and SHA-256, and records its path and the new source digest in a
+non-authoritative migration receipt. The backup rejects symlink/hardlink traversal
+and preserves a UTF-8 BOM and whitespace. A workspace alias or Windows junction
+continues to use the canonical workspace identity; the backup lives in the local
+state directory. The owner updates only migration bookkeeping, not the SQLite
+workspace setup facts.
+
+The receipt is committed before removing the claimed source. Cleanup retries
+verify the backup, canonical fingerprint and claim again, including when the file
+was removed before the final receipt update. Concurrent source changes, damaged
+backups, alias changes and source/claim collisions remain blocked and preserve
+the available files. Backup failure restores a source claimed by the current run.
+The startup helper bundler requires this patch to prevent shipping a stale helper.
+
+Validation uses the owning upstream workspace suites and a bundled integration
+fixture with the same old/new milestone timestamps and a non-authoritative
+`merged` receipt as the reported incident. All state is temporary:
+
+```sh
+# In the patched OpenClaw checkout:
+TMPDIR=/private/tmp node node_modules/vitest/vitest.mjs run \
+  --config test/vitest/vitest.infra.config.ts \
+  src/infra/state-migrations.workspace-setup-recovery.test.ts \
+  src/infra/state-migrations.workspace-setup.test.ts \
+  src/infra/state-migrations.workspace-attestation-recovery.test.ts
+
+# In LobsterAI, using the rebuilt runtime:
+OPENCLAW_STARTUP_MIGRATION_RUNTIME=<runtime> npm test -- openclawWorkspaceSetupRecovery
+OPENCLAW_STARTUP_MIGRATION_RUNTIME=<runtime> OPENCLAW_STARTUP_MIGRATION_GATEWAY=1 \
+  npm test -- openclawWorkspaceSetupRecovery
+```
+
+The Gateway fixture verifies authenticated health/history calls, shutdown and a
+second successful startup. Host tests do not establish Windows package or customer
+machine acceptance. Rebuild the pinned runtime when distributing this patch.
+
+Validation on macOS, 2026-09-18: the same bundled regression reproduces the exact
+original conflict with the existing runtime helper and passes with the rebuilt
+helper. The three upstream workspace suites pass all 81 tests. The LobsterAI
+startup, workspace, repair and patch suites pass 117 tests (one opt-in Gateway
+test skipped in that run); the new integration suite passes its two migration
+cases and its separately enabled Gateway/restart case. Electron compilation,
+changed-file ESLint, upstream changed-file oxlint and script syntax checks pass.
+All 44 patches apply successfully to a clean pinned checkout and on reapplication.
+The isolated Gateway proof uses the rebuilt startup helper with the existing
+mac-arm64 Gateway payload; a full runtime rebuild, Windows package, actual app UI
+and provider request against the customer's environment have not been validated.

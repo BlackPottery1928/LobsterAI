@@ -21,6 +21,10 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedE
   if (!authOwner.includes('await params.persistConfig?.(params.cfg)')) {
     throw new Error('Startup auth migration requires openclaw-auth-migration-config-commit.patch; run openclaw:patch first.');
   }
+  const workspaceOwner = fs.readFileSync(path.join(openclawSrc, 'src/infra/state-migrations.workspace-setup.ts'), 'utf8');
+  if (!workspaceOwner.includes('await recoverReappearedWorkspaceSetup(')) {
+    throw new Error('Startup workspace migration requires openclaw-workspace-setup-recovery.patch; run openclaw:patch first.');
+  }
   const lockOwner = fs.readFileSync(path.join(openclawSrc, 'src/infra/gateway-lock.ts'), 'utf8');
   if (!lockOwner.includes('inspectOwner: opts.inspectOwner')) {
     throw new Error('Manual lock recovery requires zz-openclaw-lock-owner-recovery.patch; run openclaw:patch first.');
