@@ -47,6 +47,7 @@ import {
   type ConsolidatedItem,
   consolidateMediaPolling,
   type ConversationTurn,
+  countTurnCompletedSteps,
   COWORK_DETAIL_CONTENT_CLASS,
   COWORK_DETAIL_GUTTER_CLASS,
   formatElapsedDuration,
@@ -55,6 +56,7 @@ import {
   getContextCompactionMessageLabel,
   getMediaCompletionDisplayText,
   getRetainedMediaPollCount,
+  getThinkingPhaseLabels,
   getToolResultDisplay,
   getToolResultLineCount,
   getToolResultLineCountSummary,
@@ -162,14 +164,33 @@ const ContextCompactionDivider: React.FC<{ label: string; active?: boolean }> = 
 const ACTIVITY_TIMER_APPEAR_DELAY_MS = 1000;
 const ACTIVITY_LONG_WAIT_HINT_DELAY_MS = 30_000;
 
+// Rotate the phase word while the model is still silent, so the row visibly keeps moving.
+const ACTIVITY_PHASE_INTERVAL_MS = 2200;
+
 export const ActivityIndicator: React.FC<{
   fingerprint: string;
   hasContent: boolean;
   startTimestamp: number | null;
   statusTextOverride?: string | null;
-}> = ({ fingerprint, hasContent, startTimestamp, statusTextOverride }) => {
+  /** Tool steps of the turn that already finished; rendered as a small "N steps done" cue. */
+  completedSteps?: number;
+}> = ({ fingerprint, hasContent, startTimestamp, statusTextOverride, completedSteps = 0 }) => {
   const [isLongWaiting, setIsLongWaiting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [phaseIndex, setPhaseIndex] = useState(0);
+  const thinking = !statusTextOverride && !hasContent && !isLongWaiting;
+
+  useEffect(() => {
+    if (!thinking) {
+      setPhaseIndex(0);
+      return undefined;
+    }
+    const intervalId = window.setInterval(
+      () => setPhaseIndex(index => (index + 1) % getThinkingPhaseLabels().length),
+      ACTIVITY_PHASE_INTERVAL_MS,
+    );
+    return () => window.clearInterval(intervalId);
+  }, [thinking, fingerprint]);
 
   // The long-wait hint resets whenever streamed content grows, so it only
   // appears after the model has been silent for a while.
@@ -192,8 +213,9 @@ export const ActivityIndicator: React.FC<{
   // (switching sessions/views); until the turn has a timestamp, show no
   // counter rather than one restarted from zero.
   const elapsedMs = startTimestamp != null ? Math.max(0, now - startTimestamp) : null;
+  const phases = getThinkingPhaseLabels();
   const statusText = statusTextOverride
-    ?? getActivityIndicatorStatusText(false, isLongWaiting, hasContent);
+    ?? (thinking ? phases[phaseIndex % phases.length] : getActivityIndicatorStatusText(false, isLongWaiting, hasContent));
 
   return (
     <div className="flex items-center gap-2 py-1 animate-fade-in">
@@ -211,6 +233,15 @@ export const ActivityIndicator: React.FC<{
           aria-hidden="true"
         >
           {formatElapsedDuration(elapsedMs)}
+        </span>
+      )}
+      {completedSteps > 0 && (
+        <span
+          className="text-xs text-muted flex-shrink-0 animate-fade-in"
+          data-cowork-activity-steps={completedSteps}
+          aria-hidden="true"
+        >
+          {i18nService.t('coworkActivityStepsDone').replace('{count}', String(completedSteps))}
         </span>
       )}
     </div>
@@ -942,6 +973,7 @@ const AssistantTurnBlock: React.FC<{
                 hasContent={visibleAssistantItems.length > 0}
                 startTimestamp={getTurnStartTimestamp(turn)}
                 statusTextOverride={activityStatusOverride}
+                completedSteps={countTurnCompletedSteps(turn)}
               />
             )}
             {artifacts && artifacts.length > 0 && (

@@ -184,7 +184,7 @@ import {
   OpenClawEnginePhase,
   OpenClawGatewayRepairErrorCode,
 } from '../shared/openclawEngine/constants';
-import { OpenClawRepairPhase } from '../shared/openclawEngine/repair';
+import { OpenClawRepairPhase, OpenClawRepairStage } from '../shared/openclawEngine/repair';
 import { PlatformRegistry } from '../shared/platform';
 import type { ProviderConfig } from '../shared/providers';
 import {
@@ -276,6 +276,7 @@ import {
   initCronJobServiceManager,
   initScheduledTaskHelpers,
   migrateScheduledTaskAnnounceJobs,
+  peekCronJobService,
   registerScheduledTaskHandlers,
 } from './ipcHandlers/scheduledTask';
 import { registerSessionDiagnosticsHandlers } from './ipcHandlers/sessionDiagnostics';
@@ -299,6 +300,7 @@ import {
   quitAppWithoutConfirmation,
   showAppQuitConfirmation,
 } from './libs/appQuitConfirmation';
+import { hideAppWindowsForQuit } from './libs/appQuitWindows';
 import { AppUpdateCoordinator, INSTALLATION_UUID_KEY } from './libs/appUpdateCoordinator';
 import { AuthCallbackRouter } from './libs/authCallbackRouter';
 import {
@@ -444,7 +446,7 @@ import {
   DEFAULT_MANAGED_AGENT_ID,
   OpenClawChannelSessionSync,
 } from './libs/openclawChannelSessionSync';
-import { createOpenClawRepairBackupDirectory, runOpenClawCompatibilityRepair, runOpenClawDoctorRepair } from './libs/openclawCompatibilityRepair';
+import { createOpenClawRepairBackupDirectory, OpenClawRepairFailure, runOpenClawCompatibilityRepair, runOpenClawDoctorRepair } from './libs/openclawCompatibilityRepair';
 import {
   CONFIG_DELIVERY_FALLBACK_REASON_PREFIX,
   DEFERRED_SYNC_REASON_PREFIX,
@@ -462,6 +464,14 @@ import {
   OpenClawConfigImpactReason,
   removeImpactDecisionReasons,
 } from './libs/openclawConfigImpact';
+import {
+  ConfigDiagnosticErrorKind,
+  ConfigDiagnosticOutcome,
+  ConfigDiagnosticStage,
+  ConfigWorkloadState,
+  observeConfigRecovery,
+  writeConfigDiagnostic,
+} from './libs/openclawConfigObservation';
 import { buildProviderSelection, OpenClawConfigSync } from './libs/openclawConfigSync';
 import { OpenClawEngineManager, type OpenClawEngineStatus } from './libs/openclawEngineManager';
 import {
@@ -576,6 +586,7 @@ import {
 import { registerVoiceInputPermissionHandler } from './permissions/voiceInputPermission';
 import { patchEnabledNspClawguard } from './plugins/nspClawguardCompatibility';
 import { isHiddenUserPluginId } from './plugins/pluginManager';
+import type { SkillChangeBatch } from './skills/skillChangeDiagnostics';
 import { SkillManager } from './skills/skillManager';
 import { getSkillServiceManager } from './skills/skillServices';
 import {
@@ -2678,6 +2689,37 @@ const hasActiveGatewayWorkloads = (): boolean => {
   return false;
 };
 
+const getConfigRestartWorkloads = () => {
+  const runtime = openClawRuntimeAdapter?.getConfigRestartWorkloadSnapshot();
+  let cronBusy: boolean | null = null;
+  try { cronBusy = peekCronJobService()?.hasRunningJobs() ?? null; } catch { /* Observation unavailable. */ }
+  const state = runtime?.state === ConfigWorkloadState.Busy || cronBusy === true
+    ? ConfigWorkloadState.Busy
+    : !runtime || runtime.state === ConfigWorkloadState.Unknown || cronBusy === null
+      ? ConfigWorkloadState.Unknown : ConfigWorkloadState.Idle;
+  return { state, runtime, cronBusy };
+};
+
+let lastConfigRestartWorkloadSignature = '';
+const hasActiveConfigRestartWorkloads = (reason: string, forceLog = false, syncId?: number): boolean => {
+  const workloads = getConfigRestartWorkloads();
+  // Tick/sample ages change on every poll; only log changes in the decision evidence.
+  const signature = JSON.stringify([
+    reason, workloads.state, workloads.cronBusy, workloads.runtime?.connectionGeneration,
+    workloads.runtime?.activeTurns, workloads.runtime?.im.activeSessions, workloads.runtime?.im.staleSessions,
+  ]);
+  if (forceLog || signature !== lastConfigRestartWorkloadSignature) {
+    lastConfigRestartWorkloadSignature = signature;
+    writeConfigDiagnostic({
+      event: 'restart-workload-check', reason, syncId, workloads,
+      blocksAutomaticRestart: workloads.state === ConfigWorkloadState.Busy,
+    });
+  }
+  // Unknown is diagnostic only in stage 1. Only positively observed IM work is
+  // added to the existing ActiveTurn/cron busy condition.
+  return workloads.state === ConfigWorkloadState.Busy;
+};
+
 const clearDeferredRestart = () => {
   if (deferredRestartTimer) {
     clearInterval(deferredRestartTimer);
@@ -2692,6 +2734,7 @@ const clearDeferredRestart = () => {
 
 type SyncOpenClawConfigOptions = {
   reason: string;
+  skillChangeBatch?: SkillChangeBatch;
   manualRepair?: boolean;
   restartGatewayIfRunning?: boolean;
   expectedImpact?: OpenClawConfigImpact;
@@ -2832,7 +2875,7 @@ const scheduleDeferredGatewayRestart = (reason: string) => {
   );
   deferredRestartOverdue = false;
   deferredRestartTimer = setInterval(() => {
-    if (!hasActiveGatewayWorkloads()) {
+    if (!hasActiveConfigRestartWorkloads(deferredRestartReason ?? reason)) {
       void executeDeferredGatewayRestart(deferredRestartReason ?? reason);
     }
   }, DEFERRED_RESTART_POLL_MS);
@@ -2842,7 +2885,7 @@ const scheduleDeferredGatewayRestart = (reason: string) => {
   // sync every five minutes while a long task is still active.
   deferredRestartTimeout = setTimeout(() => {
     deferredRestartTimeout = null;
-    if (hasActiveGatewayWorkloads()) {
+    if (hasActiveConfigRestartWorkloads(deferredRestartReason ?? reason, true)) {
       deferredRestartOverdue = true;
       console.warn(
         `${gwDiagTs()} scheduleDeferredGatewayRestart: overdue while workloads remain active; restart stays queued until the first idle poll (reason: ${deferredRestartReason ?? reason})`,
@@ -2858,6 +2901,7 @@ const scheduleDeferredGatewayRestart = (reason: string) => {
 
 const _syncOpenClawConfigImpl = async (
   options: SyncOpenClawConfigOptions = { reason: 'unknown' },
+  syncId = 0,
 ): Promise<SyncOpenClawConfigResult> => {
   const D = gwDiagTs;
   console.log(
@@ -3027,6 +3071,7 @@ const _syncOpenClawConfigImpl = async (
     // through config.set for a positive hot-apply ack, or schedule a deferred
     // restart when the RPC path is unavailable.
     const deliveryManager = getOpenClawEngineManager();
+    let payloadDigest: string | undefined;
     const delivery = await deliverOpenClawConfigToGateway({
       reason: options.reason,
       gatewayPhase: deliveryManager.getStatus().phase,
@@ -3036,6 +3081,26 @@ const _syncOpenClawConfigImpl = async (
         openClawRuntimeAdapter ? openClawRuntimeAdapter.ensureGatewayRpcClient() : null
       ),
       scheduleDeferredRestart: retryDeferredDelivery ? undefined : scheduleDeferredGatewayRestart,
+      onDiagnostic: event => {
+        if (event.payloadDigest) payloadDigest = event.payloadDigest;
+        const terminal = event.stage === ConfigDiagnosticStage.Complete;
+        const failed = event.outcome === ConfigDiagnosticOutcome.Failed;
+        const warn = (failed && event.errorKind !== ConfigDiagnosticErrorKind.HashConflict)
+          || (event.timeoutMs !== undefined && event.elapsedMs >= event.timeoutMs * 0.8);
+        const workloads = terminal || failed ? getConfigRestartWorkloads() : undefined;
+        writeConfigDiagnostic({
+          syncId, reason: options.reason, skillChangeBatch: options.skillChangeBatch,
+          // Logical host attempt, not the runtime's private wire request ID.
+          hostAttemptId: `${syncId}:${event.attempt}:${event.stage}`,
+          ...event, payloadDigest, workloads,
+          gatewayPid: deliveryManager.getGatewayProcessPid(),
+          gatewayGeneration: deliveryManager.getGatewayProcessGeneration(),
+          observation: terminal && event.evidence && event.actualAction ? observeConfigRecovery({
+            evidence: event.evidence, actualAction: event.actualAction,
+            workloadState: workloads?.state ?? ConfigWorkloadState.Unknown,
+          }) : undefined,
+        }, warn);
+      },
     });
     if (delivery.mode === OpenClawConfigDeliveryMode.Rejected) {
       return {
@@ -3069,7 +3134,7 @@ const _syncOpenClawConfigImpl = async (
     };
   }
 
-  if (hasActiveGatewayWorkloads()) {
+  if (hasActiveConfigRestartWorkloads(options.reason, true, syncId)) {
     console.log(`${D()} ──── RESTART DEFERRED (active workloads). reason=${options.reason}`);
     scheduleDeferredGatewayRestart(options.reason);
     return {
@@ -3103,7 +3168,7 @@ const _syncOpenClawConfigImpl = async (
     return { success: false, changed: true, status: manager.getStatus() };
   }
   console.log(
-    `${D()} ──── HARD RESTART EXECUTING. reason=${options.reason}, phase=${status.phase}, port=${status.message?.match(/loopback:(\d+)/)?.[1] ?? 'unknown'}`,
+    `${D()} ──── HARD RESTART EXECUTING. reason=${options.reason}, syncId=${syncId}, phase=${status.phase}, port=${status.message?.match(/loopback:(\d+)/)?.[1] ?? 'unknown'}`,
   );
   if (openClawRuntimeAdapter) {
     openClawRuntimeAdapter.disconnectGatewayClient();
@@ -3140,11 +3205,30 @@ const syncOpenClawConfig = async (
   // own regeneration behind a promise that is waiting for repair completion.
   if (openClawManualRepairActive && !options.manualRepair) await openClawManualRepairBarrier;
   const generation = ++openClawConfigApplyGeneration;
+  const enqueuedAt = Date.now();
   const startAfterPrevious = openClawConfigApplyQueue.catch(() => {});
   const restartRequired =
     options.restartGatewayIfRunning === true
     || options.expectedImpact === OpenClawConfigImpact.Restart;
-  const resultPromise = startAfterPrevious.then(() => _syncOpenClawConfigImpl(options));
+  const resultPromise = startAfterPrevious.then(async () => {
+    const startedAt = Date.now();
+    const cpuAtStart = process.cpuUsage();
+    writeConfigDiagnostic({
+      event: 'sync-start', syncId: generation, reason: options.reason,
+      skillChangeBatch: options.skillChangeBatch, queueWaitMs: startedAt - enqueuedAt,
+    });
+    try {
+      return await _syncOpenClawConfigImpl(options, generation);
+    } finally {
+      const cpu = process.cpuUsage(cpuAtStart);
+      writeConfigDiagnostic({
+        event: 'sync-finish', syncId: generation, reason: options.reason,
+        elapsedMs: Date.now() - startedAt, hostPid: process.pid,
+        hostCpuUserMs: cpu.user / 1_000, hostCpuSystemMs: cpu.system / 1_000,
+        hostRssBytes: process.memoryUsage().rss,
+      });
+    }
+  });
   const barrierPromise = resultPromise.then((result) => {
     if (!result.success) {
       throw new Error(result.error || 'OpenClaw config sync failed.');
@@ -3218,6 +3302,8 @@ type OpenClawGatewayRepairResult = {
   error?: string;
   errorCode?: OpenClawGatewayRepairErrorCode;
   recoverable?: boolean;
+  failedStage?: OpenClawRepairStage;
+  failurePath?: string;
 };
 
 let openClawGatewayRepairPromise: Promise<OpenClawGatewayRepairResult> | null = null;
@@ -3297,6 +3383,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
     }
 
     let backupPath: string | undefined;
+    let repairStage: OpenClawRepairStage = OpenClawRepairStage.Preparation;
     let releaseConfigMaintenance: (() => void) | undefined;
     try {
       openClawManualRepairActive = true;
@@ -3329,11 +3416,13 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
             LOBSTERAI_NPM_BIN_DIR: npmBinDir,
           },
         };
+        await runOpenClawCompatibilityRepair({ ...repairOptions, phase: OpenClawRepairPhase.LockRecovery });
         await runOpenClawCompatibilityRepair({ ...repairOptions, phase: OpenClawRepairPhase.Snapshot });
         await runOpenClawDoctorRepair(repairOptions);
         await runOpenClawCompatibilityRepair({ ...repairOptions, phase: OpenClawRepairPhase.Recovery });
         // The snapshot already backs up config. Retain compatibility sources
         // through migration and config sync instead of regenerating from scratch.
+        repairStage = OpenClawRepairStage.Configuration;
         if (!preserveConfig) backupOpenClawConfig(originalPath, backupPath);
         await startAskUserServer();
         const sync = await syncOpenClawConfig({ reason: 'manual-repair', restartGatewayIfRunning: false, manualRepair: true });
@@ -3344,6 +3433,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
           legacyConfigPath: path.join(backupPath, 'original', 'openclaw.json'),
         });
       });
+      repairStage = OpenClawRepairStage.Gateway;
       const started = await manager.startGateway('manual-repair');
       // Reconnection can await a token refresh that itself needs config sync.
       // Release config writers after repair/startup, before awaiting the client.
@@ -3366,16 +3456,21 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         originalPath,
         backupPath,
         error: success ? undefined : status.message || 'Failed to restart OpenClaw gateway after repair.',
+        failedStage: success ? undefined : repairStage,
       };
     } catch (error) {
       console.error('[OpenClawRepair] gateway state repair failed:', error);
       const message = error instanceof Error ? error.message : 'Failed to repair OpenClaw gateway state.';
+      const failedStage = error instanceof OpenClawRepairFailure ? error.stage : repairStage;
       return {
         success: false,
         status: manager.setExternalError(message),
         originalPath,
         backupPath,
         error: message,
+        failedStage,
+        failurePath: error instanceof OpenClawRepairFailure ? error.failurePath : undefined,
+        errorCode: failedStage === OpenClawRepairStage.Snapshot ? OpenClawGatewayRepairErrorCode.SnapshotFailed : undefined,
       };
     } finally {
       openClawManualRepairActive = false;
@@ -3720,7 +3815,7 @@ const getDesktopNotificationManager = (): DesktopNotificationManager => {
         flushOpenSessionFromNotification();
       },
       updateTrayReminder: (count: number, onClick?: () => void) => {
-        updateTrayReminder(() => mainWindow, { count, onClick });
+        updateTrayReminder(() => isQuitting ? null : mainWindow, { count, onClick });
       },
     });
   }
@@ -4117,6 +4212,7 @@ const flushOpenSessionFromNotification = (): void => {
 };
 
 const focusMainWindowForReason = (reason: string): void => {
+  if (isQuitting) return;
   const targetWindow = mainWindow && !mainWindow.isDestroyed()
     ? mainWindow
     : ensureMainWindowForReason?.(reason) ?? null;
@@ -4746,6 +4842,9 @@ const scheduleReload = (reason: string, webContents?: WebContents) => {
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
+  if (isDev) {
+    console.warn('[Main] Development startup skipped: another LobsterAI instance is already running. Quit that instance and restart electron:dev to load the current source.');
+  }
   app.quit();
 } else {
   // Register custom protocol for OAuth callback
@@ -4786,7 +4885,7 @@ if (!gotTheLock) {
   let pendingShowOnFirstFrame = false;
 
   const focusMainWindow = (reason: string) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (isQuitting || !mainWindow || mainWindow.isDestroyed()) return;
     try {
       if (!mainWindow.isVisible() && !hasRenderedFirstFrame) {
         pendingShowOnFirstFrame = true;
@@ -13703,6 +13802,7 @@ if (!gotTheLock) {
 
   // 创建主窗口
   const createWindow = () => {
+    if (isQuitting) return;
     // 如果窗口已经存在，就不再创建新窗口
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -13888,7 +13988,7 @@ if (!gotTheLock) {
     // "应用没打开"。开机自启保持仅托盘,不弹窗。
     const SHOW_FALLBACK_DELAY_MS = 10_000;
     const showFallbackTimer = setTimeout(() => {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (isQuitting || !mainWindow || mainWindow.isDestroyed()) return;
       if (mainWindow.isVisible() || hasRenderedFirstFrame) return;
       if (isAutoLaunched()) return;
       console.warn(
@@ -13901,7 +14001,7 @@ if (!gotTheLock) {
     let hasOpenedDevelopmentTools = false;
     const developmentLoadRecovery: DevelopmentMainWindowLoadRecovery | null = isDev
       ? createDevelopmentMainWindowLoadRecovery({
-          isTargetAvailable: () => !createdMainWindow.isDestroyed(),
+          isTargetAvailable: () => !isQuitting && !createdMainWindow.isDestroyed(),
           loadDevelopmentUrl: () => createdMainWindow.loadURL(DEV_SERVER_URL),
           loadErrorPage: () => createdMainWindow.loadFile(
             path.join(__dirname, '../resources/error.html'),
@@ -14032,6 +14132,7 @@ if (!gotTheLock) {
     // 等待内容加载完成后再显示窗口
     mainWindow.once('ready-to-show', () => {
       clearTimeout(showFallbackTimer);
+      if (isQuitting) return;
       // 开机自启时不显示窗口，仅显示托盘图标
       if (!isAutoLaunched()) {
         mainWindow?.show();
@@ -14041,7 +14142,7 @@ if (!gotTheLock) {
       const initLang = getStore().get<{ language?: string }>('app_config')?.language;
       setLanguage(initLang === 'en' ? 'en' : 'zh');
       // 窗口就绪后创建系统托盘
-      createTray(() => mainWindow);
+      createTray(() => isQuitting ? null : mainWindow);
 
       // Start cron polling after the window is ready.
       (async () => {
@@ -14078,6 +14179,7 @@ if (!gotTheLock) {
   };
 
   ensureMainWindowForReason = (reason: string): BrowserWindow | null => {
+    if (isQuitting) return null;
     if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
     console.log(`[Main] recreating main window after ${reason}`);
     createWindow();
@@ -14378,6 +14480,7 @@ if (!gotTheLock) {
   const runAppCleanupAndExit = (trigger: string) => {
     isCleanupInProgress = true;
     isQuitting = true;
+    hideAppWindowsForQuit();
 
     const watchdog = setTimeout(() => {
       console.error(
@@ -14433,8 +14536,6 @@ if (!gotTheLock) {
       )
       .then(confirmed => {
         if (appQuitConfirmationGate.finishPrompt(confirmed)) {
-          // Cleanup is asynchronous and cannot be cancelled once teardown starts.
-          if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setEnabled(false);
           runAppCleanupAndExit('before-quit');
         } else {
           console.log('[Main] quit cancelled at the confirmation prompt');
@@ -14862,8 +14963,8 @@ if (!gotTheLock) {
 
     // When skills change (install/enable/disable/delete), re-sync AGENTS.md
     // so OpenClaw's IM channel agents pick up the latest skill list.
-    manager.onSkillsChanged(() => {
-      syncOpenClawConfig({ reason: 'skills-changed' }).catch(error => {
+    manager.onSkillsChanged(skillChangeBatch => {
+      syncOpenClawConfig({ reason: 'skills-changed', skillChangeBatch }).catch(error => {
         console.warn('[Main] Failed to sync OpenClaw config after skills change:', error);
       });
     });
@@ -15010,7 +15111,7 @@ if (!gotTheLock) {
       if (currentLanguage !== lastLanguage) {
         lastLanguage = currentLanguage;
         setLanguage(currentLanguage === 'en' ? 'en' : 'zh');
-        updateTrayMenu(() => mainWindow);
+        updateTrayMenu(() => isQuitting ? null : mainWindow);
       }
 
       const previousUseSystemProxy = oldConfig
@@ -15054,7 +15155,7 @@ if (!gotTheLock) {
 
     // 在 macOS 上，当点击 dock 图标时显示已有窗口或重新创建
     app.on('activate', () => {
-      if (isDataMigrationRestoreInProgress) {
+      if (isQuitting || isDataMigrationRestoreInProgress) {
         return;
       }
       if (mainWindow && !mainWindow.isDestroyed()) {
