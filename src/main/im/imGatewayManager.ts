@@ -8,7 +8,7 @@ import Database from 'better-sqlite3';
 import { EventEmitter } from 'events';
 
 import { classifyErrorKey } from '../../common/coworkErrorClassify';
-import { WeixinPlugin } from '../../shared/im/weixin';
+import { WeixinPlugin, WeixinQrLoginTimeout } from '../../shared/im/weixin';
 import type { CoworkStore } from '../coworkStore';
 import { t } from '../i18n';
 import type { CoworkRuntime } from '../libs/agentEngine/types';
@@ -51,7 +51,7 @@ type GatewayClientLike = {
   request: <T = Record<string, unknown>>(
     method: string,
     params?: unknown,
-    opts?: { expectFinal?: boolean },
+    opts?: { expectFinal?: boolean; timeoutMs?: number | null },
   ) => Promise<T>;
 };
 
@@ -1667,13 +1667,20 @@ export class IMGatewayManager extends EventEmitter {
     try {
       const result = await client.request<WeixinQrLoginStartResult>(
         WeixinPlugin.LoginStart,
-        { force: true, timeoutMs: 300000, verbose: true },
+        { channel: WeixinPlugin.Id, force: true, timeoutMs: WeixinQrLoginTimeout.Start, verbose: true },
+        { timeoutMs: WeixinQrLoginTimeout.Start + WeixinQrLoginTimeout.RpcGrace },
       );
+      if (typeof result?.qrDataUrl !== 'string' || !result.qrDataUrl.trim()) {
+        throw new Error(result?.message || t('imWeixinQrInvalidResponse'));
+      }
+      if (typeof result.sessionKey !== 'string' || !result.sessionKey.trim()) {
+        throw new Error(t('imWeixinQrInvalidResponse'));
+      }
       console.log('[IMGatewayManager] Weixin QR login start result:', result.message);
       return result;
     } catch (err) {
       console.error('[IMGatewayManager] Weixin QR login start failed:', err);
-      return { message: `Failed to start Weixin login: ${String(err)}` };
+      throw err;
     }
   }
 
@@ -1694,7 +1701,9 @@ export class IMGatewayManager extends EventEmitter {
         WeixinPlugin.LoginWait,
         // OpenClaw's current web.login.wait schema has no sessionKey field, so
         // the QR flow still has to pass the plugin session key through accountId.
-        { timeoutMs: 480000, ...(sessionKey ? { accountId: sessionKey } : {}) },
+        { channel: WeixinPlugin.Id, timeoutMs: WeixinQrLoginTimeout.Wait, ...(sessionKey ? { accountId: sessionKey } : {}) },
+        // The plugin timeout is an RPC parameter, not the client's default 30s deadline.
+        { timeoutMs: WeixinQrLoginTimeout.Wait + WeixinQrLoginTimeout.RpcGrace },
       );
       const alreadyConnected = result.alreadyConnected === true
         || isWeixinAlreadyConnectedMessage(result.message);

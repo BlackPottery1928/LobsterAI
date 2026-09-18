@@ -3275,7 +3275,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
     imWeixinQrScanPrompt: '请使用微信扫描下方二维码',
     imWeixinQrWaiting: '等待扫码确认...',
     imWeixinQrSuccess: '已获取配置，保存后生效',
-    imWeixinQrFailed: '连接失败',
+    imWeixinQrFailed: '本次扫码连接失败',
+    imWeixinQrInvalidResponse: '未能获取有效的微信二维码，请重试；若持续失败，请更新应用。',
     imWeixinQrExpired: '二维码已过期，请重新获取',
     imWeixinQrAccountMissing:
       '微信已连接过此 OpenClaw，但未找到本地账号 ID。请重新加载状态后再试。',
@@ -7473,7 +7474,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
     imWeixinQrScanPrompt: 'Scan the QR code below with WeChat',
     imWeixinQrWaiting: 'Waiting for scan confirmation...',
     imWeixinQrSuccess: 'Configuration received. Save to apply.',
-    imWeixinQrFailed: 'Connection failed',
+    imWeixinQrFailed: 'This QR login attempt failed',
+    imWeixinQrInvalidResponse: 'Could not get a valid WeChat QR code. Try again; if this continues, update the app.',
     imWeixinQrExpired: 'QR code expired, please try again',
     imWeixinQrAccountMissing:
       'WeChat is already connected to this OpenClaw, but no local account ID was found. Refresh status and try again.',
