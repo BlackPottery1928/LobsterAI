@@ -1,5 +1,33 @@
 # OpenClaw v2026.8.1 patch notes
 
+## Marketplace clone failures during startup
+
+`zz-openclaw-marketplace-clone-retry.patch` gives a failed marketplace source
+`git clone` a typed error code before any plugin artifact is published. The
+update path preserves the error code in its outcome. Doctor retains the install
+record and reports this acquisition failure as a notice with retry guidance,
+instead of turning an unavailable source repository into a global readiness
+failure. Other install warnings are unchanged; no error-message matching is used.
+
+The existing payload smoke check still runs. A corrupt or missing payload with
+a verified install path remains quarantined for that boot; an active record
+without an install path remains fatal. Security scan, capability consent,
+unclassified repair failures, and unknown-owner verification failures retain
+their blocking behavior. Failed acquisition cannot publish its partial clone.
+The patch neither deletes user plugin records nor changes plugin enable flags.
+
+Validate with the upstream `marketplace`, `update`,
+`missing-configured-plugin-install`, and `post-core-plugin-convergence` suites,
+then rebuild the runtime. The LobsterAI startup compatibility helper separately
+maps only retired `gateway.reload.mode` values `hot` and `restart` to `hybrid`
+and removes only `gateway.reload.debounceMs` / `deferralTimeoutMs`, matching
+the pinned Doctor's explicit retired-field rules. It uses an exact original
+backup and the canonical config writer. Unknown config errors remain blocked
+without removing their fields, and auth migration logs their paths without values.
+
+Remove the patch when the pinned upstream carries the same typed acquisition
+failure routing and passes the retained payload and unknown-owner regressions.
+
 ## Manual lock-owner recovery
 
 `zz-openclaw-lock-owner-recovery.patch` adds an optional asynchronous
@@ -83,6 +111,26 @@ ordinary non-main-agent migration, marker-only config persistence, failed config
 commit followed by retry, and repeated startup without unrelated config changes.
 Remove the patch once the pinned upstream owner provides an equivalent commit
 boundary.
+
+## Subagent collaboration lifecycle
+
+- `openclaw-sessions-spawn-agent-id-schema.patch` makes `agentId` required in the
+  model-visible native spawn schema when the requesting agent's effective
+  `subagents.requireAgentId` policy requires explicit selection. The field also
+  explains `agents_list` discovery. ACP and configured collector defaults retain
+  their existing optional-target contract. Execution-time target allowlists are
+  unchanged. Regression tests cover per-agent overrides and default policies.
+- `openclaw-subagent-shared-gateway-context.patch` accepts distinct resolver
+  closures that resolve to the same live Gateway context during batch completion.
+  Every resolver is checked on each dispatch. Missing, retired or different
+  Gateway owners remain rejected; no ambient fallback is introduced. Regression
+  tests cover simultaneous children, owner retirement and incompatible bindings.
+- `openclaw-subagent-settle-failure-event.patch` publishes a session-scoped
+  `lobsterai.subagent.settle_failed` event after a terminal requester wake failure
+  is persisted, before releasing its live Gateway binding. It contains only the
+  requester session/run identity. LobsterAI accepts it only for that exact waiting
+  request, shows a localized retry hint, and never reports completion. The durable
+  upstream task delivery failure remains intact.
 
 ## Browser DNS failure and Gateway process recovery
 
@@ -178,3 +226,70 @@ Upstream inspection is fixed at main commit
 upgrade tag, update patch manifests/validators and this record, then rebuild;
 a closed PR, patch conflict, or global rejection listener alone is not evidence
 that all three fixes are obsolete.
+
+## Reappeared workspace setup state
+
+`openclaw-workspace-setup-recovery.patch` handles a retired setup JSON file that
+reappears after a completed migration. This can block both startup migration and
+Doctor with `legacy workspace setup conflicts with canonical SQLite state`, even
+when the canonical setup state still matches its previous migration receipt.
+The workspace migration owner handles recovery under its existing stopped-Gateway
+lock, so startup and one-click repair use the same rules.
+
+Recovery requires the same canonical workspace identity, a completed receipt
+that confirms the previous source was removed, and a matching canonical setup
+fingerprint. The incoming file must pass the existing version, field and
+timestamp validation and contain only milestones already present in SQLite.
+Different milestone timestamps in that narrow case are archived without changing
+the canonical workspace row or bootstrap, identity, memory and session files.
+Other conflicts retain the existing migration checks.
+
+Before cleanup, the owner saves the original bytes in an independent regular file
+under `OPENCLAW_STATE_DIR/workspace-setup-quarantine/<source-key-hash>/<sha256>.json`,
+verifies its size and SHA-256, and records its path and the new source digest in a
+non-authoritative migration receipt. The backup rejects symlink/hardlink traversal
+and preserves a UTF-8 BOM and whitespace. A workspace alias or Windows junction
+continues to use the canonical workspace identity; the backup lives in the local
+state directory. The owner updates only migration bookkeeping, not the SQLite
+workspace setup facts.
+
+The receipt is committed before removing the claimed source. Cleanup retries
+verify the backup, canonical fingerprint and claim again, including when the file
+was removed before the final receipt update. Concurrent source changes, damaged
+backups, alias changes and source/claim collisions remain blocked and preserve
+the available files. Backup failure restores a source claimed by the current run.
+The startup helper bundler requires this patch to prevent shipping a stale helper.
+
+Validation uses the owning upstream workspace suites and a bundled integration
+fixture with the same old/new milestone timestamps and a non-authoritative
+`merged` receipt as the reported incident. All state is temporary:
+
+```sh
+# In the patched OpenClaw checkout:
+TMPDIR=/private/tmp node node_modules/vitest/vitest.mjs run \
+  --config test/vitest/vitest.infra.config.ts \
+  src/infra/state-migrations.workspace-setup-recovery.test.ts \
+  src/infra/state-migrations.workspace-setup.test.ts \
+  src/infra/state-migrations.workspace-attestation-recovery.test.ts
+
+# In LobsterAI, using the rebuilt runtime:
+OPENCLAW_STARTUP_MIGRATION_RUNTIME=<runtime> npm test -- openclawWorkspaceSetupRecovery
+OPENCLAW_STARTUP_MIGRATION_RUNTIME=<runtime> OPENCLAW_STARTUP_MIGRATION_GATEWAY=1 \
+  npm test -- openclawWorkspaceSetupRecovery
+```
+
+The Gateway fixture verifies authenticated health/history calls, shutdown and a
+second successful startup. Host tests do not establish Windows package or customer
+machine acceptance. Rebuild the pinned runtime when distributing this patch.
+
+Validation on macOS, 2026-09-18: the same bundled regression reproduces the exact
+original conflict with the existing runtime helper and passes with the rebuilt
+helper. The three upstream workspace suites pass all 81 tests. The LobsterAI
+startup, workspace, repair and patch suites pass 117 tests (one opt-in Gateway
+test skipped in that run); the new integration suite passes its two migration
+cases and its separately enabled Gateway/restart case. Electron compilation,
+changed-file ESLint, upstream changed-file oxlint and script syntax checks pass.
+All 44 patches apply successfully to a clean pinned checkout and on reapplication.
+The isolated Gateway proof uses the rebuilt startup helper with the existing
+mac-arm64 Gateway payload; a full runtime rebuild, Windows package, actual app UI
+and provider request against the customer's environment have not been validated.

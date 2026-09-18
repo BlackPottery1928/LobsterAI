@@ -9,6 +9,7 @@ import {
   chunkConsolidatedItemsForDisplay,
   type ConsolidatedItem,
   countTurnCompletedSteps,
+  countTurnFailedSteps,
   formatElapsedDuration,
   formatStructuredText,
   formatTurnDuration,
@@ -18,6 +19,7 @@ import {
   getActivityIndicatorStatusText,
   getActivityStepDisplay,
   getThinkingPhaseLabels,
+  getToolInputSummary,
   getToolResultCollapsedDisplay,
   getToolResultDisplay,
   getTurnActivityFingerprint,
@@ -258,6 +260,35 @@ test('turn end timestamp is the latest message time and duration formats in loca
   expect(formatTurnDuration(45_000)).toBe('45秒');
   expect(formatTurnDuration(21 * 60_000 + 45_000)).toBe('21分钟 45秒');
   expect(formatTurnDuration(3_720_000)).toBe('1小时 2分钟');
+});
+
+test('failed tool steps are counted so the folded process can report them', () => {
+  const turn = buildTurn([{
+    id: 'user-1', type: 'user', content: 'hello', timestamp: 1000,
+  }, {
+    id: 'tool-1', type: 'tool_use', content: '', timestamp: 2000, metadata: { toolUseId: 'tool-use-1', toolName: 'exec' },
+  }, {
+    id: 'result-1', type: 'tool_result', content: 'command not found', timestamp: 3000, metadata: { toolUseId: 'tool-use-1', isError: true },
+  }, {
+    id: 'tool-2', type: 'tool_use', content: '', timestamp: 4000, metadata: { toolUseId: 'tool-use-2', toolName: 'read' },
+  }, {
+    id: 'result-2', type: 'tool_result', content: 'ok', timestamp: 5000, metadata: { toolUseId: 'tool-use-2' },
+  }, {
+    id: 'tool-3', type: 'tool_use', content: '', timestamp: 6000, metadata: { toolUseId: 'tool-use-3', toolName: 'image' },
+  }, {
+    id: 'result-3', type: 'tool_result', content: '', timestamp: 7000, metadata: { toolUseId: 'tool-use-3', error: 'unsupported' },
+  }, {
+    id: 'assistant-1', type: 'assistant', content: 'done', timestamp: 8000,
+  }]);
+  expect(countTurnFailedSteps(turn)).toBe(2);
+  expect(countTurnFailedSteps(buildTurn([{ id: 'user-2', type: 'user', content: 'hi', timestamp: 1 }]))).toBe(0);
+});
+
+test('image and browser tool rows summarize their target instead of a generic tool label', () => {
+  expect(getToolInputSummary('image', { path: '/tmp/shots/cover.png', prompt: 'describe' })).toBe('/tmp/shots/cover.png');
+  expect(getToolInputSummary('browser', { action: 'navigate', url: 'https://example.com/docs' })).toBe('navigate · https://example.com/docs');
+  expect(getToolInputSummary('browser', { action: 'screenshot' })).toBe('screenshot');
+  expect(getToolInputSummary('browser', {})).toBeNull();
 });
 
 test('turn answer start index splits trailing answer text from the process', () => {

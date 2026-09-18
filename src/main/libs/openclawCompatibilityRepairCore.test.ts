@@ -188,6 +188,64 @@ test('healthy installations and same-ID third-party packages are retained', asyn
   expect(deps.acceptBundledPlugin).not.toHaveBeenCalled();
 });
 
+function migratedPluginFixture() {
+  const context = pluginFixture();
+  const base = path.dirname(context.options.stateDir);
+  context.options.stateDir = path.join(base, 'admin', 'LobsterAI', 'openclaw', 'state');
+  fs.mkdirSync(context.options.stateDir, { recursive: true });
+  context.options.configPath = path.join(context.options.stateDir, 'openclaw.json');
+  fs.writeFileSync(context.options.configPath, '{}');
+  context.records.deepseek.installPath = path.join(base, 'old-user', 'LobsterAI', 'openclaw', 'state',
+    'npm', 'projects', 'openclaw-deepseek-123', 'node_modules', '@openclaw', 'deepseek-provider');
+  return context;
+}
+
+test('reconciles a missing previous-profile install and backs up its SQLite ledger including WAL', async () => {
+  const { options, deps, records, root, user } = migratedPluginFixture();
+  const dbPath = path.join(options.stateDir, 'state', 'openclaw.sqlite');
+  fs.mkdirSync(path.dirname(dbPath));
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec('PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0; CREATE TABLE ledger (value TEXT)');
+    db.prepare('INSERT INTO ledger VALUES (?)').run(JSON.stringify(records));
+    const result = await repairOpenClawCompatibility(options, deps);
+    expect(result, result.error).toMatchObject({ success: true });
+    expect(deps.writeInstallRecords).toHaveBeenCalledWith({
+      user, deepseek: expect.objectContaining({ source: OpenClawRepairPluginSource.Path, installPath: root }),
+    }, {});
+    expect(deps.validatePlugin).toHaveBeenCalledExactlyOnceWith('deepseek', root);
+    expect(deps.acceptBundledPlugin).toHaveBeenCalledExactlyOnceWith('deepseek', {});
+    const saved = new DatabaseSync(path.join(options.backupDir, 'original', 'state', 'openclaw.sqlite'), { readOnly: true });
+    try { expect(saved.prepare('SELECT value FROM ledger').get()?.value).toBe(JSON.stringify(records)); } finally { saved.close(); }
+    expect(fs.existsSync(records.deepseek.installPath!)).toBe(false);
+  } finally { db.close(); }
+});
+
+test.each(['existing', 'custom-path', 'conflicting-package', 'linked-parent', 'permission-denied'])(
+  'preserves an ambiguous previous-profile installation: %s', async scenario => {
+    const { options, deps, records } = migratedPluginFixture();
+    const installPath = records.deepseek.installPath!;
+    if (scenario === 'existing') fs.mkdirSync(installPath, { recursive: true });
+    if (scenario === 'custom-path') records.deepseek.installPath = path.join(path.dirname(options.backupDir), 'custom-plugin');
+    if (scenario === 'conflicting-package') records.deepseek.resolvedName = '@someone/deepseek-provider';
+    if (scenario === 'linked-parent') {
+      fs.mkdirSync(path.dirname(installPath), { recursive: true });
+      fs.symlinkSync(path.join(path.dirname(options.backupDir), 'absent-target'), installPath, 'junction');
+    }
+    if (scenario === 'permission-denied') {
+      const lstat = fs.lstatSync;
+      vi.spyOn(fs, 'lstatSync').mockImplementation(((filePath: fs.PathLike, ...args: []) => {
+        if (String(filePath).includes('old-user')) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+        return lstat(filePath, ...args);
+      }) as typeof fs.lstatSync);
+    }
+    const result = await repairOpenClawCompatibility(options, deps);
+    expect(result.success).toBe(scenario !== 'permission-denied');
+    expect(deps.writeInstallRecords).not.toHaveBeenCalled();
+    expect(deps.acceptBundledPlugin).not.toHaveBeenCalled();
+  },
+);
+
 test('bundled version mismatch stops before writing install records or consent', async () => {
   const { options, deps, root } = pluginFixture();
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: '@openclaw/deepseek-provider', version: '9999.1.1' }));

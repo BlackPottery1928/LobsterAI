@@ -79,6 +79,22 @@ describe.skipIf(!runtimeRoot)('packaged shared-state preparation', () => {
     return db;
   }
 
+  function seedPreAuditState(wal = false) {
+    const db = seedLegacyState(wal);
+    db.exec(`
+      DROP TABLE audit_events;
+      CREATE TABLE config_machine_state (
+        state_key TEXT NOT NULL PRIMARY KEY, value_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL
+      );
+      INSERT INTO config_machine_state VALUES ('fixture.retained', '{"value":"旧版配置"}', 10);
+    `);
+    return db;
+  }
+
+  function retainedMachineState(db: DatabaseSync) {
+    return db.prepare("SELECT value_json,updated_at_ms FROM config_machine_state WHERE state_key = 'fixture.retained'").get();
+  }
+
   function environment(): NodeJS.ProcessEnv {
     return {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR,
@@ -144,6 +160,53 @@ describe.skipIf(!runtimeRoot)('packaged shared-state preparation', () => {
     expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
   });
 
+  test.each([true, false])('initializes pre-audit v1 with WAL data and legacy discovery=%s', async legacyDiscovery => {
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (!legacyDiscovery) delete config.plugins.bundledDiscovery;
+    const configBefore = JSON.stringify(config);
+    fs.writeFileSync(configPath, configBefore);
+    const db = seedPreAuditState(true);
+    const retained = retainedMachineState(db);
+    expect(fs.statSync(databasePath + '-wal').size).toBeGreaterThan(0);
+
+    const result = await prepare();
+    expect(result, result.error).toMatchObject({ status: OpenClawStartupMigrationStatus.Migrated });
+    const saved = connect(result.backups.find(file => file.endsWith('.sqlite'))!);
+    expect(saved.prepare('PRAGMA user_version').get()?.user_version).toBe(1);
+    expect(saved.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'audit_events'").get()).toBeUndefined();
+    expect(retainedMachineState(saved)).toEqual(retained);
+    expect(fs.readFileSync(result.backups.find(file => file.endsWith('openclaw.json'))!, 'utf8')).toBe(configBefore);
+    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(15);
+    expect(db.prepare("SELECT schema_version FROM schema_meta WHERE meta_key = 'primary'").get()?.schema_version).toBe(15);
+    expect(db.prepare('PRAGMA integrity_check').get()?.integrity_check).toBe('ok');
+    expect(events(db)).toEqual([]);
+    expect(retainedMachineState(db)).toEqual(retained);
+    if (legacyDiscovery) {
+      expect(db.prepare("SELECT value_json FROM config_machine_state WHERE state_key = 'plugins.bundledDiscovery'").get()?.value_json)
+        .toBe(JSON.stringify(OpenClawBundledDiscoveryMode.Compat));
+      expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).plugins.bundledDiscovery).toBeUndefined();
+    } else {
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(configBefore);
+    }
+    expect(await prepare()).toMatchObject({ status: OpenClawStartupMigrationStatus.Skipped, backups: [], changes: [] });
+  });
+
+  test.each([2, 15])('refuses to recreate a missing audit ledger in schema %s', async version => {
+    const db = seedPreAuditState();
+    db.exec(`PRAGMA user_version = ${version}`);
+    db.prepare('UPDATE schema_meta SET schema_version = ?').run(version);
+    const retained = retainedMachineState(db);
+    db.close();
+    const configBefore = fs.readFileSync(configPath);
+    const result = await prepare();
+    expect(result.status).toBe(OpenClawStartupMigrationStatus.Failed);
+    const unchanged = connect();
+    expect(unchanged.prepare('PRAGMA user_version').get()?.user_version).toBe(version);
+    expect(unchanged.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'audit_events'").get()).toBeUndefined();
+    expect(retainedMachineState(unchanged)).toEqual(retained);
+    expect(fs.readFileSync(configPath)).toEqual(configBefore);
+  });
+
   test.each(['missing', 'malformed'])('preserves %s config for Doctor after database migration', async kind => {
     seedLegacyState().close();
     if (kind === 'missing') fs.unlinkSync(configPath);
@@ -204,6 +267,30 @@ describe.skipIf(!runtimeRoot)('packaged shared-state preparation', () => {
     expect(events(connect())).toEqual([{ sequence: 42, event_id: 'retained-event', run_id: 'retained-run' }]);
     expect(connect(path.join(backupDir, 'original', 'state', 'openclaw.sqlite'))
       .prepare('PRAGMA user_version').get()?.user_version).toBe(1);
+  }, 180_000);
+
+  test('one-click repair initializes pre-audit v1 before Doctor and remains restartable', async () => {
+    const db = seedPreAuditState();
+    const retained = retainedMachineState(db);
+    db.close();
+    const backupDir = path.join(directory, 'manual-backup');
+    fs.mkdirSync(backupDir);
+    const params = { runtimeRoot: runtimeRoot!, stateDir, configPath, backupDir,
+      electronNodeRuntimePath: process.execPath, env: environment() };
+    await runOpenClawCompatibilityRepair({ ...params, phase: OpenClawRepairPhase.Snapshot });
+    const doctor = await runOpenClawDoctorRepair(params);
+    expect(doctor.code).toBe(0);
+    expect(fs.existsSync(path.join(backupDir, 'doctor-result.json'))).toBe(true);
+    await runOpenClawCompatibilityRepair({ ...params, phase: OpenClawRepairPhase.Recovery });
+    expect(connect().prepare('PRAGMA user_version').get()?.user_version).toBe(15);
+    expect(retainedMachineState(connect())).toEqual(retained);
+    const saved = connect(path.join(backupDir, 'original', 'state', 'openclaw.sqlite'));
+    expect(saved.prepare('PRAGMA user_version').get()?.user_version).toBe(1);
+    expect(retainedMachineState(saved)).toEqual(retained);
+    expect(await prepare()).toMatchObject({ status: OpenClawStartupMigrationStatus.Skipped, backups: [], changes: [] });
+    const gateway = { runtimeRoot: runtimeRoot!, env: environment(), sessionKey: 'agent:main:main' };
+    await readRepairedGatewayHistory(gateway);
+    await readRepairedGatewayHistory(gateway);
   }, 180_000);
 
   test.each([1, 15])('repairs agent v1 and dangling skill links with shared schema %s, retaining media and WAL data', async sharedVersion => {
