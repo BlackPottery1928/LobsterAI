@@ -14,6 +14,7 @@ import type {
   ScheduledTaskPayload,
 } from '../../../scheduledTask/types';
 import { AgentId } from '../../../shared/agent/constants';
+import { sanitizeWeixinDeliveryError } from '../../../shared/im/weixin';
 import { OpenClawEnginePhase } from '../../../shared/openclawEngine/constants';
 import {
   imConversationDisplayName,
@@ -31,6 +32,7 @@ import {
   resolveGroupDeliveryTargetFromSessions,
   resolveImDeliveryHintsFromSessions,
 } from './helpers';
+import { WeixinReportDelivery } from './weixinReportDelivery';
 
 /** Matches auto-generated channel session titles, e.g. "[TG] group:123". */
 const AUTO_CHANNEL_TITLE_RE = /^\[[^\]]*\]\s/;
@@ -554,6 +556,25 @@ async function ensureScheduledTaskGatewayClient(
 
 export function registerScheduledTaskHandlers(deps: ScheduledTaskHandlerDeps): void {
   const { getCronJobService, getIMGatewayManager, getOpenClawRuntimeAdapter, getCoworkSessionTitle } = deps;
+  const weixinReportDelivery = new WeixinReportDelivery({
+    getJob: id => getCronJobService().getJob(id),
+    listRuns: (id, limit, offset) => getCronJobService().listRuns(id, limit, offset),
+    send: async params => {
+      await ensureScheduledTaskGatewayClient(getOpenClawRuntimeAdapter);
+      const client = asGatewayRpcClient(getOpenClawRuntimeAdapter()?.getGatewayClient());
+      if (!client) throw new Error('Gateway not ready');
+      return client.request('send', params, { timeoutMs: 90_000 });
+    },
+  });
+
+  ipcMain.handle(ScheduledTaskIpc.ResendWeixinReport, async (_event, taskId: string, runId: string) => {
+    try {
+      await weixinReportDelivery.resend(taskId, runId);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: sanitizeWeixinDeliveryError(error) };
+    }
+  });
 
   ipcMain.handle(ScheduledTaskIpc.List, async () => {
     try {

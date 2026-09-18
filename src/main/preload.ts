@@ -1311,6 +1311,8 @@ contextBridge.exposeInMainWorld('electron', {
 
     // Execution
     runManually: (id: string) => ipcRenderer.invoke(ScheduledTaskIpc.RunManually, id),
+    resendWeixinReport: (taskId: string, runId: string) =>
+      ipcRenderer.invoke(ScheduledTaskIpc.ResendWeixinReport, taskId, runId),
     stop: (id: string) => ipcRenderer.invoke(ScheduledTaskIpc.Stop, id),
 
     // Run history

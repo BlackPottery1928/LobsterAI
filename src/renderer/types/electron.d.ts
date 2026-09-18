@@ -1942,6 +1942,7 @@ interface IElectronAPI {
       error?: string;
     }>;
     runManually: (id: string) => Promise<{ success: boolean; error?: string }>;
+    resendWeixinReport: (taskId: string, runId: string) => Promise<{ success: boolean; error?: string }>;
     stop: (id: string) => Promise<{ success: boolean; error?: string }>;
     listRuns: (
       taskId: string,
