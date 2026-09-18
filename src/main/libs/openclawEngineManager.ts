@@ -35,7 +35,7 @@ import { readDreamingRecoverySummary } from './openclawDreamingRecovery';
 import { createDreamingStartupFailureCollector } from './openclawDreamingStartupFailure';
 import { cleanupStaleGatewayLocks, GatewayLockCleanupAction } from './openclawGatewayLock';
 import { buildOpenClawGatewayShutdownBridge, spawnOpenClawGatewayProcess, stopOpenClawGatewayProcess } from './openclawGatewayProcess';
-import { cleanupStaleThirdPartyPluginsFromBundledDir, listLocalOpenClawExtensionIds,syncLocalOpenClawExtensionsIntoRuntime } from './openclawLocalExtensions';
+import { cleanupStaleThirdPartyPluginsFromBundledDir, listLocalOpenClawExtensionIds,syncLocalOpenClawExtensionsIntoRuntime, withoutMissingManagedPluginLoadPaths } from './openclawLocalExtensions';
 import { migrateAllFtsOnlyMemoryIndexes } from './openclawMemoryIndexMigration';
 import { listLegacySessionStorePaths, migrateLegacySessionStorageWithDoctor } from './openclawSessionLegacyMigration';
 import { extractOpenClawBindingSchemaFailure, extractOpenClawCliFailure, hasLegacyOpenClawDiscovery, isOpenClawBindingSchemaFailure, runOpenClawStartupCompatibility } from './openclawStartupCompatibility';
@@ -1872,9 +1872,19 @@ export class OpenClawEngineManager extends EventEmitter {
     // Ensure gateway.mode is set even if config already exists
     try {
       const raw = fs.readFileSync(this.configPath, 'utf8');
-      const config = JSON.parse(raw);
+      // Load paths into a previous install location make OpenClaw reject the
+      // whole config. Drop them before any helper, migration or the gateway
+      // reads it: a config sync that fails or keeps the plugins section does not.
+      const { config, removed } = withoutMissingManagedPluginLoadPaths(JSON.parse(raw));
+      let changed = removed.length > 0;
+      if (changed) {
+        console.warn(`[OpenClaw] Dropped missing managed plugin load paths before startup: ${removed.join(', ')}`);
+      }
       if (!config.gateway?.mode) {
         config.gateway = { ...config.gateway, mode: 'local' };
+        changed = true;
+      }
+      if (changed) {
         fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
       }
       return hasLegacyOpenClawDiscovery(config);

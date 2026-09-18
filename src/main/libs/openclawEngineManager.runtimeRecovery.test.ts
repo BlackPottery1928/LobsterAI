@@ -271,4 +271,29 @@ describe('OpenClawEngineManager startup runtime recovery', () => {
     expect(order).toEqual(['startup-compatibility', 'config-self-heal', 'startup-compatibility']);
     expect(internals.configSelfHealPending).toBe(false);
   });
+
+  test('drops missing managed plugin load paths before helpers, migrations or the gateway read the config', async () => {
+    const { manager } = prepareSpawnlessStartup();
+    // Left by a previous install location; a failed config sync never rewrites it.
+    const missingRuntimeDir = path.join(tempDir, 'old-install', 'resources', 'cfmind', 'third-party-extensions');
+    const userDataDir = path.join(tempDir, 'user-data', 'third-party-extensions');
+    fs.mkdirSync(userDataDir, { recursive: true });
+    fs.writeFileSync(manager.getConfigPath(), JSON.stringify({
+      gateway: { mode: 'local', port: 18789 },
+      plugins: { load: { paths: [missingRuntimeDir, userDataDir] }, entries: { browser: { enabled: true } } },
+    }));
+    let configSeenByHelper: unknown;
+    vi.mocked(runOpenClawStartupCompatibility).mockReset().mockImplementationOnce(async () => {
+      configSeenByHelper = JSON.parse(fs.readFileSync(manager.getConfigPath(), 'utf8'));
+      return { status: OpenClawStartupMigrationStatus.Failed, error: 'stop after preparation' };
+    });
+
+    await manager.startGateway('missing-plugin-load-path-test');
+
+    expect(configSeenByHelper).toEqual({
+      gateway: { mode: 'local', port: 18789 },
+      plugins: { load: { paths: [userDataDir] }, entries: { browser: { enabled: true } } },
+    });
+    expect(spawnOpenClawGatewayProcess).not.toHaveBeenCalled();
+  });
 });
