@@ -13,6 +13,8 @@ import { AppSettingsIpc } from '../shared/appSettings/constants';
 import { AppUpdateIpc } from '../shared/appUpdate/constants';
 import { ArtifactPreviewIpc } from '../shared/artifactPreview/constants';
 import { MarkdownFileIpc, type SaveMarkdownFileRequest } from '../shared/artifactPreview/markdownEditing';
+import { ReviewIpc, type ReviewScopeRequest } from '../shared/artifactPreview/reviewScopes';
+import type { ReviewSourceRequest } from '../shared/artifactPreview/reviewSource';
 import {
   AsrIpcChannel,
   type AsrRealtimeSessionRequest,
@@ -45,6 +47,7 @@ import {
   type BrowserRuntimeProfile,
 } from '../shared/browserWebAccess/constants';
 import { ClipboardIpc } from '../shared/clipboard/constants';
+import { BACKGROUND_JOB_EVENT_CHANNEL, type CoworkBackgroundJobsEvent } from '../shared/cowork/backgroundJobs';
 import type { CoworkBrowserAnnotationMessageBatch } from '../shared/cowork/browserAnnotations';
 import type {
   CoworkBtwAbortRequest,
@@ -642,6 +645,19 @@ contextBridge.exposeInMainWorld('electron', {
     deleteSubagentSession: (options: { parentSessionId: string; runId: string }) =>
       ipcRenderer.invoke(CoworkIpcChannel.SubagentDelete, options),
 
+    // Task panel: background jobs
+    listBackgroundJobs: (sessionId: string) =>
+      ipcRenderer.invoke(CoworkIpcChannel.BackgroundJobList, { sessionId }),
+    killBackgroundJob: (options: { sessionId: string; jobId: string }) =>
+      ipcRenderer.invoke(CoworkIpcChannel.BackgroundJobKill, options),
+    clearSettledBackgroundJobs: (sessionId: string) =>
+      ipcRenderer.invoke(CoworkIpcChannel.BackgroundJobClearSettled, { sessionId }),
+    onBackgroundJobsEvent: (listener: (event: CoworkBackgroundJobsEvent) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, event: CoworkBackgroundJobsEvent) => listener(event);
+      ipcRenderer.on(BACKGROUND_JOB_EVENT_CHANNEL, handler);
+      return () => ipcRenderer.removeListener(BACKGROUND_JOB_EVENT_CHANNEL, handler);
+    },
+
     // Media task management
     cancelMediaTask: (taskId: string) =>
       ipcRenderer.invoke(CoworkIpcChannel.CancelMediaTask, taskId),
@@ -810,6 +826,10 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.on(CoworkIpcChannel.OpenSessionFromNotification, handler);
       return () => ipcRenderer.removeListener(CoworkIpcChannel.OpenSessionFromNotification, handler);
     },
+  },
+  workspaceReview: {
+    read: (input: ReviewScopeRequest) => ipcRenderer.invoke(ReviewIpc.Read, input),
+    source: (input: ReviewSourceRequest) => ipcRenderer.invoke(ReviewIpc.Source, input),
   },
   dialog: {
     selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),

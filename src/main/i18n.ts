@@ -81,6 +81,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Session titles (created by ChannelSessionSync)
     coworkDefaultSessionTitle: '新对话',
+    coworkWorkspaceChangesTitle: '工作区变更',
     cronSessionPrefix: '定时',
     channelPrefixFeishu: '飞书',
     channelPrefixDingtalk: '钉钉',
@@ -109,6 +110,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Cowork error messages (shared with renderer via classifyErrorKey)
     coworkErrorAuthInvalid: 'API 密钥无效或已过期，请检查配置。',
+    coworkErrorSubagentSummaryFailed: '子任务已完成，但主 Agent 未能恢复汇总。请继续对话以重试汇总。',
     coworkErrorLobsterAILoginExpired: '登录状态已过期，请重新登录后继续使用 LobsterAI 套餐模型。',
     coworkErrorOAuthInvalid: 'OAuth 授权已失效或权限不足，请重新授权后重试。',
     coworkErrorModelAccessDenied: '当前账号无权访问该模型，请切换模型或检查服务商账号权限。',
@@ -460,6 +462,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Session titles
     coworkDefaultSessionTitle: 'New Chat',
+    coworkWorkspaceChangesTitle: 'Workspace changes',
     cronSessionPrefix: 'Cron',
     channelPrefixFeishu: 'Feishu',
     channelPrefixDingtalk: 'DingTalk',
@@ -498,6 +501,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Cowork error messages
     coworkErrorAuthInvalid: 'Invalid or expired API key. Please check your configuration.',
+    coworkErrorSubagentSummaryFailed: 'Subtasks finished, but the main agent could not resume the summary. Send a follow-up to retry.',
     coworkErrorLobsterAILoginExpired:
       'Your login session has expired. Sign in again to continue using LobsterAI plan models.',
     coworkErrorOAuthInvalid: 'OAuth authorization is invalid or missing required access. Re-authenticate and try again.',

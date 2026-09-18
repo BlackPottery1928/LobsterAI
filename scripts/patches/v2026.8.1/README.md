@@ -112,6 +112,26 @@ commit followed by retry, and repeated startup without unrelated config changes.
 Remove the patch once the pinned upstream owner provides an equivalent commit
 boundary.
 
+## Subagent collaboration lifecycle
+
+- `openclaw-sessions-spawn-agent-id-schema.patch` makes `agentId` required in the
+  model-visible native spawn schema when the requesting agent's effective
+  `subagents.requireAgentId` policy requires explicit selection. The field also
+  explains `agents_list` discovery. ACP and configured collector defaults retain
+  their existing optional-target contract. Execution-time target allowlists are
+  unchanged. Regression tests cover per-agent overrides and default policies.
+- `openclaw-subagent-shared-gateway-context.patch` accepts distinct resolver
+  closures that resolve to the same live Gateway context during batch completion.
+  Every resolver is checked on each dispatch. Missing, retired or different
+  Gateway owners remain rejected; no ambient fallback is introduced. Regression
+  tests cover simultaneous children, owner retirement and incompatible bindings.
+- `openclaw-subagent-settle-failure-event.patch` publishes a session-scoped
+  `lobsterai.subagent.settle_failed` event after a terminal requester wake failure
+  is persisted, before releasing its live Gateway binding. It contains only the
+  requester session/run identity. LobsterAI accepts it only for that exact waiting
+  request, shows a localized retry hint, and never reports completion. The durable
+  upstream task delivery failure remains intact.
+
 ## Browser DNS failure and Gateway process recovery
 
 Three independent patches contain browser failures at their owners. A DNS

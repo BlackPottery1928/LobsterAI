@@ -10,6 +10,9 @@ import type {
 } from '../../shared/activity/constants';
 import type { AppUpdateActiveWorkloads, AppUpdateCheckResult, AppUpdateRuntimeState } from '../../shared/appUpdate/constants';
 import type { MarkdownFileBridge } from '../../shared/artifactPreview/markdownEditing';
+import type { ReviewScopeRequest } from '../../shared/artifactPreview/reviewScopes';
+import type { ReviewSourceRequest, ReviewSourceResponse } from '../../shared/artifactPreview/reviewSource';
+import type { ResolvedArtifactOutput } from '../../shared/artifactPreview/workspace';
 import type {
   AsrRealtimeSessionRequest,
   AsrRealtimeSessionResult,
@@ -42,6 +45,11 @@ import type {
   BrowserDiagnosticResult,
   BrowserRuntimeProfile,
 } from '../../shared/browserWebAccess/constants';
+import type {
+  BackgroundJobKillResult,
+  CoworkBackgroundJob,
+  CoworkBackgroundJobsEvent,
+} from '../../shared/cowork/backgroundJobs';
 import type {
   BrowserAnnotationRect,
   BrowserAnnotationScreenshotRef,
@@ -1208,6 +1216,10 @@ interface IElectronAPI {
       parentSessionId: string;
       runId: string;
     }) => Promise<{ success: boolean; deleted?: boolean; error?: string }>;
+    listBackgroundJobs: (sessionId: string) => Promise<{ success: boolean; jobs: CoworkBackgroundJob[]; error?: string }>;
+    killBackgroundJob: (options: { sessionId: string; jobId: string }) => Promise<{ success: boolean; error?: string } & Partial<BackgroundJobKillResult>>;
+    clearSettledBackgroundJobs: (sessionId: string) => Promise<{ success: boolean; jobs: CoworkBackgroundJob[]; error?: string }>;
+    onBackgroundJobsEvent: (listener: (event: CoworkBackgroundJobsEvent) => void) => () => void;
     respondToPermission: (options: {
       requestId: string;
       result: CoworkPermissionResult;
@@ -1291,6 +1303,10 @@ interface IElectronAPI {
     onSessionModelOverrideChanged?: (
       callback: (data: { sessionId: string; modelOverride: string }) => void,
     ) => () => void;
+  };
+  workspaceReview: {
+    read: (input: ReviewScopeRequest) => Promise<ResolvedArtifactOutput | null>;
+    source: (input: ReviewSourceRequest) => Promise<ReviewSourceResponse | null>;
   };
   dialog: {
     selectDirectory: () => Promise<{ success: boolean; path: string | null }>;
