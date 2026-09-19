@@ -2837,16 +2837,21 @@ const executeDeferredGatewayRestart = async (reason: string) => {
   });
 };
 
-// A hard restart requested while the gateway is restarting itself (config
-// reload → SIGUSR1) is parked here instead of killing the mid-restart process.
-// When the gateway client reconnects we either drop it (the self-restart
-// already loaded the on-disk config) or replay it (env vars need a respawn).
-type PendingSelfRestartReevaluation = {
+// A hard restart requested while the gateway is mid-lifecycle is parked here
+// instead of killing the in-flight process:
+// - self-restart in progress (config reload → SIGUSR1): killing it poisons the
+//   single-instance lock.
+// - startup still in flight: the spawn froze its environment at launch, so it
+//   cannot pick up secret env var changes made after that point.
+// When the gateway client reconnects we either drop the demand (the settled
+// process already loaded the on-disk config, and its pid is unchanged only for
+// in-process self-restarts) or replay it (env vars need a real respawn).
+type PendingGatewayRestartReevaluation = {
   reasons: string[];
   requiresRespawn: boolean;
   gatewayPid: number | null;
 };
-let pendingSelfRestartReevaluation: PendingSelfRestartReevaluation | null = null;
+let pendingGatewayRestartReevaluation: PendingGatewayRestartReevaluation | null = null;
 
 /**
  * True when this sync's restart demand is satisfied by the gateway reloading
@@ -3134,10 +3139,38 @@ const _syncOpenClawConfigImpl = async (
   }
 
   const status = manager.getStatus();
-  if (status.phase !== 'running') {
-    console.log(
-      `${D()} ──── RESTART NEEDED but gateway not running (phase=${status.phase}), skipping. reason=${options.reason}`,
-    );
+  if (status.phase !== OpenClawEnginePhase.Running) {
+    // A spawn that is still in flight froze its environment at launch
+    // (buildGatewayEnv spreads the secret snapshot at spawn time), so it cannot
+    // satisfy a secret env var change made after that point: the `${VAR}`
+    // placeholders in openclaw.json would stay unresolved for the entire life
+    // of that process. Park the demand instead of dropping it — the
+    // gateway-ready callback replays it once the start settles. Every other
+    // non-running phase has no process to miss the change: the next spawn picks
+    // the env up, so skipping stays correct there. If the spawn happened to read
+    // the snapshot after the change landed, the replay costs one redundant
+    // respawn — dropping the demand instead leaves the provider degraded for the
+    // whole session, which is far worse.
+    const startupCannotSatisfy = secretEnvVarsChanged || nspClawguardPatched;
+    if (status.phase === OpenClawEnginePhase.Starting && startupCannotSatisfy) {
+      const pending = pendingGatewayRestartReevaluation;
+      pendingGatewayRestartReevaluation = {
+        reasons: [...(pending?.reasons ?? []), options.reason],
+        requiresRespawn: true,
+        // Always the process in flight right now, never an inherited pid: the
+        // replay must be skipped only when *this* spawn is replaced, because a
+        // replacement is spawned from the current snapshot and already carries
+        // the change.
+        gatewayPid: manager.getGatewayProcessPid(),
+      };
+      console.log(
+        `${D()} ──── RESTART PARKED (gateway still starting, spawned env is stale). reason=${options.reason}`,
+      );
+    } else {
+      console.log(
+        `${D()} ──── RESTART NEEDED but gateway not running (phase=${status.phase}), skipping. reason=${options.reason}`,
+      );
+    }
     return {
       success: true,
       changed: true,
@@ -3160,10 +3193,10 @@ const _syncOpenClawConfigImpl = async (
     // (empty lock file → 30s of "gateway already running; lock timeout").
     // Park the demand; the gateway-ready callback re-evaluates it.
     const requiresRespawn = nspClawguardPatched || !selfRestartSatisfiesSync(options, secretEnvVarsChanged);
-    pendingSelfRestartReevaluation = {
-      reasons: [...(pendingSelfRestartReevaluation?.reasons ?? []), options.reason],
-      requiresRespawn: (pendingSelfRestartReevaluation?.requiresRespawn ?? false) || requiresRespawn,
-      gatewayPid: pendingSelfRestartReevaluation?.gatewayPid ?? manager.getGatewayProcessPid(),
+    pendingGatewayRestartReevaluation = {
+      reasons: [...(pendingGatewayRestartReevaluation?.reasons ?? []), options.reason],
+      requiresRespawn: (pendingGatewayRestartReevaluation?.requiresRespawn ?? false) || requiresRespawn,
+      gatewayPid: pendingGatewayRestartReevaluation?.gatewayPid ?? manager.getGatewayProcessPid(),
     };
     console.log(
       `${D()} ──── RESTART PARKED (gateway self-restart in progress). reason=${options.reason}, requiresRespawn=${requiresRespawn}`,
@@ -3276,32 +3309,33 @@ const syncOpenClawConfig = async (
   }
 };
 
-// The gateway client reconnected — any self-restart has settled. Resolve the
-// parked restart demand: a same-pid (in-process) restart already loaded the
-// on-disk config, so only env-var style demands still need a real respawn.
-// A changed pid means the process was respawned with fresh env anyway.
-const handleGatewaySelfRestartSettled = () => {
+// The gateway client reconnected — any self-restart or startup has settled.
+// Resolve the parked restart demand: a same-pid (in-process) self-restart and a
+// startup that launched before the change both keep the environment they were
+// born with, so only env-var style demands still need a real respawn. A changed
+// pid means the process was respawned with fresh env anyway.
+const handleGatewayRestartReevaluation = () => {
   const manager = getOpenClawEngineManager();
   manager.clearGatewaySelfRestart();
-  const pending = pendingSelfRestartReevaluation;
+  const pending = pendingGatewayRestartReevaluation;
   if (!pending) {
     return;
   }
-  pendingSelfRestartReevaluation = null;
+  pendingGatewayRestartReevaluation = null;
   const currentPid = manager.getGatewayProcessPid();
   const respawned = pending.gatewayPid != null && currentPid != null && currentPid !== pending.gatewayPid;
   if (pending.requiresRespawn && !respawned) {
     console.log(
-      `${gwDiagTs()} parked restart still required after gateway self-restart (reasons: ${pending.reasons.join(', ')}); executing now`,
+      `${gwDiagTs()} parked restart still required after gateway settled (reasons: ${pending.reasons.join(', ')}); executing now`,
     );
     void syncOpenClawConfig({
-      reason: `self-restart-reevaluate:${pending.reasons[0]}`,
+      reason: `gateway-settled-reevaluate:${pending.reasons[0]}`,
       restartGatewayIfRunning: true,
     });
     return;
   }
   console.log(
-    `${gwDiagTs()} parked restart satisfied by gateway self-restart (reasons: ${pending.reasons.join(', ')}, respawned=${respawned})`,
+    `${gwDiagTs()} parked restart satisfied by gateway settle (reasons: ${pending.reasons.join(', ')}, respawned=${respawned})`,
   );
 };
 
@@ -3739,7 +3773,7 @@ const getCoworkEngineRouter = () => {
           },
           onGatewayClientReady: () => {
             getCronJobService().notifyGatewayReady();
-            handleGatewaySelfRestartSettled();
+            handleGatewayRestartReevaluation();
           },
           onBrowserToolEvent: event => {
             const displayMode = normalizeBrowserWebAccessConfig(
