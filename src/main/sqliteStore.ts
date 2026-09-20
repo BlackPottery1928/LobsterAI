@@ -11,7 +11,6 @@ import {
   parseOpenClawCronSessionKey,
 } from '../shared/cowork/openclawCronSessionKey';
 import { DB_FILENAME } from './appConstants';
-import { createBackgroundJobsTable } from './backgroundJobStore.schema';
 import { initializeLibraryTables } from './library/libraryMigrations';
 import {
   openSqliteDatabaseWithRecovery,
@@ -306,8 +305,6 @@ export class SqliteStore {
       CREATE INDEX IF NOT EXISTS idx_subagent_runs_agent_id
       ON subagent_runs(agent_id);
     `);
-    // Background jobs mirror for the task panel
-    createBackgroundJobsTable(this.db);
     // Subagent messages table — stores fetched conversation history locally
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS subagent_messages (

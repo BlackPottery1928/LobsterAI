@@ -83,8 +83,8 @@ import {
   type BrowserWebAccessConfig,
   normalizeBrowserWebAccessConfig,
 } from '../shared/browserWebAccess/constants';
+import type { BrowserPasskeyRequest } from '../shared/browserWebAccess/passkeys';
 import { ClipboardIpc } from '../shared/clipboard/constants';
-import { BACKGROUND_JOB_EVENT_CHANNEL, type CoworkBackgroundJobsEvent } from '../shared/cowork/backgroundJobs';
 import {
   type CoworkBrowserAnnotationMessageBatch,
   normalizeBrowserAnnotationBatches,
@@ -220,7 +220,6 @@ import { APP_NAME, APP_USER_MODEL_ID, DB_FILENAME } from './appConstants';
 import { createLocalFileProtocolResponse } from './artifactLocalFileProtocol';
 import { authQuotaGateStateFromQuota, AuthSubscriptionStatus, createDefaultAuthQuotaGateState, normalizeAuthQuota } from './authQuota';
 import { type AutoLaunchStatus, getAutoLaunchStatus, isAutoLaunched, setAutoLaunchEnabled } from './autoLaunchManager';
-import { BackgroundJobStore } from './backgroundJobStore';
 import { BrowserCredentialApprovalService } from './browserCredentials/browserCredentialApprovalService';
 import { BrowserCredentialService } from './browserCredentials/browserCredentialService';
 import { getRecentComputerUseLogEntries } from './computerUse/computerUseLogs';
@@ -270,7 +269,6 @@ import { registerActivityIpcHandlers } from './ipcHandlers/activity';
 import { registerAgentHandlers } from './ipcHandlers/agents';
 import { registerAsrIpcHandlers } from './ipcHandlers/asr';
 import { registerBrowserCredentialHandlers } from './ipcHandlers/browserCredentials/handlers';
-import { registerCoworkBackgroundJobHandlers } from './ipcHandlers/coworkBackgroundJob';
 import { registerCoworkSubagentHandlers } from './ipcHandlers/coworkSubagent';
 import { ensureDshEngineReady, registerDshHandlers } from './ipcHandlers/dsh/handlers';
 import { registerEnterpriseAccountHandlers } from './ipcHandlers/enterpriseAccount';
@@ -291,6 +289,7 @@ import {
 import { registerSessionDiagnosticsHandlers } from './ipcHandlers/sessionDiagnostics';
 import { registerSiteIpcHandlers } from './ipcHandlers/site';
 import { registerSkillHandlers } from './ipcHandlers/skills';
+import { registerSubscriptionTrialIpcHandlers } from './ipcHandlers/subscriptionTrial';
 import { LibraryIndexService } from './library/libraryIndexService';
 import { registerLibraryIpcHandlers } from './library/libraryIpc';
 import { LibraryLocalStore } from './library/libraryLocalStore';
@@ -481,6 +480,7 @@ import {
   writeConfigDiagnostic,
 } from './libs/openclawConfigObservation';
 import { buildProviderSelection, OpenClawConfigSync } from './libs/openclawConfigSync';
+import { getRecentOpenClawDailyLogEntries } from './libs/openclawDailyLogs';
 import { OpenClawEngineManager, type OpenClawEngineStatus } from './libs/openclawEngineManager';
 import {
   backupOpenClawConfig,
@@ -1771,30 +1771,6 @@ const buildLogExportFileName = (): string => {
   const timePart = `${padTwoDigits(now.getHours())}${padTwoDigits(now.getMinutes())}${padTwoDigits(now.getSeconds())}`;
   return `lobsterai-logs-${datePart}-${timePart}.zip`;
 };
-
-const OPENCLAW_DAILY_LOG_RETENTION_DAYS = 7;
-const OPENCLAW_DAILY_LOG_RE = /^openclaw-\d{4}-\d{2}-\d{2}\.log$/;
-
-function getRecentOpenClawDailyLogEntries(
-  logDir: string | null,
-): Array<{ archiveName: string; filePath: string }> {
-  if (!logDir || !fs.existsSync(logDir)) return [];
-
-  const cutoffMs = Date.now() - OPENCLAW_DAILY_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-
-  return fs
-    .readdirSync(logDir)
-    .filter(f => OPENCLAW_DAILY_LOG_RE.test(f))
-    .map(f => ({ archiveName: f, filePath: path.join(logDir, f) }))
-    .filter(({ filePath }) => {
-      try {
-        return fs.statSync(filePath).mtimeMs >= cutoffMs;
-      } catch {
-        return false;
-      }
-    })
-    .sort((a, b) => a.archiveName.localeCompare(b.archiveName));
-}
 
 const truncateIpcString = (value: string, maxChars: number): string => {
   if (value.length <= maxChars) return value;
@@ -3656,13 +3632,6 @@ const bindCoworkRuntimeForwarder = (): void => {
     getDesktopNotificationManager().handleSessionStopped(sessionId);
   });
 
-  runtime.on('backgroundJobsChanged', (_sessionId: string, event: CoworkBackgroundJobsEvent) => {
-    BrowserWindow.getAllWindows().forEach((win) => {
-      if (win.isDestroyed()) return;
-      win.webContents.send(BACKGROUND_JOB_EVENT_CHANNEL, event);
-    });
-  });
-
   runtime.on('complete', (sessionId: string, claudeSessionId: string | null) => {
     mediaSelectionBySession.delete(sessionId);
     mediaTurnAccountScopeBySession.delete(sessionId);
@@ -3750,7 +3719,6 @@ const getCoworkEngineRouter = () => {
         },
         new SubagentRunStore(getStore().getDatabase()),
         new SubagentMessageStore(getStore().getDatabase()),
-        new BackgroundJobStore(getStore().getDatabase()),
       );
       // Wire up channel session sync for IM conversations via OpenClaw
       try {
@@ -5122,7 +5090,7 @@ if (!gotTheLock) {
           { archiveName: 'cowork.log', filePath: getCoworkLogPath() },
           ...getRecentComputerUseLogEntries(),
           ...manager.getRecentGatewayLogEntries(),
-          ...getRecentOpenClawDailyLogEntries(manager.getOpenClawDailyLogDir()),
+          ...getRecentOpenClawDailyLogEntries(manager.getOpenClawDailyLogDirs()),
           ...(process.platform === 'win32'
             ? [
                 {
@@ -7252,6 +7220,36 @@ if (!gotTheLock) {
     fetchWithAuth,
   });
 
+  registerSubscriptionTrialIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+    getServerBaseUrl: getServerApiBaseUrl,
+    getClientVersion: () => app.getVersion(),
+    platform: process.platform,
+    hasAuthTokens: () => getAuthTokens() !== null,
+    fetchPublic: (url, options) => net.fetch(url, options),
+    fetchWithAuth,
+  });
+
+  const activateLowCreditPurchaseOffer = async (): Promise<Record<string, unknown> | null> => {
+    try {
+      const response = await fetchWithAuth(`${getServerApiBaseUrl()}/api/purchase-offers/low-credit/activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) return null;
+      const body = (await response.json()) as {
+        code: number;
+        data?: Record<string, unknown>;
+      };
+      if (body.code !== 0 || !body.data) return null;
+      return { ...body.data, receivedAtEpochMs: Date.now() };
+    } catch (error) {
+      console.warn('[Auth] low-credit purchase offer activation failed:', error);
+      return null;
+    }
+  };
+
   ipcMain.handle(AuthIpcChannel.Exchange, async (_event, { code }: { code: string }) => {
     const startingTokens = getAuthTokens();
     const startingUser = getAuthUser();
@@ -7342,11 +7340,13 @@ if (!gotTheLock) {
         `[Auth] exchange completed; enterpriseContext=${enterpriseContext ? 'present' : 'absent'}`,
       );
       const quota = normalizeQuota(body.data.quota);
+      const purchaseOffer = await activateLowCreditPurchaseOffer();
       syncOpenClawConfigIfAuthQuotaGateChanged(startingQuotaGateState);
       return {
         success: true,
         user: body.data.user,
         quota,
+        purchaseOffer,
         enterpriseContext,
       };
     } catch (error) {
@@ -7495,11 +7495,13 @@ if (!gotTheLock) {
         `[Auth] profile refresh completed; quota=${quota ? 'present' : 'absent'}; `
         + `enterpriseContext=${enterpriseContext ? 'present' : 'absent'}`,
       );
+      const purchaseOffer = await activateLowCreditPurchaseOffer();
       return {
         success: true,
         status: AuthSessionStatus.Authenticated,
         user: profileBody.data,
         quota,
+        purchaseOffer,
         enterpriseContext,
       };
     } catch (error) {
@@ -7540,9 +7542,12 @@ if (!gotTheLock) {
       syncOpenClawConfigIfAuthQuotaGateChanged(previousQuotaGateState);
       const enterpriseContextResult = await refreshEnterpriseAccountContext();
       if (authAccountGeneration !== requestAccountGeneration) return { success: false };
+      const purchaseOffer = await activateLowCreditPurchaseOffer();
+      if (authAccountGeneration !== requestAccountGeneration) return { success: false };
       return {
         success: true,
         quota,
+        purchaseOffer,
         enterpriseContext: enterpriseContextResult.context,
       };
     } catch {
@@ -9084,6 +9089,14 @@ if (!gotTheLock) {
     BrowserIpc.DismissCredentialLoginStatus,
     (_event, request?: AgentBrowserHostRequest): Promise<AgentBrowserHostResponse> =>
       runBrowserHostAction(() => getAgentBrowserHost().dismissCredentialLoginStatus(request?.sessionId)),
+  );
+
+  ipcMain.handle(
+    BrowserIpc.ResolvePasskey,
+    (_event, request?: BrowserPasskeyRequest): Promise<AgentBrowserHostResponse> =>
+      runBrowserHostAction(() => request
+        ? getAgentBrowserHost().resolvePasskey(request)
+        : getAgentBrowserHost().getState()),
   );
 
   ipcMain.handle(
@@ -10677,12 +10690,6 @@ if (!gotTheLock) {
 
   registerCoworkSubagentHandlers({
     getOpenClawRuntimeAdapter: () => openClawRuntimeAdapter,
-    getCoworkEngineRouter,
-  });
-
-  // ── Task panel background jobs IPC ─────────────────────────────────────
-
-  registerCoworkBackgroundJobHandlers({
     getCoworkEngineRouter,
   });
 

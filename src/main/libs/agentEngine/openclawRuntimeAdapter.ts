@@ -26,12 +26,6 @@ import {
   OpenClawBrowserGatewayMethod,
 } from '../../../shared/browserWebAccess/constants';
 import {
-  BackgroundJobKillOutcome,
-  type BackgroundJobKillResult,
-  type CoworkBackgroundJob,
-  type CoworkBackgroundJobsEvent,
-} from '../../../shared/cowork/backgroundJobs';
-import {
   buildBrowserAnnotationPromptSection,
   type CoworkBrowserAnnotationMessageBatch,
 } from '../../../shared/cowork/browserAnnotations';
@@ -94,7 +88,6 @@ import type {
 import { OpenClawGatewayFailureKind } from '../../../shared/openclawEngine/constants';
 import { OpenClawTranscriptSafetyStatus } from '../../../shared/openclawTranscript/constants';
 import { ProviderName } from '../../../shared/providers';
-import type { BackgroundJobStore } from '../../backgroundJobStore';
 import type { Agent, CoworkExecutionMode, CoworkMessage, CoworkMessageMetadata, CoworkSession, CoworkSessionStatus, CoworkStore } from '../../coworkStore';
 import { t } from '../../i18n';
 import { MediaGenerationTool } from '../../mediaGenerationPolicy';
@@ -166,7 +159,6 @@ import { extractCronDeliveredTarget } from './cronDeliveryTarget';
 import { buildEmptyResponseHintMetadata, findRecoveredEmptyResponseHintIds } from './emptyResponseHint';
 import { buildMediaGenerationTurnInstruction } from './mediaGenerationTurnInstruction';
 import { OpenClawApprovalController } from './openclawApprovalController';
-import { OpenClawBackgroundJobSync } from './openclawBackgroundJobs';
 import {
   applyLocalTimestampsToEntries,
   buildGatewayMediaMetadata,
@@ -2632,7 +2624,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
 
   // ── Subagent tracking (delegated) ───────────────────────────────────────
   private readonly subagentTracker: SubagentTracker;
-  private readonly backgroundJobSync: OpenClawBackgroundJobSync | null;
   private readonly subagentSessionMaterializer: SubagentSessionMaterializer;
   private readonly approvalController: OpenClawApprovalController;
   private readonly questionController: OpenClawQuestionController;
@@ -3702,26 +3693,11 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     options: OpenClawRuntimeAdapterOptions = {},
     subagentRunStore?: SubagentRunStore,
     subagentMessageStore?: SubagentMessageStore,
-    backgroundJobStore?: BackgroundJobStore,
   ) {
     super();
     this.store = store;
     this.engineManager = engineManager;
     this.options = options;
-    this.backgroundJobSync = backgroundJobStore
-      ? new OpenClawBackgroundJobSync({
-        store: backgroundJobStore,
-        getGatewayRequest: () => {
-          const client = this.gatewayClient;
-          return client ? (method, params, opts) => client.request(method, params, opts) : null;
-        },
-        getSessionKeys: (sessionId) => this.getSessionKeysForSession(sessionId),
-        emit: (sessionId, jobs) => {
-          const event: CoworkBackgroundJobsEvent = { sessionId, jobs, timestamp: Date.now() };
-          this.emit('backgroundJobsChanged', sessionId, event);
-        },
-      })
-      : null;
     this.thinkingController = new OpenClawThinkingController({
       store: this.store,
       emitMessage: (sessionId, message, beforeMessageId) => {
@@ -5335,18 +5311,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     return this.questionController.getPendingQuestions();
   }
 
-  async listBackgroundJobs(sessionId: string): Promise<CoworkBackgroundJob[]> {
-    return this.backgroundJobSync?.list(sessionId) ?? [];
-  }
-
-  async killBackgroundJob(sessionId: string, jobId: string): Promise<BackgroundJobKillResult> {
-    return this.backgroundJobSync?.kill(sessionId, jobId) ?? { outcome: BackgroundJobKillOutcome.Unsupported };
-  }
-
-  async clearSettledBackgroundJobs(sessionId: string): Promise<CoworkBackgroundJob[]> {
-    return this.backgroundJobSync?.clearSettled(sessionId) ?? [];
-  }
-
   isSessionActive(sessionId: string): boolean {
     return this.activeTurns.has(sessionId) || this.yieldedSessions.has(sessionId);
   }
@@ -6224,7 +6188,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         this.gatewayClientEntryPath = connection.clientEntryPath;
         this.gatewayReconnectSuppressed = false;
         this.gatewayReconnectAttempt = 0;
-        this.backgroundJobSync?.onGatewayConnected();
         this.resetGatewayRpcHealth();
         this.subscribeToGatewaySessionEvents(client);
         // All connection paths must resume history sync, including model
@@ -9023,7 +8986,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       if (isCurrentRun && isSuccessfulYieldResult(toolNameRaw, finalContent, isError)) {
         turn.yieldedRunId = eventRunId ?? latestRunId;
       }
-      this.backgroundJobSync?.observeToolResult(sessionId, toolNameRaw, data.args, toolDetails, isError);
       if (isOpenClawToolLoopBlockedResultText(finalContent)) {
         turn.toolLoopBlockReason = finalContent.trim().slice(0, 400);
       }
@@ -11922,8 +11884,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   }
 
   private cleanupSessionTurn(sessionId: string): void {
-    // A background job may have just been killed or exited with the turn.
-    this.backgroundJobSync?.noteSessionSettled(sessionId);
     const turn = this.activeTurns.get(sessionId);
     if (turn) {
       this.cancelLifecycleErrorFallback(turn);
@@ -12088,7 +12048,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
    */
   onSessionDeleted(sessionId: string): void {
     this.yieldedSessions.delete(sessionId);
-    this.backgroundJobSync?.onSessionDeleted(sessionId);
     this.discardPendingBtwRunsForSession(sessionId);
     this.configRestartImWorkloads.forgetSession(sessionId);
     this.cronHistoryCursorBySession.delete(sessionId);
