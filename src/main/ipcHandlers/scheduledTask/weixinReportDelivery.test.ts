@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 import { DeliveryMode, PayloadKind, RunDeliveryStatus, ScheduleKind, SessionTarget, TaskStatus, WakeMode } from '../../../scheduledTask/constants';
 import type { ScheduledTask, ScheduledTaskRun } from '../../../scheduledTask/types';
+import { AgentId } from '../../../shared/agent/constants';
 import { WeixinDeliveryError, WeixinPlugin } from '../../../shared/im/weixin';
 import { WeixinReportDelivery } from './weixinReportDelivery';
 
@@ -36,7 +37,7 @@ describe('manual Weixin report recovery', () => {
     await delivery.resend(task.id, report.id);
     expect(deps.send).toHaveBeenCalledExactlyOnceWith({
       channel: WeixinPlugin.Id, to: task.delivery.to, accountId: task.delivery.accountId,
-      message: report.summary, idempotencyKey: expect.any(String),
+      agentId: AgentId.Main, message: report.summary, idempotencyKey: expect.any(String),
     });
     expect(report.deliveryStatus).toBe(RunDeliveryStatus.NotDelivered);
     expect(report.summary).toBe('The original saved report');
@@ -53,6 +54,12 @@ describe('manual Weixin report recovery', () => {
     const { deps, delivery } = makeDelivery({ agentId: 'report-agent' });
     await delivery.resend(task.id, report.id);
     expect(deps.send).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'report-agent' }));
+  });
+
+  test('names the main agent for main-agent jobs so multi-agent gateways accept the send', async () => {
+    const { deps, delivery } = makeDelivery({ agentId: null });
+    await delivery.resend(task.id, report.id);
+    expect(deps.send).toHaveBeenCalledWith(expect.objectContaining({ agentId: AgentId.Main }));
   });
 
   test('allows recovery of old runs that were incorrectly marked delivered', async () => {

@@ -3753,6 +3753,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     scheduledTasksWeixinRejected: '微信拒绝了这次推送。报告已保留，请检查微信连接；仍失败时可导出日志排查。',
     scheduledTasksWeixinUnconfirmed: '未能确认微信是否接收。请先检查微信，避免重复补发；报告已保留。',
     scheduledTasksWeixinReportUnavailable: '该报告无法补发。请确认报告已生成，且任务仍配置了微信接收人。',
+    scheduledTasksWeixinSessionExpired: '微信只允许机器人在你最近一次给它发消息后约 24 小时内推送，且每个会话有主动消息条数上限。请先在微信里给机器人发一条消息，再补发报告。',
     scheduledTasksSessionNotSynced: '会话记录同步失败，请稍后重试',
     scheduledTasksSessionSyncing: '正在同步会话记录...',
     scheduledTasksSessionRetry: '重试',
@@ -3874,6 +3875,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     scheduledTasksFormCharCount: '{count} 字符',
     scheduledTasksFormSubtitle: '设定时间与任务指令，AI 会准时执行并推送结果',
     scheduledTasksFormNotifyChannelHint: '任务完成后，可将执行结果推送到所选渠道',
+    scheduledTasksFormNotifyWeixinLimitHint: '微信限制：机器人只能在你最近一次给它发消息后约 24 小时内推送，超过后推送会失败，需要你再给机器人发一条消息后手动补发。如需稳定送达，请保持每天和机器人对话，或改用其他渠道。',
     scheduledTasksFormPayloadExpand: '全屏编辑',
     scheduledTasksFormPayloadCollapse: '退出全屏',
     scheduledTasksFormPayloadEditorDone: '完成',
@@ -8018,6 +8020,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     scheduledTasksWeixinRejected: 'WeChat rejected this delivery. The report is saved. Check the connection; export logs if it still fails.',
     scheduledTasksWeixinUnconfirmed: 'WeChat receipt is unconfirmed. Check WeChat before resending to avoid duplicates. The report is saved.',
     scheduledTasksWeixinReportUnavailable: 'This report cannot be resent. Check that it finished and the task still has a WeChat recipient.',
+    scheduledTasksWeixinSessionExpired: 'WeChat only lets the bot push within about 24 hours of your last message to it, and each conversation caps proactive messages. Message the bot in WeChat, then resend the report.',
     scheduledTasksSessionNotSynced: 'Failed to sync session. Please try again later.',
     scheduledTasksSessionSyncing: 'Syncing session...',
     scheduledTasksSessionRetry: 'Retry',
@@ -8145,6 +8148,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
       'Set a time and instructions — the AI runs on schedule and delivers the results',
     scheduledTasksFormNotifyChannelHint:
       'When the task finishes, the result can be sent to the selected channel',
+    scheduledTasksFormNotifyWeixinLimitHint:
+      'WeChat limit: the bot can only push within about 24 hours of your last message to it. Later pushes fail until you message the bot again and resend manually. For reliable delivery, chat with the bot daily or pick another channel.',
     scheduledTasksFormPayloadExpand: 'Expand to full screen',
     scheduledTasksFormPayloadCollapse: 'Exit full screen',
     scheduledTasksFormPayloadEditorDone: 'Done',

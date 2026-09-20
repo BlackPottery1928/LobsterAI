@@ -1,3 +1,5 @@
+import { PlatformRegistry } from '../platform';
+
 export const WeixinPlugin = {
   Id: 'openclaw-weixin',
   LoginStart: 'web.login.start',
@@ -30,4 +32,34 @@ export function sanitizeWeixinDeliveryError(error: unknown): string {
     return WeixinDeliveryError.Unknown;
   }
   return match[0];
+}
+
+/**
+ * `sendmessage` business code Weixin returns once the conversation context
+ * expired or the conversation hit its proactive-message cap.
+ */
+export const WEIXIN_SEND_CONTEXT_REJECTED_RET = -2;
+
+/** Extracts the numeric `ret=` code from a sanitized Weixin delivery error. */
+export function parseWeixinDeliveryRet(error: string): number | null {
+  const match = error.match(/\bret=(-?\d+)\b/);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * True when Weixin rejected a send because the user has not messaged the bot
+ * recently (a community-observed window of roughly 24 hours) or the
+ * conversation exhausted its proactive-message quota. Both recover only after
+ * the user messages the bot again.
+ */
+export function isWeixinContextRejected(error: string): boolean {
+  return error.startsWith(WeixinDeliveryError.Rejected)
+    && parseWeixinDeliveryRet(error) === WEIXIN_SEND_CONTEXT_REJECTED_RET;
+}
+
+/** True for the Weixin channel id or its platform id. */
+export function isWeixinChannel(channel: string | null | undefined): boolean {
+  const value = channel?.trim();
+  if (!value) return false;
+  return value === WeixinPlugin.Id || value === PlatformRegistry.platformOfChannel(WeixinPlugin.Id);
 }

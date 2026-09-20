@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { hasResendableReport, isWeixinReportDelivery } from '../../../scheduledTask/runDelivery';
 import type { ScheduledTask, ScheduledTaskRun } from '../../../scheduledTask/types';
+import { AgentId } from '../../../shared/agent/constants';
 import { sanitizeWeixinDeliveryError, WeixinDeliveryError, WeixinPlugin } from '../../../shared/im/weixin';
 
 export type WeixinReportDeliveryDeps = {
@@ -65,7 +66,9 @@ export class WeixinReportDelivery {
         channel: WeixinPlugin.Id,
         to: task.delivery.to!,
         ...(task.delivery.accountId ? { accountId: task.delivery.accountId } : {}),
-        ...(task.agentId ? { agentId: task.agentId } : {}),
+        // The gateway refuses an ownerless send once several agents exist, so
+        // main-agent jobs (stored without an agent id) must name the main agent.
+        agentId: task.agentId?.trim() || AgentId.Main,
         message,
         idempotencyKey: randomUUID(),
       });

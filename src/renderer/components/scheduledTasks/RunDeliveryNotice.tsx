@@ -3,13 +3,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { TaskStatus } from '../../../scheduledTask/constants';
 import { hasResendableReport, hasRunDeliveryFailure, isWeixinReportDelivery } from '../../../scheduledTask/runDelivery';
 import type { ScheduledTask, ScheduledTaskRun } from '../../../scheduledTask/types';
-import { sanitizeWeixinDeliveryError, WeixinDeliveryError } from '../../../shared/im/weixin';
+import { isWeixinContextRejected, sanitizeWeixinDeliveryError, WeixinDeliveryError } from '../../../shared/im/weixin';
 import { i18nService } from '../../services/i18n';
 
 export function getWeixinDeliveryHint(error: string): string {
   if (error.startsWith(WeixinDeliveryError.ContextExpired)) return 'scheduledTasksWeixinContextExpired';
   if (error.startsWith(WeixinDeliveryError.AccountExpired)) return 'scheduledTasksWeixinAccountExpired';
   if (error.startsWith(WeixinDeliveryError.ReportUnavailable)) return 'scheduledTasksWeixinReportUnavailable';
+  if (isWeixinContextRejected(error)) return 'scheduledTasksWeixinSessionExpired';
   if (error.startsWith(WeixinDeliveryError.Rejected)) return 'scheduledTasksWeixinRejected';
   return 'scheduledTasksWeixinUnconfirmed';
 }

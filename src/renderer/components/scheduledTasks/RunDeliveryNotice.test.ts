@@ -2,9 +2,17 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 
-import { DeliveryMode, RunDeliveryStatus, TaskStatus } from '../../../scheduledTask/constants';
+import {
+  DeliveryMode,
+  PayloadKind,
+  RunDeliveryStatus,
+  ScheduleKind,
+  SessionTarget,
+  TaskStatus,
+  WakeMode,
+} from '../../../scheduledTask/constants';
 import { hasRunDeliveryFailure } from '../../../scheduledTask/runDelivery';
-import type { ScheduledTaskRun } from '../../../scheduledTask/types';
+import type { ScheduledTask, ScheduledTaskRun } from '../../../scheduledTask/types';
 import { sanitizeWeixinDeliveryError, WeixinDeliveryError, WeixinPlugin } from '../../../shared/im/weixin';
 import { i18nService } from '../../services/i18n';
 import RunDeliveryNotice, { getWeixinDeliveryHint } from './RunDeliveryNotice';
@@ -24,13 +32,31 @@ describe('report generation and delivery are shown separately', () => {
     expect(html).not.toContain('<button');
   });
 
-  test('does not infer an expired context from a generic rejection', () => {
+  test('explains the expired Weixin session for ret=-2 and keeps other rejections generic', () => {
     const error = sanitizeWeixinDeliveryError(`Error: ${WeixinDeliveryError.Rejected} ret=-2 errcode=0 secret`);
-    expect(getWeixinDeliveryHint(error)).toBe('scheduledTasksWeixinRejected');
+    expect(getWeixinDeliveryHint(error)).toBe('scheduledTasksWeixinSessionExpired');
+    expect(getWeixinDeliveryHint(`${WeixinDeliveryError.Rejected} ret=-3 errcode=0`))
+      .toBe('scheduledTasksWeixinRejected');
     expect(getWeixinDeliveryHint(`${WeixinDeliveryError.ContextExpired} ret=-2 errcode=0`))
       .toBe('scheduledTasksWeixinContextExpired');
     expect(getWeixinDeliveryHint(`${WeixinDeliveryError.AccountExpired} ret=0 errcode=-14`))
       .toBe('scheduledTasksWeixinAccountExpired');
+  });
+
+  test('renders the expired-session guidance for a ret=-2 Weixin report delivery', () => {
+    const task: ScheduledTask = {
+      id: run.taskId, name: 'Report', description: '', enabled: true,
+      schedule: { kind: ScheduleKind.Cron, expr: '0 9 * * *' },
+      sessionTarget: SessionTarget.Isolated, wakeMode: WakeMode.Now,
+      payload: { kind: PayloadKind.AgentTurn, message: 'Generate report' },
+      delivery: { mode: DeliveryMode.Announce, channel: WeixinPlugin.Id, to: 'recipient@im.wechat' },
+      agentId: null, sessionKey: null, createdAt: '', updatedAt: '',
+      state: { nextRunAtMs: null, lastRunAtMs: null, lastStatus: null, lastError: null, lastDurationMs: null, runningAtMs: null, consecutiveErrors: 0 },
+    };
+    const expired = { ...run, deliveryError: `${WeixinDeliveryError.Rejected} ret=-2 errcode=0` };
+    const html = renderToStaticMarkup(React.createElement(RunDeliveryNotice, { run: expired, task }));
+    expect(html).toContain(i18nService.t('scheduledTasksWeixinSessionExpired'));
+    expect(html).not.toContain(i18nService.t('scheduledTasksWeixinRejected'));
   });
 
   test('does not reintroduce stale mode:none delivery errors or change other channel UI', () => {
