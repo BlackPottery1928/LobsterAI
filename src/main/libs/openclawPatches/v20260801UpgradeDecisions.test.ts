@@ -44,6 +44,7 @@ const RETAINED_PATCHES = [
   'openclaw-shell-snapshot-electron-node-env.patch',
   'openclaw-skip-disabled-web-search-discovery.patch',
   'openclaw-skip-derive-prompt-segments-deadloop.patch',
+  'openclaw-sqlite-readonly-result-file.patch',
   'openclaw-subagent-cleanup-finalize-best-effort.patch',
   'openclaw-subagent-shared-gateway-context.patch',
   'openclaw-subagent-settle-failure-event.patch',
