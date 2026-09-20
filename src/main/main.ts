@@ -83,6 +83,7 @@ import {
   type BrowserWebAccessConfig,
   normalizeBrowserWebAccessConfig,
 } from '../shared/browserWebAccess/constants';
+import type { BrowserPasskeyRequest } from '../shared/browserWebAccess/passkeys';
 import { ClipboardIpc } from '../shared/clipboard/constants';
 import { BACKGROUND_JOB_EVENT_CHANNEL, type CoworkBackgroundJobsEvent } from '../shared/cowork/backgroundJobs';
 import {
@@ -9099,6 +9100,14 @@ if (!gotTheLock) {
     BrowserIpc.DismissCredentialLoginStatus,
     (_event, request?: AgentBrowserHostRequest): Promise<AgentBrowserHostResponse> =>
       runBrowserHostAction(() => getAgentBrowserHost().dismissCredentialLoginStatus(request?.sessionId)),
+  );
+
+  ipcMain.handle(
+    BrowserIpc.ResolvePasskey,
+    (_event, request?: BrowserPasskeyRequest): Promise<AgentBrowserHostResponse> =>
+      runBrowserHostAction(() => request
+        ? getAgentBrowserHost().resolvePasskey(request)
+        : getAgentBrowserHost().getState()),
   );
 
   ipcMain.handle(
