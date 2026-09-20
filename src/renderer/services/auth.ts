@@ -69,6 +69,10 @@ interface AuthQuotaCheckResult {
   enterpriseQuotaAvailable: boolean;
 }
 
+interface RefreshQuotaOptions {
+  refreshProfileSummary?: boolean;
+}
+
 export interface PricingCatalogBaseModel {
   modelId?: string;
   modelName?: string;
@@ -527,8 +531,7 @@ class AuthService {
           result.enterpriseContext,
         );
         await this.loadServerModels();
-        void this.fetchProfileSummary();
-        this.refreshQuota();
+        void this.refreshQuota({ refreshProfileSummary: true });
         return true;
       }
       writeAuthRendererLog('warn', 'login callback exchange was rejected');
@@ -656,7 +659,7 @@ class AuthService {
   /**
    * Refresh quota information.
    */
-  async refreshQuota(): Promise<boolean> {
+  async refreshQuota(options: RefreshQuotaOptions = {}): Promise<boolean> {
     const authStateAtStart = store.getState().auth;
     if (
       !authStateAtStart.isLoggedIn
@@ -684,7 +687,10 @@ class AuthService {
           || result.quota?.subscriptionStatus === AuthSubscriptionStatus.Enterprise
           || authStateAtStart.user.accountMode === EnterpriseAccountMode.Enterprise
         );
-        if (!isEnterpriseAccount && !getCreditQuotaSnapshot(result.purchaseOffer)) {
+        if (
+          !isEnterpriseAccount
+          && (options.refreshProfileSummary || !getCreditQuotaSnapshot(result.purchaseOffer))
+        ) {
           try {
             const summaryResult = await window.electron.auth.getProfileSummary();
             if (summaryResult.success && summaryResult.data) profileSummary = summaryResult.data;
@@ -758,7 +764,7 @@ class AuthService {
       // The model list and the quota come from independent endpoints, so a
       // failing quota refresh must not block a plan model recovery.
       const [refreshed] = await Promise.all([
-        this.refreshQuota(),
+        this.refreshQuota({ refreshProfileSummary: true }),
         this.loadServerModels(),
       ]);
       if (!refreshed) {
@@ -768,7 +774,6 @@ class AuthService {
           enterpriseQuotaAvailable: false,
         };
       }
-      await this.fetchProfileSummary();
       if (!isAuthAccountRequestCurrent(requestSnapshot, store.getState().auth)) {
         writeAuthRendererLog('debug', 'discarded quota check result after auth state changed');
         return {
@@ -836,7 +841,7 @@ class AuthService {
     if (!result.success || !result.data) {
       throw new Error(result.error || 'Claim failed');
     }
-    await Promise.all([this.refreshQuota(), this.fetchProfileSummary()]);
+    await this.refreshQuota({ refreshProfileSummary: true });
     return result.data;
   }
 
