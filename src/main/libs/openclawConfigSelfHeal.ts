@@ -3,10 +3,12 @@ import path from 'path';
 
 import { OPENCLAW_LEGACY_DISCOVERY_KEY } from '../../shared/openclawEngine/startupCompatibility';
 import { LEGACY_PLUGIN_INSTALL_CONFIG_PATH } from './openclawPluginInstallMigration';
+import { assertOwnedRepairPath } from './openclawRepairPaths';
 import { runStartupMigration, type StartupMigrationRunner } from './openclawStartupStateMigration';
 import { safelyReplaceTextFileSync } from './safeFileReplace';
 
 /**
+ * Explicit Quick Repair helper. Ordinary startup never calls this function.
  * Upgrading over data from an older build keeps its openclaw.json: uninstalling
  * on Windows does not remove %APPDATA%, and the no-model config path preserves
  * existing sections. Keys the bundled OpenClaw has since retired then fail strict
@@ -41,12 +43,19 @@ export const OpenClawConfigSelfHealStatus = {
   Invalid: 'invalid',
 } as const;
 
+export const OpenClawConfigSelfHealSkipReason = {
+  MissingCli: 'missing-openclaw-cli',
+  MissingConfig: 'missing-config',
+  InvalidValidationOutput: 'unparseable-validate-output',
+  ConfigChanged: 'config-changed',
+} as const;
+
 export type OpenClawConfigIssue = { path?: string; message?: string };
 
 export type OpenClawConfigSelfHealResult =
   | {
       status: typeof OpenClawConfigSelfHealStatus.Skipped;
-      reason: 'missing-openclaw-cli' | 'missing-config' | 'unparseable-validate-output' | 'config-changed';
+      reason: typeof OpenClawConfigSelfHealSkipReason[keyof typeof OpenClawConfigSelfHealSkipReason];
     }
   | { status: typeof OpenClawConfigSelfHealStatus.Valid }
   | { status: typeof OpenClawConfigSelfHealStatus.Healed; removed: string[]; backupPath: string }
@@ -155,15 +164,16 @@ export async function healOpenClawConfigUnrecognizedKeys(params: {
 }): Promise<OpenClawConfigSelfHealResult> {
   const cliPath = path.join(params.runtimeRoot, 'openclaw.mjs');
   if (!fs.existsSync(cliPath)) {
-    return { status: OpenClawConfigSelfHealStatus.Skipped, reason: 'missing-openclaw-cli' };
+    return { status: OpenClawConfigSelfHealStatus.Skipped, reason: OpenClawConfigSelfHealSkipReason.MissingCli };
   }
+  assertOwnedRepairPath(params.stateDir, params.configPath);
   let raw: string;
   let mode: number;
   try {
     raw = fs.readFileSync(params.configPath, 'utf8');
     mode = fs.statSync(params.configPath).mode & 0o777;
   } catch {
-    return { status: OpenClawConfigSelfHealStatus.Skipped, reason: 'missing-config' };
+    return { status: OpenClawConfigSelfHealStatus.Skipped, reason: OpenClawConfigSelfHealSkipReason.MissingConfig };
   }
 
   const runner = params.runner ?? runStartupMigration;
@@ -184,7 +194,13 @@ export async function healOpenClawConfigUnrecognizedKeys(params: {
   };
 
   const before = await validate();
-  if (!before) return { status: OpenClawConfigSelfHealStatus.Skipped, reason: 'unparseable-validate-output' };
+  // Check even valid/unparseable results: later repair stages must not migrate
+  // a concurrent replacement that was never included in the full snapshot.
+  assertOwnedRepairPath(params.stateDir, params.configPath);
+  if (fs.readFileSync(params.configPath, 'utf8') !== raw) {
+    return { status: OpenClawConfigSelfHealStatus.Skipped, reason: OpenClawConfigSelfHealSkipReason.ConfigChanged };
+  }
+  if (!before) return { status: OpenClawConfigSelfHealStatus.Skipped, reason: OpenClawConfigSelfHealSkipReason.InvalidValidationOutput };
   if (before.valid) return { status: OpenClawConfigSelfHealStatus.Valid };
 
   let config: Record<string, unknown>;
@@ -201,11 +217,6 @@ export async function healOpenClawConfigUnrecognizedKeys(params: {
   if (removed.length === 0) {
     return { status: OpenClawConfigSelfHealStatus.Invalid, removed, issues: before.issues };
   }
-  // A concurrent config sync may have rewritten the file while the CLI ran.
-  if (fs.readFileSync(params.configPath, 'utf8') !== raw) {
-    return { status: OpenClawConfigSelfHealStatus.Skipped, reason: 'config-changed' };
-  }
-
   const stamp = (params.now ?? new Date()).toISOString().replace(/[:.]/g, '-');
   const backupPath = `${params.configPath}.before-self-heal-${stamp}`;
   fs.writeFileSync(backupPath, raw, { flag: 'wx', mode: 0o600 });

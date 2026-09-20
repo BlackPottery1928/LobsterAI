@@ -10,6 +10,9 @@ import {
   type OpenClawRepairSnapshotManifest,
 } from '../../shared/openclawEngine/repair';
 import { isMissingUnaliasedPluginPath, isPreviousManagedPluginPath } from './openclawPluginRepairPaths';
+import { assertOwnedRepairPath } from './openclawRepairPaths';
+
+export { assertOwnedRepairPath } from './openclawRepairPaths';
 
 type Config = Record<string, unknown>;
 export interface RepairInstallRecord {
@@ -50,27 +53,6 @@ function readConfig(filePath: string): Config {
   const value: unknown = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected an OpenClaw config object.');
   return value as Config;
-}
-
-/** Never follow a symlink, hard link, or external custom database into a repair. */
-export function assertOwnedRepairPath(stateDir: string, filePath: string): void {
-  const relative = path.relative(path.resolve(stateDir), path.resolve(filePath));
-  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error(`Repair path is outside the OpenClaw state directory: ${filePath}`);
-  }
-  let current = path.resolve(stateDir);
-  for (const part of relative.split(path.sep)) {
-    current = path.join(current, part);
-    try {
-      const stat = fs.lstatSync(current);
-      if (stat.isSymbolicLink() || (stat.isFile() && stat.nlink !== 1)) {
-        throw new Error(`Repair refuses an aliased path: ${current}`);
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-      throw error;
-    }
-  }
 }
 
 function checkDatabase(db: DatabaseSync): void {

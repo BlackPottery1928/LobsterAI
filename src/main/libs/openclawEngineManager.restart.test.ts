@@ -28,8 +28,6 @@ interface SupervisorInternals {
   gatewayProcess: ChildProcess | null;
   gatewayRecentOutput: WeakMap<ChildProcess, string[]>;
   gatewayRestartAttempt: number;
-  configSelfHealPending: boolean;
-  configSelfHealRestartUsed: boolean;
   gatewayRestartTimer: ReturnType<typeof setTimeout> | null;
   startGatewayPromise: Promise<OpenClawEngineStatus> | null;
   shutdownRequested: boolean;
@@ -73,8 +71,6 @@ function makeSupervisor() {
     gatewayRestartTimer: null,
     gatewayRestartWait: null,
     gatewayRestartAttempt: 0,
-    configSelfHealPending: false,
-    configSelfHealRestartUsed: false,
     gatewayLifecycleGeneration: 0,
     shutdownRequested: false,
     gatewayPort: 18789,
@@ -542,23 +538,8 @@ describe('OpenClaw gateway restart supervision', () => {
     '[stderr] Run "openclaw doctor --fix" to repair, then retry.',
   ];
 
-  test('restarts once to remove unrecognized config keys before reporting invalid configuration', async () => {
+  test('names rejected keys and waits for explicit repair without restarting', () => {
     const { manager, internals, child, phases } = makeSupervisor();
-    const start = vi.spyOn(manager, 'startGateway').mockResolvedValue(manager.getStatus());
-    internals.gatewayRecentOutput.set(child, unrecognizedKeyExit);
-    child.exitCode = 78;
-    closeChild(child, 78);
-
-    expect(internals.configSelfHealPending).toBe(true);
-    expect(internals.configSelfHealRestartUsed).toBe(true);
-    expect(phases).toEqual([OpenClawEnginePhase.Starting]);
-    await vi.advanceTimersByTimeAsync(3_000);
-    expect(start).toHaveBeenCalledWith('auto-restart-after-crash');
-  });
-
-  test('names the rejected keys once the self-heal restart has been used', () => {
-    const { manager, internals, child, phases } = makeSupervisor();
-    internals.configSelfHealRestartUsed = true;
     internals.gatewayRecentOutput.set(child, unrecognizedKeyExit);
     child.exitCode = 78;
     closeChild(child, 78);
@@ -569,12 +550,10 @@ describe('OpenClaw gateway restart supervision', () => {
       'session.maintenance: Unrecognized key: "rotateBytes"',
       'cron: Unrecognized key: "store"',
     ].join('\n'));
-    // A manual retry still removes the keys first.
-    expect(internals.configSelfHealPending).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  test('does not spend a self-heal restart on invalid configuration it cannot repair', () => {
+  test('reports invalid plugin paths without an automatic repair restart', () => {
     const { manager, internals, child, phases } = makeSupervisor();
     internals.gatewayRecentOutput.set(child, [
       '[stderr] Gateway failed to start: Invalid config at /state/openclaw.json:',
@@ -585,8 +564,6 @@ describe('OpenClaw gateway restart supervision', () => {
 
     expect(phases).toEqual([OpenClawEnginePhase.Error]);
     expect(manager.getStatus().message).toContain('plugins.load.paths: plugin: plugin path not found');
-    expect(internals.configSelfHealPending).toBe(false);
-    expect(internals.configSelfHealRestartUsed).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
   });
 

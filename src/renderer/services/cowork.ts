@@ -94,6 +94,7 @@ import {
 import { i18nService } from './i18n';
 import { restoreNativeQuestionPermissions } from './nativeQuestionRecovery';
 import { reportOnboardingAction } from './onboardingAnalytics';
+import { resolveOpenClawRepairHistoryWarning } from './openclawRepair';
 
 const STREAM_ERROR_DUPLICATE_WINDOW_MS = 10_000;
 
@@ -2408,6 +2409,20 @@ class CoworkService {
     // covers Quick Repair. Gateway phase changes are not repair completion.
     const repairPromise = Promise.resolve().then(async () => {
       const result = await engineApi.repairGatewayState();
+      const historyWarning = result && resolveOpenClawRepairHistoryWarning(result);
+      if (historyWarning) {
+        window.dispatchEvent(new CustomEvent('app:showToast', {
+          detail: {
+            message: historyWarning,
+            actionLabel: result.backupPath ? i18nService.t('openClawRepairViewBackup') : undefined,
+            onAction: result.backupPath ? () => {
+              void window.electron.shell.showItemInFolder(result.backupPath!).catch(error => {
+                console.error('[Cowork] Failed to reveal repair backup:', error);
+              });
+            } : undefined,
+          },
+        }));
+      }
       if (result?.status) {
         this.notifyOpenClawStatus(result.status);
       }

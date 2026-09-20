@@ -12,7 +12,6 @@ import {
   LegacySessionMigrationWarningCode,
   listLegacySessionStorePaths,
   migrateLegacySessionStorageWithDoctor,
-  preflightLegacySessionStores,
 } from './openclawSessionLegacyMigration';
 
 let tempDir = '';
@@ -138,48 +137,20 @@ describe('openclawSessionLegacyMigration', () => {
     expect(listLegacySessionStorePaths(stateDir)).toEqual([sharedPath, mainPath, workerPath]);
   });
 
-  test('preflight keeps readable stores, strips a BOM and sets damaged stores aside', () => {
-    const now = new Date('2026-09-18T13:49:48.000Z');
-    const validPath = path.join(stateDir, 'agents', 'main', 'sessions', 'sessions.json');
-    const bomPath = path.join(stateDir, 'agents', 'bom', 'sessions', 'sessions.json');
-    const truncatedPath = path.join(stateDir, 'agents', 'worker', 'sessions', 'sessions.json');
-    const arrayPath = path.join(stateDir, 'sessions', 'sessions.json');
-    writeFile(validPath, '{"agent:main:1":{"sessionId":"1"}}');
-    writeFile(bomPath, '\uFEFF{"agent:bom:1":{"sessionId":"2"}}');
-    writeFile(truncatedPath, '\u0000\u0000{"agent:worker:1":');
-    writeFile(arrayPath, '[]');
-
-    const result = preflightLegacySessionStores(listLegacySessionStorePaths(stateDir), now);
-
-    expect(result).toEqual({ repaired: [bomPath], quarantined: [arrayPath, truncatedPath] });
-    expect(fs.readFileSync(validPath, 'utf8')).toBe('{"agent:main:1":{"sessionId":"1"}}');
-    expect(fs.readFileSync(bomPath, 'utf8')).toBe('{"agent:bom:1":{"sessionId":"2"}}');
-    expect(fs.readFileSync(`${truncatedPath}.unreadable-2026-09-18T13-49-48-000Z`, 'utf8'))
-      .toBe('\u0000\u0000{"agent:worker:1":');
-    expect(fs.readFileSync(`${arrayPath}.unreadable-2026-09-18T13-49-48-000Z`, 'utf8')).toBe('[]');
-    expect(listLegacySessionStorePaths(stateDir)).toEqual([bomPath, validPath]);
-  });
-
-  test('a damaged store no longer blocks migration of the others', async () => {
-    const validPath = path.join(stateDir, 'agents', 'main', 'sessions', 'sessions.json');
+  test('normal migration preserves an unreadable store and reports the failure for explicit repair', async () => {
     const brokenPath = path.join(stateDir, 'agents', 'worker', 'sessions', 'sessions.json');
-    writeFile(validPath);
     writeFile(brokenPath, '\uFEFF\uFEFFnot json');
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const runner = vi.fn<LegacySessionMigrationRunner>().mockImplementation(async () => {
-      fs.rmSync(validPath);
-      return { code: 0, stdout: '{}', stderr: '' };
+    const runner = vi.fn<LegacySessionMigrationRunner>().mockResolvedValue({
+      code: 1, stdout: '', stderr: 'store_unreadable',
     });
 
     const result = await migrateLegacySessionStorageWithDoctor({
       stateDir, configPath, runtimeRoot, electronNodeRuntimePath: process.execPath, env: {}, runner,
     });
 
-    expect(result).toEqual({ status: 'migrated', code: 0, migratedPaths: [validPath] });
-    expect(runner).toHaveBeenCalledOnce();
-    expect(fs.readdirSync(path.dirname(brokenPath))).toEqual([
-      expect.stringMatching(/^sessions\.json\.unreadable-/),
-    ]);
+    expect(result.status).toBe('failed');
+    expect(fs.readFileSync(brokenPath, 'utf8')).toBe('\uFEFF\uFEFFnot json');
+    expect(fs.readdirSync(path.dirname(brokenPath))).toEqual(['sessions.json']);
   });
 
   test('runs official doctor with the same state and config then verifies migration', async () => {

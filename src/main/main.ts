@@ -511,6 +511,7 @@ import {
   migrateLegacyOpenClawPluginInstalls,
   OpenClawPluginInstallMigrationStatus,
 } from './libs/openclawPluginInstallMigration';
+import { readOpenClawRepairQuarantinedStoreCount } from './libs/openclawRepairPreflight';
 import { collectReferencedEnvVarNames, pickReferencedSecretEnvVars } from './libs/openclawSecretEnv';
 import {
   getOpenClawTokenProxyPort,
@@ -3308,6 +3309,7 @@ type OpenClawGatewayRepairResult = {
   status?: OpenClawEngineStatus;
   originalPath: string;
   backupPath?: string;
+  quarantinedSessionStoreCount?: number;
   error?: string;
   errorCode?: OpenClawGatewayRepairErrorCode;
   recoverable?: boolean;
@@ -3465,6 +3467,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         originalPath,
         backupPath,
         error: success ? undefined : status.message || 'Failed to restart OpenClaw gateway after repair.',
+        quarantinedSessionStoreCount: readOpenClawRepairQuarantinedStoreCount(backupPath),
         failedStage: success ? undefined : repairStage,
       };
     } catch (error) {
@@ -3480,6 +3483,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         failedStage,
         failurePath: error instanceof OpenClawRepairFailure ? error.failurePath : undefined,
         errorCode: failedStage === OpenClawRepairStage.Snapshot ? OpenClawGatewayRepairErrorCode.SnapshotFailed : undefined,
+        quarantinedSessionStoreCount: readOpenClawRepairQuarantinedStoreCount(backupPath),
       };
     } finally {
       openClawManualRepairActive = false;

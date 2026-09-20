@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import {
   healOpenClawConfigUnrecognizedKeys,
+  OpenClawConfigSelfHealSkipReason,
   OpenClawConfigSelfHealStatus,
   parseOpenClawConfigValidateOutput,
   removeUnrecognizedOpenClawConfigKeys,
@@ -177,16 +178,16 @@ describe('healOpenClawConfigUnrecognizedKeys', () => {
     expect(fs.readdirSync(stateDir)).toEqual(['openclaw.json']);
   });
 
-  test('does not overwrite a config that changed while the CLI was validating it', async () => {
+  test.each([false, true])('refuses a concurrent config replacement even when validation is valid=%s', async valid => {
     fs.writeFileSync(configPath, JSON.stringify(retiredConfig()));
     const synced = `${JSON.stringify({ gateway: { mode: 'local' }, cron: { enabled: true } })}\n`;
     const runner: StartupMigrationRunner = async () => {
       fs.writeFileSync(configPath, synced);
-      return { code: 1, stderr: '', stdout: JSON.stringify({ valid: false, issues: retiredIssues }) };
+      return { code: valid ? 0 : 1, stderr: '', stdout: JSON.stringify({ valid, issues: valid ? [] : retiredIssues }) };
     };
 
     await expect(healWith(runner)).resolves.toEqual({
-      status: OpenClawConfigSelfHealStatus.Skipped, reason: 'config-changed',
+      status: OpenClawConfigSelfHealStatus.Skipped, reason: OpenClawConfigSelfHealSkipReason.ConfigChanged,
     });
     expect(fs.readFileSync(configPath, 'utf8')).toBe(synced);
     expect(fs.readdirSync(stateDir)).toEqual(['openclaw.json']);
@@ -195,18 +196,18 @@ describe('healOpenClawConfigUnrecognizedKeys', () => {
   test('skips without a bundled CLI, a config file or a parseable report', async () => {
     const neverRuns: StartupMigrationRunner = async () => { throw new Error('must not run'); };
     await expect(healWith(neverRuns)).resolves.toEqual({
-      status: OpenClawConfigSelfHealStatus.Skipped, reason: 'missing-config',
+      status: OpenClawConfigSelfHealStatus.Skipped, reason: OpenClawConfigSelfHealSkipReason.MissingConfig,
     });
 
     fs.writeFileSync(configPath, JSON.stringify(retiredConfig()));
     const silent: StartupMigrationRunner = async () => ({ code: 1, stderr: '', stdout: '' });
     await expect(healWith(silent)).resolves.toEqual({
-      status: OpenClawConfigSelfHealStatus.Skipped, reason: 'unparseable-validate-output',
+      status: OpenClawConfigSelfHealStatus.Skipped, reason: OpenClawConfigSelfHealSkipReason.InvalidValidationOutput,
     });
 
     fs.rmSync(path.join(runtimeRoot, 'openclaw.mjs'));
     await expect(healWith(neverRuns)).resolves.toEqual({
-      status: OpenClawConfigSelfHealStatus.Skipped, reason: 'missing-openclaw-cli',
+      status: OpenClawConfigSelfHealStatus.Skipped, reason: OpenClawConfigSelfHealSkipReason.MissingCli,
     });
   });
 });

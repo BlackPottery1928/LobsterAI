@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { OpenClawGatewayRepairErrorCode } from '../../shared/openclawEngine/constants';
 import { OpenClawRepairStage } from '../../shared/openclawEngine/repair';
 import { i18nService } from './i18n';
-import { resolveOpenClawRepairError } from './openclawRepair';
+import { resolveOpenClawRepairError, resolveOpenClawRepairHistoryWarning } from './openclawRepair';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -19,6 +19,15 @@ test('shows the failure stage, source and diagnostic location without implying a
 
 test('older repair responses retain their actual error', () => {
   expect(resolveOpenClawRepairError({ success: false, error: 'Existing repair error' })).toBe('Existing repair error');
+});
+
+test('history isolation is visible even when the gateway starts, without warning on ordinary repairs', () => {
+  vi.spyOn(i18nService, 't').mockImplementation(key => `${key} {count}`);
+  expect(resolveOpenClawRepairHistoryWarning({ success: true, quarantinedSessionStoreCount: 2 }))
+    .toBe('openClawRepairHistoryQuarantined 2');
+  expect(resolveOpenClawRepairHistoryWarning({ success: true })).toBeUndefined();
+  expect(resolveOpenClawRepairError({ success: false, quarantinedSessionStoreCount: 1 }))
+    .toContain('openClawRepairHistoryQuarantined 1');
 });
 
 test('lock recovery failures state that backup and later repairs have not run', () => {
