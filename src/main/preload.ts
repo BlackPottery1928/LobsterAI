@@ -46,6 +46,7 @@ import {
   BrowserIpc,
   type BrowserRuntimeProfile,
 } from '../shared/browserWebAccess/constants';
+import type { BrowserPasskeyRequest } from '../shared/browserWebAccess/passkeys';
 import { ClipboardIpc } from '../shared/clipboard/constants';
 import { BACKGROUND_JOB_EVENT_CHANNEL, type CoworkBackgroundJobsEvent } from '../shared/cowork/backgroundJobs';
 import type { CoworkBrowserAnnotationMessageBatch } from '../shared/cowork/browserAnnotations';
@@ -420,6 +421,8 @@ contextBridge.exposeInMainWorld('electron', {
         request: AgentBrowserCredentialSavePromptRequest,
       ): Promise<AgentBrowserHostResponse> =>
         ipcRenderer.invoke(BrowserIpc.ResolveCredentialSavePrompt, request),
+      resolvePasskey: (request: BrowserPasskeyRequest): Promise<AgentBrowserHostResponse> =>
+        ipcRenderer.invoke(BrowserIpc.ResolvePasskey, request),
       onHostState: (callback: (event: AgentBrowserHostStateEvent) => void) => {
         const handler = (_event: Electron.IpcRendererEvent, hostEvent: AgentBrowserHostStateEvent) =>
           callback(hostEvent);

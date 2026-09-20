@@ -45,6 +45,7 @@ import type {
   BrowserDiagnosticResult,
   BrowserRuntimeProfile,
 } from '../../shared/browserWebAccess/constants';
+import type { BrowserPasskeyRequest } from '../../shared/browserWebAccess/passkeys';
 import type {
   BackgroundJobKillResult,
   CoworkBackgroundJob,
@@ -939,6 +940,7 @@ interface IElectronAPI {
         request: AgentBrowserCredentialSavePromptRequest,
       ) => Promise<AgentBrowserHostResponse>;
       onHostState: (callback: (event: AgentBrowserHostStateEvent) => void) => () => void;
+      resolvePasskey: (request: BrowserPasskeyRequest) => Promise<AgentBrowserHostResponse>;
       credentials: {
         getAvailability: () => Promise<BrowserCredentialAvailabilityResponse>;
         list: () => Promise<BrowserCredentialListResponse>;

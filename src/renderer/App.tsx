@@ -10,6 +10,7 @@ import {
   AppUpdateStatus,
   isManualDownloadUrl,
 } from '../shared/appUpdate/constants';
+import { BrowserPasskeyUiEvent } from '../shared/browserWebAccess/passkeys';
 import { OpenClawQuestion } from '../shared/cowork/openclawQuestion';
 import {
   LibraryNavigationEvent,
@@ -1827,6 +1828,12 @@ const App: React.FC = () => {
       }
     };
   }, [dispatch]);
+
+  useEffect(() => {
+    const openBrowserSettings = () => handleShowSettings({ initialTab: 'browserWebAccess' });
+    window.addEventListener(BrowserPasskeyUiEvent.OpenBrowserSettings, openBrowserSettings);
+    return () => window.removeEventListener(BrowserPasskeyUiEvent.OpenBrowserSettings, openBrowserSettings);
+  }, [handleShowSettings]);
 
   // 监听托盘菜单打开设置的 IPC 事件
   useEffect(() => {
