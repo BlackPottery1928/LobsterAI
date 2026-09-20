@@ -47,11 +47,6 @@ import type {
 } from '../../shared/browserWebAccess/constants';
 import type { BrowserPasskeyRequest } from '../../shared/browserWebAccess/passkeys';
 import type {
-  BackgroundJobKillResult,
-  CoworkBackgroundJob,
-  CoworkBackgroundJobsEvent,
-} from '../../shared/cowork/backgroundJobs';
-import type {
   BrowserAnnotationRect,
   BrowserAnnotationScreenshotRef,
   CoworkBrowserAnnotationMessageBatch,
@@ -1219,10 +1214,6 @@ interface IElectronAPI {
       parentSessionId: string;
       runId: string;
     }) => Promise<{ success: boolean; deleted?: boolean; error?: string }>;
-    listBackgroundJobs: (sessionId: string) => Promise<{ success: boolean; jobs: CoworkBackgroundJob[]; error?: string }>;
-    killBackgroundJob: (options: { sessionId: string; jobId: string }) => Promise<{ success: boolean; error?: string } & Partial<BackgroundJobKillResult>>;
-    clearSettledBackgroundJobs: (sessionId: string) => Promise<{ success: boolean; jobs: CoworkBackgroundJob[]; error?: string }>;
-    onBackgroundJobsEvent: (listener: (event: CoworkBackgroundJobsEvent) => void) => () => void;
     respondToPermission: (options: {
       requestId: string;
       result: CoworkPermissionResult;
