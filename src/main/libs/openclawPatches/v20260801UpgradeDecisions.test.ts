@@ -56,6 +56,7 @@ const RETAINED_PATCHES = [
   'openclaw-windows-process-identity.patch',
   'openclaw-workspace-attestation-quarantine.patch',
   'openclaw-workspace-setup-recovery.patch',
+  'zz-openclaw-channel-scheduling-authority.patch',
   'zz-openclaw-error-detail-preview.patch',
   'zz-openclaw-lock-owner-recovery.patch',
   'zz-openclaw-marketplace-clone-retry.patch',
