@@ -10,6 +10,9 @@ import type {
 } from '../../shared/activity/constants';
 import type { AppUpdateActiveWorkloads, AppUpdateCheckResult, AppUpdateRuntimeState } from '../../shared/appUpdate/constants';
 import type { MarkdownFileBridge } from '../../shared/artifactPreview/markdownEditing';
+import type { ReviewScopeRequest } from '../../shared/artifactPreview/reviewScopes';
+import type { ReviewSourceRequest, ReviewSourceResponse } from '../../shared/artifactPreview/reviewSource';
+import type { ResolvedArtifactOutput } from '../../shared/artifactPreview/workspace';
 import type {
   AsrRealtimeSessionRequest,
   AsrRealtimeSessionResult,
@@ -42,6 +45,7 @@ import type {
   BrowserDiagnosticResult,
   BrowserRuntimeProfile,
 } from '../../shared/browserWebAccess/constants';
+import type { BrowserPasskeyRequest } from '../../shared/browserWebAccess/passkeys';
 import type {
   BrowserAnnotationRect,
   BrowserAnnotationScreenshotRef,
@@ -173,6 +177,7 @@ import type {
   SkinGetActiveResponse,
   SkinListResponse,
 } from '../../shared/skin/types';
+import type { SubscriptionTrialBridge } from '../../shared/subscriptionTrial/constants';
 import type { CoworkTempDirPreview } from './cowork';
 interface ApiResponse {
   ok: boolean;
@@ -931,6 +936,7 @@ interface IElectronAPI {
         request: AgentBrowserCredentialSavePromptRequest,
       ) => Promise<AgentBrowserHostResponse>;
       onHostState: (callback: (event: AgentBrowserHostStateEvent) => void) => () => void;
+      resolvePasskey: (request: BrowserPasskeyRequest) => Promise<AgentBrowserHostResponse>;
       credentials: {
         getAvailability: () => Promise<BrowserCredentialAvailabilityResponse>;
         list: () => Promise<BrowserCredentialListResponse>;
@@ -1291,6 +1297,10 @@ interface IElectronAPI {
     onSessionModelOverrideChanged?: (
       callback: (data: { sessionId: string; modelOverride: string }) => void,
     ) => () => void;
+  };
+  workspaceReview: {
+    read: (input: ReviewScopeRequest) => Promise<ResolvedArtifactOutput | null>;
+    source: (input: ReviewSourceRequest) => Promise<ReviewSourceResponse | null>;
   };
   dialog: {
     selectDirectory: () => Promise<{ success: boolean; path: string | null }>;
@@ -1926,6 +1936,7 @@ interface IElectronAPI {
       error?: string;
     }>;
     runManually: (id: string) => Promise<{ success: boolean; error?: string }>;
+    resendWeixinReport: (taskId: string, runId: string) => Promise<{ success: boolean; error?: string }>;
     stop: (id: string) => Promise<{ success: boolean; error?: string }>;
     listRuns: (
       taskId: string,
@@ -1991,6 +2002,7 @@ interface IElectronAPI {
       error?: string;
     }>;
   };
+  subscriptionTrial: SubscriptionTrialBridge;
   activity: {
     getSlot: (
       input: ActivityHostGetSlotInput,
@@ -2010,6 +2022,7 @@ interface IElectronAPI {
       success: boolean;
       user?: import('../store/slices/authSlice').UserProfile;
       quota?: import('../store/slices/authSlice').UserQuota;
+      purchaseOffer?: import('../store/slices/authSlice').LowCreditPurchaseOffer | null;
       enterpriseContext?: EnterpriseAccountContext | null;
       error?: string;
     }>;
@@ -2020,11 +2033,13 @@ interface IElectronAPI {
       cachedUser?: import('../store/slices/authSlice').UserProfile | null;
       user?: import('../store/slices/authSlice').UserProfile;
       quota?: import('../store/slices/authSlice').UserQuota | null;
+      purchaseOffer?: import('../store/slices/authSlice').LowCreditPurchaseOffer | null;
       enterpriseContext?: EnterpriseAccountContext | null;
     }>;
     getQuota: () => Promise<{
       success: boolean;
       quota?: import('../store/slices/authSlice').UserQuota;
+      purchaseOffer?: import('../store/slices/authSlice').LowCreditPurchaseOffer | null;
       enterpriseContext?: EnterpriseAccountContext | null;
     }>;
     logout: () => Promise<{ success: boolean }>;

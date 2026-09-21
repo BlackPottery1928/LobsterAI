@@ -10,6 +10,7 @@ import {
   BrowserCredentialLoginTool,
   BrowserCredentialMcpServer,
 } from '../../shared/browserCredentials/constants';
+import { WeixinPlugin } from '../../shared/im/weixin';
 import { OpenClawSkillReviewMode } from '../../shared/openclawEngine/constants';
 import { OpenClawProviderId, ProviderName } from '../../shared/providers';
 import { DEFAULT_DISCORD_OPENCLAW_CONFIG, DEFAULT_QQ_CONFIG, DiscordDmPolicy } from '../im/types';
@@ -3454,6 +3455,36 @@ describe('OpenClawConfigSync runtime config output', () => {
     const env = sync.collectSecretEnvVars();
     expect(env).not.toHaveProperty('LOBSTER_NIM_TOKEN');
     expect(env.LOBSTER_NIM_TOKEN_1).toBe('work-token');
+  });
+
+  test('keeps unused Weixin disabled across config rewrites and cold starts, with temporary QR activation', async () => {
+    let enabled = false;
+    let qrActive = false;
+    const deps = {
+      getWeixinConfig: () => ({ enabled, accountId: 'saved-account', dmPolicy: 'open', allowFrom: [] }),
+      isWeixinQrLoginActive: () => qrActive,
+      getUserPlugins: () => [{ pluginId: WeixinPlugin.Id, enabled: true }],
+    };
+    const sync = await createSync(deps);
+    const read = () => JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    sync.sync('unused-weixin');
+    expect(read().plugins.entries[WeixinPlugin.Id].enabled).toBe(false);
+    qrActive = true;
+    sync.sync('qr-login');
+    expect(read().plugins.entries[WeixinPlugin.Id].enabled).toBe(true);
+    expect(read().channels[WeixinPlugin.Id].enabled).toBe(false);
+    enabled = true;
+    qrActive = false;
+    sync.sync('login-complete');
+    expect(read().plugins.entries[WeixinPlugin.Id].enabled).toBe(true);
+    expect(read().channels[WeixinPlugin.Id].enabled).toBe(true);
+    enabled = false;
+    sync.sync('disable-weixin');
+    expect(read().plugins.entries[WeixinPlugin.Id].enabled).toBe(false);
+    const restarted = await createSync(deps);
+    restarted.sync('cold-start');
+    expect(read().plugins.entries[WeixinPlugin.Id].enabled).toBe(false);
+    expect(read().channels[WeixinPlugin.Id].enabled).toBe(false);
   });
 
   test('writes weixin channel config using dmPolicy and allowFrom instead of unsupported accountId', async () => {

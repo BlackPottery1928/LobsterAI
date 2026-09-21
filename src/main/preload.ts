@@ -13,6 +13,8 @@ import { AppSettingsIpc } from '../shared/appSettings/constants';
 import { AppUpdateIpc } from '../shared/appUpdate/constants';
 import { ArtifactPreviewIpc } from '../shared/artifactPreview/constants';
 import { MarkdownFileIpc, type SaveMarkdownFileRequest } from '../shared/artifactPreview/markdownEditing';
+import { ReviewIpc, type ReviewScopeRequest } from '../shared/artifactPreview/reviewScopes';
+import type { ReviewSourceRequest } from '../shared/artifactPreview/reviewSource';
 import {
   AsrIpcChannel,
   type AsrRealtimeSessionRequest,
@@ -44,6 +46,7 @@ import {
   BrowserIpc,
   type BrowserRuntimeProfile,
 } from '../shared/browserWebAccess/constants';
+import type { BrowserPasskeyRequest } from '../shared/browserWebAccess/passkeys';
 import { ClipboardIpc } from '../shared/clipboard/constants';
 import type { CoworkBrowserAnnotationMessageBatch } from '../shared/cowork/browserAnnotations';
 import type {
@@ -128,6 +131,7 @@ import type {
   SkinGetActiveResponse,
   SkinListResponse,
 } from '../shared/skin/types';
+import { SubscriptionTrialIpc } from '../shared/subscriptionTrial/constants';
 import { NimQrLoginIpc } from './ipcHandlers/nimQrLogin';
 import { OpenClawSessionIpc } from './openclawSession/constants';
 import { OpenClawSessionPolicyIpc } from './openclawSessionPolicy/constants';
@@ -417,6 +421,8 @@ contextBridge.exposeInMainWorld('electron', {
         request: AgentBrowserCredentialSavePromptRequest,
       ): Promise<AgentBrowserHostResponse> =>
         ipcRenderer.invoke(BrowserIpc.ResolveCredentialSavePrompt, request),
+      resolvePasskey: (request: BrowserPasskeyRequest): Promise<AgentBrowserHostResponse> =>
+        ipcRenderer.invoke(BrowserIpc.ResolvePasskey, request),
       onHostState: (callback: (event: AgentBrowserHostStateEvent) => void) => {
         const handler = (_event: Electron.IpcRendererEvent, hostEvent: AgentBrowserHostStateEvent) =>
           callback(hostEvent);
@@ -811,6 +817,10 @@ contextBridge.exposeInMainWorld('electron', {
       return () => ipcRenderer.removeListener(CoworkIpcChannel.OpenSessionFromNotification, handler);
     },
   },
+  workspaceReview: {
+    read: (input: ReviewScopeRequest) => ipcRenderer.invoke(ReviewIpc.Read, input),
+    source: (input: ReviewSourceRequest) => ipcRenderer.invoke(ReviewIpc.Source, input),
+  },
   dialog: {
     selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
     selectFile: (options?: {
@@ -1082,6 +1092,9 @@ contextBridge.exposeInMainWorld('electron', {
     openSystemNotificationSettings: () =>
       ipcRenderer.invoke(AppIpcChannel.OpenSystemNotificationSettings),
   },
+  subscriptionTrial: {
+    status: () => ipcRenderer.invoke(SubscriptionTrialIpc.Status),
+  },
   activity: {
     getSlot: (input: ActivityHostGetSlotInput) =>
       ipcRenderer.invoke(ActivityIpc.HostGetSlot, input),
@@ -1291,6 +1304,8 @@ contextBridge.exposeInMainWorld('electron', {
 
     // Execution
     runManually: (id: string) => ipcRenderer.invoke(ScheduledTaskIpc.RunManually, id),
+    resendWeixinReport: (taskId: string, runId: string) =>
+      ipcRenderer.invoke(ScheduledTaskIpc.ResendWeixinReport, taskId, runId),
     stop: (id: string) => ipcRenderer.invoke(ScheduledTaskIpc.Stop, id),
 
     // Run history
