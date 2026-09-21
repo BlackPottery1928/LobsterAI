@@ -20,6 +20,7 @@ const RETAINED_PATCHES = [
   'openclaw-compaction-summary-section-order.patch',
   'openclaw-cron-preparation-failure-state.patch',
   'openclaw-cron-skip-missed-jobs.patch',
+  'openclaw-device-identity-preservation.patch',
   'openclaw-gateway-fast-path-rejection-handler.patch',
   'openclaw-im-bound-agent-run-cwd.patch',
   'openclaw-inferred-plugin-install-allowlist.patch',
@@ -96,6 +97,10 @@ describe('OpenClaw v2026.8.1 upgrade decisions', () => {
     ]);
     expectPatchContains('openclaw-cli-startup-metadata-windows-timeout.patch', [
       'process.platform === "win32" ? 300_000 : 120_000',
+    ]);
+    expectPatchContains('openclaw-device-identity-preservation.patch', [
+      'classifyCanonicalRow(canonical, snapshot.identity) === "different"',
+      'canonical SQLite identity remains authoritative',
     ]);
     expectPatchContains('openclaw-plugin-archive-windows-timeout.patch', [
       'DEFAULT_PLUGIN_ARCHIVE_TIMEOUT_MS',
