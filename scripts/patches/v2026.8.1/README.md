@@ -341,3 +341,50 @@ All 44 patches apply successfully to a clean pinned checkout and on reapplicatio
 The isolated Gateway proof uses the rebuilt startup helper with the existing
 mac-arm64 Gateway payload; a full runtime rebuild, Windows package, actual app UI
 and provider request against the customer's environment have not been validated.
+
+## Scheduling from admitted IM conversations
+
+`zz-openclaw-channel-scheduling-authority.patch` adds the opt-in
+`cron.allowChannelScheduling` setting. LobsterAI enables it for fresh user turns
+that have already passed the IM channel's access policy. OpenClaw v2026.8.1
+ignores wildcard command owners, so the previous `ownerAllowFrom: ["*"]`
+integration did not expose the native `automations` tool to these conversations.
+The gateway RPC methods remain named `cron.*`.
+
+The patch admits a scheduling capability for the exact channel run. It uses the
+existing final executable tool surface and cron authority resolver, leaving
+explicit tool policies and other owner-only tools unchanged. Non-owner channel
+capabilities cannot acquire operator-turn authority. Missing senders, internal
+sources, heartbeats, room events, relayed inputs, spawned sessions and replayed
+turns remain excluded; the capability expires when its originating run settles.
+The setting is disabled by default outside LobsterAI. The `zz-` prefix places
+the patch after the existing cron schema patches.
+
+The built-in embedded executor must also bind that capability when constructing
+tools, as the Codex executor already does. Its resolver reads the completed tool
+capture at execution time, so scheduling stays unavailable until the final
+callable surface is known and retained tool callbacks cannot outlive the run.
+
+Creator grants and scheduling-only capability markers share process-local
+registries across the gateway bundle and plugin SDK chunks. Otherwise an SDK
+grant cannot be redeemed by the gateway, and a capability can lose its
+scheduling-only restriction when transported between module copies. Grant
+consumption stays single-use and gateway lifecycle resets revoke pending grants.
+
+Native creation also retains the active channel account when a model supplies
+an explicit recipient on that same channel. Explicit accounts and other channels
+remain unchanged, and no thread is inherited for an explicit recipient. Without
+this, a multi-account Feishu reminder can be created successfully but then try
+to send through the unconfigured `default` account.
+
+This belongs in a version-scoped patch because capability admission is internal
+to OpenClaw's reply runner; marking every IM user as a global command owner would
+also expose unrelated administrative tools. When upgrading, remove this patch
+only after verifying equivalent channel scheduling admission and authority
+isolation. Rebuild the runtime and gateway bundle before validating or shipping.
+
+Regression coverage lives in the patch's admission, capability and schema tests.
+LobsterAI config-sync tests verify the opt-in and removal of the ineffective
+wildcard. Validate the complete flow with a real channel message, the Electron
+scheduled-task view, native `automations` calls, and the reminder's delivery to
+the originating channel account.

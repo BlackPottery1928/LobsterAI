@@ -311,12 +311,8 @@ const resolveModelDisplayName = (modelId: string, userModelName?: string): strin
 const MANAGED_OWNER_ALLOW_FROM = [
   // Internal `chat.send` turns identify the sender as bare `gateway-client`.
   // Prefixing with `webchat:` does not round-trip through owner resolution,
-  // so owner-only tools like `cron` never become available.
+  // so owner-only tools like `automations` never become available.
   'gateway-client',
-  // Native IM channel senders use their platform user ID (e.g. telegram:xxx),
-  // which would not match 'gateway-client'. Use wildcard so all senders that
-  // pass the per-channel allowFrom gate are also recognised as owners.
-  '*',
 ];
 
 const MANAGED_TOOL_DENY = ['web_search'] as const;
@@ -2518,6 +2514,9 @@ export class OpenClawConfigSync {
       },
       cron: {
         enabled: true,
+        // Channel-admitted users schedule with their current tool permissions
+        // without gaining global owner access. OpenClaw ignores owner wildcards.
+        allowChannelScheduling: true,
         skipMissedJobs: coworkConfig.skipMissedJobs === true,
         sessionRetention: '7d',
       },
