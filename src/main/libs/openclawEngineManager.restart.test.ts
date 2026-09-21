@@ -556,6 +556,43 @@ describe('OpenClaw gateway restart supervision', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  // Output of the v2026.8.1 gateway for keys it has no startup migration for.
+  const unrecognizedKeyExit = [
+    '[stderr] 2026-09-18T23:16:36.503+08:00 Gateway failed to start: Invalid config at /state/openclaw.json:',
+    '[stderr] openclaw.json:3 — session.maintenance: Unrecognized key: "rotateBytes"',
+    '[stderr] openclaw.json:5 — cron: Unrecognized key: "store"',
+    '[stderr] Run "openclaw doctor --fix" to repair, then retry.',
+  ];
+
+  test('names rejected keys and waits for explicit repair without restarting', () => {
+    const { manager, internals, child, phases } = makeSupervisor();
+    internals.gatewayRecentOutput.set(child, unrecognizedKeyExit);
+    child.exitCode = 78;
+    closeChild(child, 78);
+
+    expect(phases).toEqual([OpenClawEnginePhase.Error]);
+    expect(manager.getStatus().message).toBe([
+      'OpenClaw gateway startup stopped because openclaw.json is invalid. Repair the config or use Quick Repair before restarting.',
+      'session.maintenance: Unrecognized key: "rotateBytes"',
+      'cron: Unrecognized key: "store"',
+    ].join('\n'));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test('reports invalid plugin paths without an automatic repair restart', () => {
+    const { manager, internals, child, phases } = makeSupervisor();
+    internals.gatewayRecentOutput.set(child, [
+      '[stderr] Gateway failed to start: Invalid config at /state/openclaw.json:',
+      '[stderr] plugins.load.paths: plugin: plugin path not found: /old/resources/cfmind/third-party-extensions',
+    ]);
+    child.exitCode = 78;
+    closeChild(child, 78);
+
+    expect(phases).toEqual([OpenClawEnginePhase.Error]);
+    expect(manager.getStatus().message).toContain('plugins.load.paths: plugin: plugin path not found');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   test('retries failed spawns without waiting for an exit event that may never arrive', () => {
     const { internals, child, phases } = makeSupervisor();
     Object.defineProperty(child, 'pid', { value: undefined });

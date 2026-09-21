@@ -14,6 +14,11 @@ const stageMessages: Record<OpenClawRepairStage, string> = {
   [OpenClawRepairStage.Gateway]: 'openClawRepairGatewayFailed',
 };
 
+export function resolveOpenClawRepairHistoryWarning(result: OpenClawGatewayRepairResult): string | undefined {
+  const count = result.quarantinedSessionStoreCount ?? 0;
+  return count > 0 ? i18nService.t('openClawRepairHistoryQuarantined').replace('{count}', String(count)) : undefined;
+}
+
 export function resolveOpenClawRepairError(result: OpenClawGatewayRepairResult, includeBackupPath = true): string {
   if (result.errorCode === OpenClawGatewayRepairErrorCode.Busy) return i18nService.t('openClawRepairBusyError');
   if (result.errorCode === OpenClawGatewayRepairErrorCode.ConfigApplyPending) return i18nService.t('openClawRepairConfigApplyPendingError');
@@ -22,6 +27,7 @@ export function resolveOpenClawRepairError(result: OpenClawGatewayRepairResult, 
     stageKey ? i18nService.t(stageKey) : undefined,
     result.error?.trim() || (!stageKey ? i18nService.t('openClawRepairFailed') : undefined),
     result.failurePath ? i18nService.t('openClawRepairFailurePath').replace('{path}', () => result.failurePath!) : undefined,
+    resolveOpenClawRepairHistoryWarning(result),
     includeBackupPath && result.backupPath ? i18nService.t('openClawRepairFilesPath').replace('{path}', () => result.backupPath!) : undefined,
   ].filter(Boolean).join('\n');
 }
