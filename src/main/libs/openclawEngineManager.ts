@@ -32,7 +32,7 @@ import { getCodexHomeDir } from './openaiCodexAuth';
 import { migrateLegacyCronStorageWithDoctor } from './openclawCronLegacyMigration';
 import { getOpenClawDailyLogCandidates } from './openclawDailyLogs';
 import { readDreamingRecoverySummary } from './openclawDreamingRecovery';
-import { createDreamingStartupFailureCollector } from './openclawDreamingStartupFailure';
+import { createDreamingStartupFailureCollector, OPENCLAW_STARTUP_MIGRATION_REFUSAL } from './openclawDreamingStartupFailure';
 import { cleanupStaleGatewayLocks, GatewayLockCleanupAction } from './openclawGatewayLock';
 import { buildOpenClawGatewayShutdownBridge, spawnOpenClawGatewayProcess, stopOpenClawGatewayProcess } from './openclawGatewayProcess';
 import { cleanupStaleThirdPartyPluginsFromBundledDir, listLocalOpenClawExtensionIds,syncLocalOpenClawExtensionsIntoRuntime } from './openclawLocalExtensions';
@@ -70,7 +70,7 @@ const OPENCLAW_GATEWAY_MAX_OLD_SPACE_OPTION = `--max-old-space-size=${OPENCLAW_G
 const NODE_MAX_OLD_SPACE_RE = /(?:^|\s)--max-old-space-size(?:=|\s|$)/;
 const GATEWAY_RECENT_OUTPUT_LINE_LIMIT = 80;
 const OPENCLAW_PLUGIN_VERIFICATION_FAILURE = 'OpenClaw plugin verification failed; refusing to report the gateway ready.';
-const OPENCLAW_PLUGIN_VERIFICATION_DETAIL_LIMIT = 400;
+const OPENCLAW_TERMINAL_STARTUP_DETAIL_LIMIT = 400;
 const GATEWAY_PROBE_PATH = {
   Health: '/health',
   Healthz: '/healthz',
@@ -122,13 +122,15 @@ export const isOpenClawConfigStartupFailure = (text: string | null | undefined):
   return OPENCLAW_CONFIG_STARTUP_FAILURE_PATTERNS.some((pattern) => pattern.test(text));
 };
 
-export const extractOpenClawPluginVerificationFailure = (
+/** A terminal startup refusal printed by the gateway, plus only its own bullets. */
+const extractOpenClawTerminalStartupFailure = (
   text: string | null | undefined,
+  marker: string,
 ): string | null => {
   if (!text) return null;
   const lines = stripVTControlCharacters(text).split(/\r?\n/)
     .map(line => line.trim().replace(/^(?:\[[^\]\r\n]*\]\s*)+/, ''));
-  const failureIndex = lines.lastIndexOf(OPENCLAW_PLUGIN_VERIFICATION_FAILURE);
+  const failureIndex = lines.lastIndexOf(marker);
   if (failureIndex < 0) return null;
 
   // Only include this terminal failure's diagnostic bullets, not unrelated
@@ -139,10 +141,23 @@ export const extractOpenClawPluginVerificationFailure = (
     details.push(line);
   }
   const detail = details.join('\n');
-  return detail.length > OPENCLAW_PLUGIN_VERIFICATION_DETAIL_LIMIT
-    ? `${detail.slice(0, OPENCLAW_PLUGIN_VERIFICATION_DETAIL_LIMIT - 1)}…`
+  return detail.length > OPENCLAW_TERMINAL_STARTUP_DETAIL_LIMIT
+    ? `${detail.slice(0, OPENCLAW_TERMINAL_STARTUP_DETAIL_LIMIT - 1)}…`
     : detail;
 };
+
+export const extractOpenClawPluginVerificationFailure = (
+  text: string | null | undefined,
+): string | null => extractOpenClawTerminalStartupFailure(text, OPENCLAW_PLUGIN_VERIFICATION_FAILURE);
+
+/**
+ * The pinned runtime turns any startup-migration warning into this refusal
+ * and exits 1. Restarting replays the same migration, so it must not be
+ * retried automatically; the listed legacy sources need handling first.
+ */
+export const extractOpenClawStartupMigrationRefusal = (
+  text: string | null | undefined,
+): string | null => extractOpenClawTerminalStartupFailure(text, OPENCLAW_STARTUP_MIGRATION_REFUSAL);
 
 export const isOpenClawGatewayHeapOutOfMemory = (
   text: string | null | undefined,
@@ -2165,6 +2180,23 @@ export class OpenClawEngineManager extends EventEmitter {
           version: this.status.version,
           errorCode: OpenClawEngineErrorCode.PluginVerificationFailed,
           message: t('openClawPluginVerificationFailed', { error: pluginVerificationFailure }),
+          canRetry: true,
+        };
+        this.setStatus(this.gatewayStartupBlock);
+        return;
+      }
+
+      const migrationRefusal = this.gatewayReadyProcesses.has(child)
+        ? null : extractOpenClawStartupMigrationRefusal(recentOutput);
+      if (migrationRefusal) {
+        console.error(`${gwDiagTs()} gateway refused readiness because startup migrations did not complete cleanly; auto-restart suppressed`);
+        this.gatewayRestartAttempt = 0;
+        this.clearScheduledGatewayRestart();
+        this.gatewayStartupBlock = {
+          phase: OpenClawEnginePhase.Error,
+          version: this.status.version,
+          errorCode: OpenClawEngineErrorCode.StartupMigrationRefused,
+          message: t('openClawStartupMigrationRefused', { error: migrationRefusal }),
           canRetry: true,
         };
         this.setStatus(this.gatewayStartupBlock);
