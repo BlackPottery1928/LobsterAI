@@ -157,6 +157,19 @@ describe('OpenClawEngineManager startup runtime recovery', () => {
     expect(fs.existsSync(tarPath)).toBe(true);
   });
 
+  test('repair can resolve a stable gateway token before the first successful startup', () => {
+    const manager = new OpenClawEngineManager();
+    expect(manager.getGatewayToken()).toBeNull();
+
+    const token = manager.ensureGatewayToken();
+
+    expect(token).toMatch(/^[a-f0-9]{48}$/);
+    expect(manager.getGatewayToken()).toBe(token);
+    expect(manager.ensureGatewayToken()).toBe(token);
+    expect(fs.readFileSync(path.join(manager.getStateDir(), 'gateway-token'), 'utf8')).toBe(token);
+    expect(spawnOpenClawGatewayProcess).not.toHaveBeenCalled();
+  });
+
   test('blocks a damaged bundled runtime before migrations or spawning and retains the cause on retry', async () => {
     const runtimeRoot = path.join(resourcesDir, 'cfmind');
     fs.writeFileSync(path.join(runtimeRoot, 'gateway-bundle.mjs'), 'export {};\n');

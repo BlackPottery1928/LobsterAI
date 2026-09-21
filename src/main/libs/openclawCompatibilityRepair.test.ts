@@ -30,13 +30,15 @@ afterEach(() => {
 
 test('Doctor uses the controlled runtime, safe flags and externally managed service policy', async () => {
   const params = fixture();
+  const env = { ...params.env, OPENCLAW_GATEWAY_TOKEN: 'profile-gateway-token' };
   const runner = vi.fn<StartupMigrationRunner>().mockResolvedValueOnce(startupResult())
     .mockResolvedValueOnce({ code: 1, stdout: 'partial repair', stderr: 'remaining orphan vectors' });
-  expect(await runOpenClawDoctorRepair({ ...params, runner })).toEqual({ code: 1 });
+  expect(await runOpenClawDoctorRepair({ ...params, env, runner })).toEqual({ code: 1 });
   expect(runner).toHaveBeenCalledWith('/bundled/electron', [path.join(params.runtimeRoot, 'openclaw.mjs'), ...OPENCLAW_DOCTOR_REPAIR_ARGS], expect.objectContaining({
     env: {
       PATH: '/bundled/shims', OPENCLAW_HOME: path.dirname(params.stateDir), OPENCLAW_STATE_DIR: params.stateDir,
       OPENCLAW_CONFIG_PATH: params.configPath, ELECTRON_RUN_AS_NODE: '1', OPENCLAW_SERVICE_REPAIR_POLICY: 'external',
+      OPENCLAW_GATEWAY_TOKEN: 'profile-gateway-token',
     },
   }));
   expect(fs.readFileSync(path.join(params.backupDir, 'doctor.log'), 'utf8')).toContain('remaining orphan vectors');

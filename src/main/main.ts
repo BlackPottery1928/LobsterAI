@@ -3397,6 +3397,8 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
           runtimeRoot: manager.getRuntimeRoot(), electronNodeRuntimePath,
           backupDir: backupPath, env: {
             ...process.env, ...manager.getSecretEnvVars(), ...getOpenClawConfigSync().collectSecretEnvVars(),
+            // Doctor resolves the same auth reference while the gateway is stopped.
+            OPENCLAW_GATEWAY_TOKEN: manager.ensureGatewayToken(),
             PATH: [nodeShimDir, process.env.PATH || process.env.Path].filter(Boolean).join(path.delimiter),
             LOBSTERAI_NPM_BIN_DIR: npmBinDir,
           },
