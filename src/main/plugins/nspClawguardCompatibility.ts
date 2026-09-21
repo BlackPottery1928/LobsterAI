@@ -17,9 +17,16 @@ const LEGACY_REQUIRE = `var __require = /* @__PURE__ */ ((x) => typeof require !
   if (typeof require !== "undefined") return require.apply(this, arguments);
   throw Error('Dynamic require of "' + x + '" is not supported');
 });`;
-const NATIVE_REQUIRE = `// LobsterAI: nsp-clawguard 2.5.0 native require compatibility v1.
+const NATIVE_REQUIRE_V1 = `// LobsterAI: nsp-clawguard 2.5.0 native require compatibility v1.
 import { createRequire as __lobsteraiNspCreateRequire } from 'node:module';
 var __require = __lobsteraiNspCreateRequire(import.meta.url);`;
+const NATIVE_MODULE_CONTEXT = `// LobsterAI: nsp-clawguard 2.5.0 native module compatibility v2.
+import { createRequire as __lobsteraiNspCreateRequire } from 'node:module';
+import { fileURLToPath as __lobsteraiNspFileURLToPath } from 'node:url';
+import { dirname as __lobsteraiNspDirname } from 'node:path';
+var __require = __lobsteraiNspCreateRequire(import.meta.url);
+var __filename = __lobsteraiNspFileURLToPath(import.meta.url);
+var __dirname = __lobsteraiNspDirname(__filename);`;
 
 interface PluginState {
   pluginId: string;
@@ -64,14 +71,21 @@ function patchInstalledPlugin(pluginDir: string): boolean {
   const source = original.toString('utf8');
   const newline = source.includes('\r\n') ? '\r\n' : '\n';
   const legacyRequire = LEGACY_REQUIRE.replace(/\n/g, newline);
-  const nativeRequire = NATIVE_REQUIRE.replace(/\n/g, newline);
-  if (source.includes(nativeRequire) && !source.includes(legacyRequire)) return false;
+  const nativeRequireV1 = NATIVE_REQUIRE_V1.replace(/\n/g, newline);
+  const nativeModuleContext = NATIVE_MODULE_CONTEXT.replace(/\n/g, newline);
+  if (source.includes(nativeModuleContext) && !source.includes(legacyRequire) && !source.includes(nativeRequireV1)) return false;
 
-  const offset = source.indexOf(legacyRequire);
+  // Upgrade installations patched by the previous release as well as pristine
+  // packages. The v1 helper fixes registration but not SQL.js in gateway_start.
+  const helper = source.includes(nativeRequireV1) ? nativeRequireV1 : legacyRequire;
+  const offset = source.indexOf(helper);
+  const remainder = source.replace(helper, '');
   if (
     offset < 0 || offset > 1024
-    || source.indexOf(legacyRequire, offset + legacyRequire.length) !== -1
-    || source.includes('__lobsteraiNspCreateRequire')
+    || source.indexOf(helper, offset + helper.length) !== -1
+    || remainder.includes(legacyRequire)
+    || remainder.includes('__lobsteraiNsp')
+    || /\b(?:var|let|const|function|class)\s+__(?:filename|dirname)\b/.test(remainder)
   ) {
     console.warn(`[PluginCompatibility] Skipping unrecognized ${NSP_CLAWGUARD.Id} entry at ${entryPath}.`);
     return false;
@@ -79,9 +93,11 @@ function patchInstalledPlugin(pluginDir: string): boolean {
 
   // graceful-fs must receive the native fs object. An interop proxy loses its
   // symbol queue and poisons the gateway's shared fs.close/closeSync methods.
-  const patched = source.replace(legacyRequire, nativeRequire);
+  // SQL.js also reads CommonJS paths when its async startup hook initializes
+  // the database. Decode file URLs so Windows drives, spaces and Unicode work.
+  const patched = source.replace(helper, nativeModuleContext);
   const hash = createHash('sha256').update(original).digest('hex');
-  const backupPath = `${entryPath}.lobsterai-native-require-v1.${hash}.bak`;
+  const backupPath = `${entryPath}.lobsterai-native-module-v2.${hash}.bak`;
   const mode = fs.statSync(entryPath).mode & 0o777;
   try {
     fs.writeFileSync(backupPath, original, { flag: 'wx', mode, flush: true });
@@ -97,8 +113,8 @@ function patchInstalledPlugin(pluginDir: string): boolean {
   if (!fs.readFileSync(entryPath).equals(original)) {
     throw new Error(`Plugin entry changed while preparing compatibility patch: ${entryPath}`);
   }
-  safelyReplaceTextFileSync({ filePath: entryPath, content: patched, mode, tempLabel: 'nsp-native-require' });
-  console.log(`[PluginCompatibility] Patched ${NSP_CLAWGUARD.Id} ${pkg.version} native require; backup=${backupPath}`);
+  safelyReplaceTextFileSync({ filePath: entryPath, content: patched, mode, tempLabel: 'nsp-native-module' });
+  console.log(`[PluginCompatibility] Patched ${NSP_CLAWGUARD.Id} ${pkg.version} native module context; backup=${backupPath}`);
   return true;
 }
 

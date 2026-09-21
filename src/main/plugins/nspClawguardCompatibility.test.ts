@@ -27,6 +27,22 @@ fs.closeSync = function(fd) {
 };
 export default function register(api) { api.on('before_tool_call', () => {}); }
 `;
+// The exact helper written by the previous release, retained as an upgrade fixture.
+const nativeRequireV1 = `// LobsterAI: nsp-clawguard 2.5.0 native require compatibility v1.
+import { createRequire as __lobsteraiNspCreateRequire } from 'node:module';
+var __require = __lobsteraiNspCreateRequire(import.meta.url);`;
+const legacyRequire = pluginSource.slice(0, pluginSource.indexOf('\nconst fs'));
+const startupSource = pluginSource.replace(
+  "export default function register(api) { api.on('before_tool_call', () => {}); }",
+  `export default function register(api) {
+  api.on('gateway_start', async () => {
+    // SQL.js first touches these paths asynchronously, after registration.
+    await Promise.resolve();
+    const result = { dirname: __dirname, filename: __filename, bytes: fs.readFileSync(__filename).length };
+    fs.writeFileSync(__require('node:path').join(__dirname, 'startup-result.json'), JSON.stringify(result));
+  });
+}`,
+);
 
 const roots: string[] = [];
 function createRoot(): string {
@@ -154,10 +170,58 @@ describe('runtime require compatibility', () => {
   });
 });
 
-test('retains CRLF line endings', () => {
+test.each([false, true])('initializes an async startup hook in a decoded module directory (previous v1 patch: %s)', previouslyPatched => {
+  const root = path.join(createRoot(), '插件 #100%');
+  const entry = createPlugin(root);
+  const original = previouslyPatched ? startupSource.replace(legacyRequire, nativeRequireV1) : startupSource;
+  fs.writeFileSync(entry, original);
+  const runStartup = () => execFileSync(process.execPath, ['--input-type=module', '--eval', `
+    (async () => {
+      const plugin = await import(${JSON.stringify(pathToFileURL(entry).href)});
+      let startup;
+      plugin.default({ on: (name, callback) => { if (name === 'gateway_start') startup = callback; } });
+      await startup();
+    })().catch(error => { console.error(error); process.exitCode = 1; });
+  `], { encoding: 'utf8', windowsHide: true, stdio: 'pipe', timeout: 10_000 });
+  expect(runStartup).toThrow(previouslyPatched ? /__dirname is not defined/ : /Dynamic require/);
+
+  // Keep the previous release's pristine backup when upgrading its helper.
+  const previousBackup = `${entry}.lobsterai-native-require-v1.original.bak`;
+  if (previouslyPatched) fs.writeFileSync(previousBackup, startupSource);
+  expect(patch(root)).toBe(true);
+  expect(runStartup).not.toThrow();
+  expect(JSON.parse(fs.readFileSync(path.join(path.dirname(entry), 'startup-result.json'), 'utf8'))).toEqual({
+    dirname: path.dirname(entry), filename: entry, bytes: fs.statSync(entry).size,
+  });
+  const backups = fs.readdirSync(path.dirname(entry)).filter(name => name.includes('.lobsterai-native-module-v2.'));
+  expect(backups).toHaveLength(1);
+  expect(fs.readFileSync(path.join(path.dirname(entry), backups[0]), 'utf8')).toBe(original);
+  if (previouslyPatched) expect(fs.readFileSync(previousBackup, 'utf8')).toBe(startupSource);
+  const patchedStat = fs.statSync(entry);
+  expect(patch(root)).toBe(false);
+  expect(fs.statSync(entry).mtimeMs).toBe(patchedStat.mtimeMs);
+});
+
+test.each([
+  `${nativeRequireV1}\n${pluginSource}`,
+  `${nativeRequireV1}\n${nativeRequireV1}`,
+  `${pluginSource}\nconst __dirname = '/custom';`,
+  `${pluginSource}\nconst __filename = '/custom/index.mjs';`,
+])('does not inject a module context into conflicting or already modified source %#', source => {
   const root = createRoot();
   const entry = createPlugin(root);
-  fs.writeFileSync(entry, pluginSource.replace(/\n/g, '\r\n'));
+  fs.writeFileSync(entry, source);
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  expect(patch(root)).toBe(false);
+  expect(fs.readFileSync(entry, 'utf8')).toBe(source);
+  expect(fs.readdirSync(path.dirname(entry))).toEqual(['index.mjs']);
+});
+
+test.each([false, true])('retains CRLF line endings (previous v1 patch: %s)', previouslyPatched => {
+  const root = createRoot();
+  const entry = createPlugin(root);
+  const original = previouslyPatched ? pluginSource.replace(legacyRequire, nativeRequireV1) : pluginSource;
+  fs.writeFileSync(entry, original.replace(/\n/g, '\r\n'));
   expect(patch(root)).toBe(true);
   expect(fs.readFileSync(entry, 'utf8').replace(/\r\n/g, '')).not.toContain('\n');
 });
