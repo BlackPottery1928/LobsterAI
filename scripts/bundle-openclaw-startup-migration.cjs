@@ -29,6 +29,10 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedE
   if (!lockOwner.includes('inspectOwner: opts.inspectOwner')) {
     throw new Error('Manual lock recovery requires zz-openclaw-lock-owner-recovery.patch; run openclaw:patch first.');
   }
+  const identityOwner = fs.readFileSync(path.join(openclawSrc, 'src/infra/state-migrations.device-identity.ts'), 'utf8');
+  if (!identityOwner.includes('its keys differ from the valid canonical identity; canonical SQLite identity remains authoritative')) {
+    throw new Error('Startup identity migration requires openclaw-device-identity-preservation.patch; run openclaw:patch first.');
+  }
   const outputPath = path.join(runtimeDir, path.basename(selectedEntry));
   // Rebuild even when the gateway cache is current: this entry is maintained by
   // LobsterAI and must match the pinned upstream migration/schema implementation.

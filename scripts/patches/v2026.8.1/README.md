@@ -1,5 +1,29 @@
 # OpenClaw v2026.8.1 patch notes
 
+## Device identity conflicts without an import receipt
+
+`openclaw-device-identity-preservation.patch` aligns the identity migration owner
+with the runtime reader. A valid canonical SQLite identity remains authoritative
+when a different valid retired `identity/device.json` exists without a migration
+receipt. Startup and Doctor preserve both identities and report a notice instead
+of refusing Gateway startup. Neither key material nor device auth/pairing rows
+are changed, and no receipt is fabricated for an identity that was not imported.
+
+The existing stopped-Gateway lease, identity coordinator, safe source validation,
+native claim and simultaneous source/Doctor claim checks run before preservation.
+A conflicting interrupted Doctor claim still follows the existing recovery error
+path. Matching identities and invalid canonical repair retain their existing rules.
+The startup helper bundler requires the patch. Rebuild both the Gateway/CLI runtime
+and startup helpers; changing only the helper leaves Gateway's own preflight stale.
+
+Verify upstream `state-migrations.device-identity.test.ts` and
+`state-migrations.lock.test.ts`, then run LobsterAI's `openclawStartupStateMigration`
+tests with `OPENCLAW_STARTUP_MIGRATION_RUNTIME` pointing to the rebuilt runtime.
+Set `OPENCLAW_STARTUP_MIGRATION_GATEWAY=1` to exercise real Gateway restart with
+a conflicting identity, no receipt and a cleared startup checkpoint. Also verify
+startup, one-click repair and a cold restart through the Electron client.
+Remove this patch when the pinned upstream owner provides equivalent preservation.
+
 ## Channel-scoped QR login
 
 `openclaw-web-login-channel-routing.patch` adds optional `channel` selection to
