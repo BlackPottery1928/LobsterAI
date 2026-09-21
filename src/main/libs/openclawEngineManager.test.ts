@@ -16,11 +16,13 @@ vi.mock('electron', () => ({
   },
 }));
 
+import { OPENCLAW_STARTUP_MIGRATION_REFUSAL } from './openclawDreamingStartupFailure';
 import {
   buildOpenClawCompileCacheEnv,
   buildOpenClawGatewayExecArgv,
   extractOpenClawConfigIssueLines,
   extractOpenClawPluginVerificationFailure,
+  extractOpenClawStartupMigrationRefusal,
   isOpenClawConfigStartupFailure,
   isOpenClawGatewayHeapOutOfMemory,
   OpenClawEngineManager,
@@ -30,6 +32,9 @@ import {
 
 const PLUGIN_FAILURE = 'OpenClaw plugin verification failed; refusing to report the gateway ready.';
 const PLUGIN_CONSENT_DETAIL = '- Plugin "vydra" requires capability consent. Use openclaw plugins install or openclaw plugins enable with --accept-capabilities, then retry. Run `openclaw update repair` to retry plugin repair.';
+const MIGRATION_REFUSAL = OPENCLAW_STARTUP_MIGRATION_REFUSAL;
+const MIGRATION_WARNING = '- Legacy channel allowFrom channel/account is unresolved; left in place at C:\\Users\\L\\AppData\\Roaming\\LobsterAI\\openclaw\\state\\credentials\\openclaw-weixin-a74391227cd8-im-bot-allowFrom.json';
+const MIGRATION_DOCTOR_HINT = 'Run "openclaw doctor --fix" against the same state/config, then restart the gateway.';
 
 describe('buildOpenClawCompileCacheEnv', () => {
   test('prevents the packaged launcher from respawning Electron Helper', () => {
@@ -222,7 +227,29 @@ describe('extractOpenClawPluginVerificationFailure', () => {
   });
 });
 
-describe('gateway terminal plugin verification failure', () => {
+describe('extractOpenClawStartupMigrationRefusal', () => {
+  test('keeps the refusal and its own warning bullets without log prefixes or the doctor hint', () => {
+    expect(extractOpenClawStartupMigrationRefusal([
+      '[stderr] [state-migrations] Legacy state migration warnings:',
+      `[stderr] ${MIGRATION_WARNING}`,
+      '[stdout] |  - Migrated update-check state → shared SQLite state',
+      `[stderr] \u001b[31m${MIGRATION_REFUSAL}\u001b[0m`,
+      MIGRATION_WARNING,
+      MIGRATION_DOCTOR_HINT,
+    ].join('\n'))).toBe(`${MIGRATION_REFUSAL}\n${MIGRATION_WARNING}`);
+  });
+
+  test.each([
+    undefined,
+    `[state-migrations] Legacy state migration warnings:\n${MIGRATION_WARNING}`,
+    PLUGIN_FAILURE,
+    'OpenClaw startup migrations were skipped because the selected config changed during startup; refusing to report the gateway ready. Retry startup so the new config can be validated.',
+  ])('does not suppress retries without the terminal refusal marker: %s', (output) => {
+    expect(extractOpenClawStartupMigrationRefusal(output)).toBeNull();
+  });
+});
+
+describe('gateway terminal startup failures', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -294,6 +321,29 @@ describe('gateway terminal plugin verification failure', () => {
     expect(internals.gatewayRestartAttempt).toBe(0);
   });
 
+  test.each(['zh', 'en'] as const)('stops retrying after a startup migration refusal and names the unresolved source in %s', async (language) => {
+    setLanguage(language);
+    const { child, manager, internals, start, statuses } = makeSupervisor(`${MIGRATION_REFUSAL}\n${MIGRATION_WARNING}\n${MIGRATION_DOCTOR_HINT}`);
+    const pendingRestart = vi.fn();
+    internals.gatewayRestartAttempt = 4;
+    internals.gatewayRestartTimer = setTimeout(pendingRestart, 3_000);
+
+    child.emit('close', 1);
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(manager.getStatus()).toMatchObject({
+      phase: OpenClawEnginePhase.Error, canRetry: true, errorCode: OpenClawEngineErrorCode.StartupMigrationRefused,
+    });
+    expect(manager.isGatewayStartupBlocked()).toBe(true);
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0].message).toContain('openclaw-weixin-a74391227cd8-im-bot-allowFrom.json');
+    expect(statuses[0].message).toContain(language === 'zh' ? '已停止自动重启' : 'Automatic restarts stopped');
+    expect(statuses[0].message).not.toContain('Check model configuration');
+    expect(start).not.toHaveBeenCalled();
+    expect(pendingRestart).not.toHaveBeenCalled();
+    expect(internals.gatewayRestartTimer).toBeNull();
+    expect(internals.gatewayRestartAttempt).toBe(0);
+  });
   test('retains automatic retries for plugin warnings followed by a transient crash', async () => {
     const { child, manager, start } = makeSupervisor('[config] warnings: plugins.allow: plugin not installed: qqbot\nPlugin download failed: ECONNRESET');
     child.emit('close', 1);

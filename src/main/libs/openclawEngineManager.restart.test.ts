@@ -768,3 +768,51 @@ describe('OpenClaw gateway restart supervision', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+describe('terminal startup migration refusal block', () => {
+  const refusal = [
+    OPENCLAW_STARTUP_MIGRATION_REFUSAL,
+    '- Legacy channel allowFrom channel/account is unresolved; left in place at credentials/openclaw-weixin-a74391227cd8-im-bot-allowFrom.json',
+    'Run "openclaw doctor --fix" against the same state/config, then restart the gateway.',
+  ];
+
+  test('blocks implicit restarts until a manual retry and keeps the unresolved source visible', async () => {
+    const { manager, internals, child } = makeSupervisor();
+    internals.gatewayRecentOutput.set(child, refusal);
+    closeChild(child, 1);
+    const start = vi.spyOn(internals, 'doStartGateway').mockImplementation(async () => {
+      internals.setStatus({ phase: OpenClawEnginePhase.Running, version: '2026.8.1', canRetry: false });
+      return manager.getStatus();
+    });
+
+    const blocked = manager.getStatus();
+    expect(blocked.errorCode).toBe(OpenClawEngineErrorCode.StartupMigrationRefused);
+    expect(blocked.message).toContain('openclaw-weixin-a74391227cd8-im-bot-allowFrom.json');
+    expect(manager.isGatewayStartupBlocked()).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(await manager.startGateway('auto-restart-after-crash')).toEqual(blocked);
+    expect(await manager.startGateway('channel-sync-ensure-ready')).toEqual(blocked);
+    expect(start).not.toHaveBeenCalled();
+    expect(await manager.restartGateway('ipc-manual', { retryBlocked: true })).toMatchObject({ phase: OpenClawEnginePhase.Running });
+    expect(manager.isGatewayStartupBlocked()).toBe(false);
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  test('a Memory Core JSON refusal still takes the dreaming recovery path instead of blocking', () => {
+    const { manager, internals, child } = makeSupervisor();
+    internals.gatewayRecentOutput.set(child, refusal);
+    child.stderr!.emit('data', `${OPENCLAW_STARTUP_MIGRATION_REFUSAL}\n- Skipped Memory Core daily ingestion import for workspace because the legacy source could not be imported: SyntaxError: invalid JSON\n`);
+    closeChild(child, 1);
+    expect(manager.getStatus().errorCode).toBe(OpenClawEngineErrorCode.MemoryDreamingMigrationFailed);
+    expect(manager.isGatewayStartupBlocked()).toBe(false);
+  });
+
+  test('ignores the refusal text once the process had reported ready', () => {
+    const { manager, internals, child } = makeSupervisor();
+    internals.gatewayReadyProcesses.add(child);
+    internals.gatewayRecentOutput.set(child, refusal);
+    closeChild(child, 1);
+    expect(manager.getStatus().errorCode).not.toBe(OpenClawEngineErrorCode.StartupMigrationRefused);
+    expect(manager.isGatewayStartupBlocked()).toBe(false);
+  });
+});

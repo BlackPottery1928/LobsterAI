@@ -519,6 +519,7 @@ import {
   startOpenClawTokenProxy,
   stopOpenClawTokenProxy,
 } from './libs/openclawTokenProxy';
+import { runLegacyWeixinAllowFromMigration } from './libs/openclawWeixinPairingMigration';
 import { migrateMainAgentWorkspace } from './libs/openclawWorkspaceMigration';
 import { ensurePythonRuntimeReady } from './libs/pythonRuntime';
 import { isAnalyticsEndpointUrl, sanitizeUrlForLog, serializeForLog } from './libs/sanitizeForLog';
@@ -2943,6 +2944,13 @@ const _syncOpenClawConfigImpl = async (
     console.warn(`[OpenClaw] getResolvedMcpServers failed (non-fatal):`, err);
     getMcpRuntime().clearResolvedServersCache();
   }
+
+  // Legacy Weixin pairing allowlists make the pinned runtime refuse readiness
+  // at startup; fold them into the channel config before it is rendered.
+  runLegacyWeixinAllowFromMigration({
+    stateDir: manager.getStateDir(),
+    getStore: () => getIMGatewayManager().getIMStore(),
+  });
 
   const imConfigFingerprint = imConfigRestartTracker.captureConfig();
   const syncResult = configSync.sync(options.reason);

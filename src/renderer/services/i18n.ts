@@ -1424,6 +1424,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     openClawRepairFilesPath: '本次修复保存的文件和诊断位于：{path}',
     openClawAgentMediaMigrationTitle: '引擎数据需要升级',
     openClawAgentMediaMigrationHint: '请点击“一键修复”，备份数据并升级旧会话和附件存储。完成后会重新启动网关。',
+    openClawStartupMigrationRefusedHint: '启动迁移未完成时不会自动重启。可先尝试一键修复；若之后错误详情仍列出同一文件，请手动将该文件移出所在目录后，再点击“重新启动网关”。',
     openClawRepairBusyError: '当前仍有 Agent 任务或定时任务在运行，请停止后再修复。',
     openClawRepairConfigApplyPendingError: 'OpenClaw 正在应用配置变更，请稍后再修复。',
     openClawRepairApiUnavailable: '修复接口不可用，请重启应用后再试。',
@@ -5520,6 +5521,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     openClawRepairFilesPath: 'Files and diagnostics saved during this repair: {path}',
     openClawAgentMediaMigrationTitle: 'Engine data needs an upgrade',
     openClawAgentMediaMigrationHint: 'Use Quick Repair to back up your data and upgrade legacy conversation and attachment storage. The gateway will restart afterward.',
+    openClawStartupMigrationRefusedHint: 'Automatic restarts stop when startup migrations do not complete. Try Quick Repair first; if the error details still list the same file afterwards, move that file out of its folder manually, then use Restart Gateway.',
     openClawRepairBusyError:
       'Agent tasks or scheduled tasks are still running. Stop them before repairing.',
     openClawRepairConfigApplyPendingError:
