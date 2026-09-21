@@ -348,8 +348,6 @@ export interface CoworkForkSessionOptions {
   title?: string;
 }
 
-export type { CoworkBackgroundJob, CoworkBackgroundJobsEvent } from '../../shared/cowork/backgroundJobs';
-
 // Subagent session summary for sidebar display
 export const SubagentSessionStatus = {
   Running: 'running',

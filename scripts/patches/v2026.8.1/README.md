@@ -1,5 +1,29 @@
 # OpenClaw v2026.8.1 patch notes
 
+## Channel-scoped QR login
+
+`openclaw-web-login-channel-routing.patch` adds optional `channel` selection to
+both `web.login.start` and `web.login.wait`. A specified channel must match a
+loaded QR provider; an omitted channel remains compatible only when at most one
+provider is available. Ambiguous or unavailable selections fail before channel
+stop/start or plugin login calls. Display ordering must not select an auth target.
+
+LobsterAI sends `openclaw-weixin` in both requests. With QQ 2.0.1 and Weixin 2.4.3
+loaded, the old first-provider routing selected QQ, stopped QQ accounts, and
+returned a QR result without Weixin's session key. The separate QQ package
+preparer patch observes credential rejections immediately, settles QR creation
+failures, and prevents a cancelled old wait from deleting a newer session.
+The app also sets the Gateway client's request deadline beyond the plugin's
+login timeout: the RPC `timeoutMs` parameter alone does not override the client's
+30-second default, which otherwise aborts a valid QR confirmation wait.
+
+Run the upstream `web.start`, `web.channel`, and `channels.schema` tests, plus
+LobsterAI's `imGatewayManager.weixin`, `weixinPluginActivation`, and
+`prepare-openclaw-qqbot` tests. Rebuild the embedded runtime and verify WeChat
+login with QQ enabled, retries/cancellation, real message delivery, and restart
+persistence. Remove this patch when upstream provides equivalent explicit
+provider selection and rejects ambiguous login requests.
+
 ## Marketplace clone failures during startup
 
 `zz-openclaw-marketplace-clone-retry.patch` gives a failed marketplace source

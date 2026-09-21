@@ -1,9 +1,4 @@
 import type { OpenClawSessionPatch } from '../../../common/openclawSession';
-import type {
-  BackgroundJobKillResult,
-  CoworkBackgroundJob,
-  CoworkBackgroundJobsEvent,
-} from '../../../shared/cowork/backgroundJobs';
 import type { CoworkBrowserAnnotationMessageBatch } from '../../../shared/cowork/browserAnnotations';
 import type {
   CoworkBtwAbortResponse,
@@ -59,7 +54,6 @@ export interface CoworkRuntimeEvents {
   complete: (sessionId: string, claudeSessionId: string | null) => void;
   error: (sessionId: string, error: string) => void;
   sessionStopped: (sessionId: string) => void;
-  backgroundJobsChanged: (sessionId: string, event: CoworkBackgroundJobsEvent) => void;
 }
 
 export type CoworkContextUsage = {
@@ -177,10 +171,6 @@ export interface CoworkRuntime {
   getPendingQuestions?(): Array<PermissionRequest & { sessionId: string }>;
   isSessionActive(sessionId: string): boolean;
   getSessionConfirmationMode(sessionId: string): 'modal' | 'text' | null;
-  /** Task panel: background jobs of a session (runtime ledger mirror). May refresh from the runtime. */
-  listBackgroundJobs?(sessionId: string): Promise<CoworkBackgroundJob[]>;
-  killBackgroundJob?(sessionId: string, jobId: string): Promise<BackgroundJobKillResult>;
-  clearSettledBackgroundJobs?(sessionId: string): Promise<CoworkBackgroundJob[]>;
   deleteSubagentSession?(parentSessionId: string, runId: string): Promise<boolean>;
   onSessionDeleted?(sessionId: string): void;
 }
