@@ -940,6 +940,7 @@ interface IElectronAPI {
       resolvePasskey: (request: BrowserPasskeyRequest) => Promise<AgentBrowserHostResponse>;
       credentials: {
         getAvailability: () => Promise<BrowserCredentialAvailabilityResponse>;
+        requestAccess: () => Promise<BrowserCredentialAvailabilityResponse>;
         list: () => Promise<BrowserCredentialListResponse>;
         save: (request: BrowserCredentialSaveRequest) => Promise<BrowserCredentialMutationResponse>;
         delete: (request: BrowserCredentialDeleteRequest) => Promise<BrowserCredentialMutationResponse>;
