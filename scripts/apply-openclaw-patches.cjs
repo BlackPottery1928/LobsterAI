@@ -1103,6 +1103,37 @@ const v20260801StrongPatchValidators = {
       ],
     },
   ],
+  'openclaw-sqlite-readonly-result-file.patch': [
+    {
+      file: 'src/infra/sqlite-readonly-location.ts',
+      snippets: [
+        'const resultPath = await createSqliteReadOnlyResultFile();',
+        'const resultPath = createSqliteReadOnlyResultFileSync();',
+        'readSqliteReadOnlyWorkerResult(params.resultPath, params.stderr)',
+        'removeTempDirectory(path.dirname(resultPath));',
+        'stderr: result.stderr ?? "", resultPath',
+      ],
+    },
+    {
+      file: 'src/infra/sqlite-readonly-location.worker.ts',
+      snippets: [
+        'process.argv[5] !== SQLITE_READONLY_RESULT_FILE_ARG',
+        'writeSqliteReadOnlyResultFile(resultPath, { ok: true, location: prepared.location });',
+        'prepared.cleanup();',
+      ],
+    },
+    {
+      file: 'src/infra/sqlite-readonly-result-file.ts',
+      snippets: [
+        'createPrivateSqliteTempDirectory(',
+        'createPrivateSqliteTempDirectorySync(',
+        'identity.nlink !== 1n',
+        'MAX_RESULT_BYTES + 1',
+        'flag: "wx"',
+        'mode: 0o600',
+      ],
+    },
+  ],
   'openclaw-workspace-attestation-quarantine.patch': [
     {
       file: 'src/infra/state-migrations.workspace-setup.ts',
