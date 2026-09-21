@@ -137,6 +137,22 @@ describe('openclawSessionLegacyMigration', () => {
     expect(listLegacySessionStorePaths(stateDir)).toEqual([sharedPath, mainPath, workerPath]);
   });
 
+  test('normal migration preserves an unreadable store and reports the failure for explicit repair', async () => {
+    const brokenPath = path.join(stateDir, 'agents', 'worker', 'sessions', 'sessions.json');
+    writeFile(brokenPath, '\uFEFF\uFEFFnot json');
+    const runner = vi.fn<LegacySessionMigrationRunner>().mockResolvedValue({
+      code: 1, stdout: '', stderr: 'store_unreadable',
+    });
+
+    const result = await migrateLegacySessionStorageWithDoctor({
+      stateDir, configPath, runtimeRoot, electronNodeRuntimePath: process.execPath, env: {}, runner,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(fs.readFileSync(brokenPath, 'utf8')).toBe('\uFEFF\uFEFFnot json');
+    expect(fs.readdirSync(path.dirname(brokenPath))).toEqual(['sessions.json']);
+  });
+
   test('runs official doctor with the same state and config then verifies migration', async () => {
     const legacyPath = path.join(stateDir, 'agents', 'main', 'sessions', 'sessions.json');
     writeFile(legacyPath, '{"agent:main:main":{"sessionId":"existing"}}\n');

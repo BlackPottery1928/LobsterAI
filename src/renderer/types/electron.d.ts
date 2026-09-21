@@ -388,6 +388,7 @@ interface OpenClawGatewayRepairResult {
   status?: OpenClawEngineStatus;
   originalPath?: string;
   backupPath?: string;
+  quarantinedSessionStoreCount?: number;
   error?: string;
   errorCode?: OpenClawGatewayRepairErrorCode;
   recoverable?: boolean;

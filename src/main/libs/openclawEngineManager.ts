@@ -88,6 +88,10 @@ const OPENCLAW_CONFIG_STARTUP_FAILURE_PATTERNS = [
   /openclaw\.json[\s\S]{0,240}(?:syntaxerror|unexpected token|invalid)/i,
   /(?:syntaxerror|unexpected token|invalid)[\s\S]{0,240}openclaw\.json/i,
 ];
+const OPENCLAW_CONFIG_ISSUE_LINE_LIMIT = 4;
+const OPENCLAW_CONFIG_ISSUE_LINE_MAX_LENGTH = 200;
+const OPENCLAW_CONFIG_STARTUP_FAILURE_MESSAGE =
+  'OpenClaw gateway startup stopped because openclaw.json is invalid. Repair the config or use Quick Repair before restarting.';
 const OPENCLAW_GATEWAY_HEAP_OOM_PATTERNS = [
   /JavaScript heap out of memory/i,
   /Ineffective mark-compacts near heap limit/i,
@@ -120,6 +124,27 @@ export interface OpenClawGatewayConnectionInfo {
 export const isOpenClawConfigStartupFailure = (text: string | null | undefined): boolean => {
   if (!text) return false;
   return OPENCLAW_CONFIG_STARTUP_FAILURE_PATTERNS.some((pattern) => pattern.test(text));
+};
+
+/**
+ * The per-key lines OpenClaw prints after "Invalid config at <path>:", such as
+ * `openclaw.json:4 — cron: Unrecognized key: "store"` from the gateway or
+ * `- cron: Unrecognized key: "store"` from CLI commands, as `<path>: <problem>`.
+ */
+export const extractOpenClawConfigIssueLines = (text: string | null | undefined): string[] => {
+  if (!text) return [];
+  const lines = stripVTControlCharacters(text).split(/\r?\n/)
+    .map(line => line.trim().replace(/^(?:\[[^\]\r\n]*\]\s*)+/, ''));
+  const header = lines.findLastIndex(line => /Invalid config at .+:$/i.test(line));
+  if (header < 0) return [];
+  const issues: string[] = [];
+  for (const line of lines.slice(header + 1)) {
+    const issue = line.replace(/^-\s+/, '').replace(/^\S+:\d+\s+—\s+/, '');
+    if (!/^(?:<root>|[^\s:]+):\s+\S/.test(issue)) break;
+    issues.push(issue.slice(0, OPENCLAW_CONFIG_ISSUE_LINE_MAX_LENGTH));
+    if (issues.length >= OPENCLAW_CONFIG_ISSUE_LINE_LIMIT) break;
+  }
+  return issues;
 };
 
 export const extractOpenClawPluginVerificationFailure = (
@@ -2189,13 +2214,14 @@ export class OpenClawEngineManager extends EventEmitter {
       }
 
       if (isOpenClawConfigStartupFailure(tail)) {
-        console.error(`${gwDiagTs()} gateway exited during startup because OpenClaw config is invalid; auto-restart suppressed`);
         this.gatewayRestartAttempt = 0;
         this.clearScheduledGatewayRestart();
+        const issues = extractOpenClawConfigIssueLines(tail);
+        console.error(`${gwDiagTs()} gateway exited during startup because OpenClaw config is invalid; auto-restart suppressed`);
         this.setStatus({
           phase: 'error',
           version: this.status.version,
-          message: 'OpenClaw gateway startup stopped because openclaw.json is invalid. Repair the config or use Quick Repair before restarting.',
+          message: [OPENCLAW_CONFIG_STARTUP_FAILURE_MESSAGE, ...issues].join('\n'),
           canRetry: true,
         });
         return;

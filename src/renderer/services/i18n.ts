@@ -1403,6 +1403,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
     openClawRepairRunning: '正在修复...',
     openClawRepairSuccess: '修复已完成，网关已启动。备份目录中保留了原始数据和修复报告。',
     openClawRepairSuccessNoBackup: '修复已完成，网关已启动。',
+    openClawRepairHistoryQuarantined: '已备份并隔离 {count} 个损坏的会话索引，相关历史记录尚未恢复。原始文件和处理记录已保留在备份中。',
+    openClawRepairViewBackup: '查看备份',
     openClawRepairBackupPath: '备份位置',
     openClawDreamingRecoveryTitle: '旧版记忆状态处理记录',
     openClawDreamingRecoverySummary: '涉及 {workspaces} 个工作区：已备份并隔离 {files} 个异常文件。',
@@ -5497,6 +5499,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
     openClawRepairSuccess: 'Repair completed and the gateway started. Original data and repair reports are in the backup folder.',
     openClawRepairSuccessNoBackup:
       'Repair completed and the gateway started.',
+    openClawRepairHistoryQuarantined: '{count} damaged session index(es) were backed up and set aside. Their history has not been restored. Original files and recovery details are preserved in the backup.',
+    openClawRepairViewBackup: 'View backup',
     openClawRepairBackupPath: 'Backup location',
     openClawDreamingRecoveryTitle: 'Legacy memory recovery record',
     openClawDreamingRecoverySummary: '{workspaces} workspace(s) involved: {files} invalid file(s) backed up and quarantined.',
