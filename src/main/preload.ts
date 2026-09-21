@@ -46,8 +46,8 @@ import {
   BrowserIpc,
   type BrowserRuntimeProfile,
 } from '../shared/browserWebAccess/constants';
+import type { BrowserPasskeyRequest } from '../shared/browserWebAccess/passkeys';
 import { ClipboardIpc } from '../shared/clipboard/constants';
-import { BACKGROUND_JOB_EVENT_CHANNEL, type CoworkBackgroundJobsEvent } from '../shared/cowork/backgroundJobs';
 import type { CoworkBrowserAnnotationMessageBatch } from '../shared/cowork/browserAnnotations';
 import type {
   CoworkBtwAbortRequest,
@@ -132,6 +132,7 @@ import type {
   SkinGetActiveResponse,
   SkinListResponse,
 } from '../shared/skin/types';
+import { SubscriptionTrialIpc } from '../shared/subscriptionTrial/constants';
 import { NimQrLoginIpc } from './ipcHandlers/nimQrLogin';
 import { OpenClawSessionIpc } from './openclawSession/constants';
 import { OpenClawSessionPolicyIpc } from './openclawSessionPolicy/constants';
@@ -421,6 +422,8 @@ contextBridge.exposeInMainWorld('electron', {
         request: AgentBrowserCredentialSavePromptRequest,
       ): Promise<AgentBrowserHostResponse> =>
         ipcRenderer.invoke(BrowserIpc.ResolveCredentialSavePrompt, request),
+      resolvePasskey: (request: BrowserPasskeyRequest): Promise<AgentBrowserHostResponse> =>
+        ipcRenderer.invoke(BrowserIpc.ResolvePasskey, request),
       onHostState: (callback: (event: AgentBrowserHostStateEvent) => void) => {
         const handler = (_event: Electron.IpcRendererEvent, hostEvent: AgentBrowserHostStateEvent) =>
           callback(hostEvent);
@@ -645,19 +648,6 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke(CoworkIpcChannel.SubagentListByAgent, options),
     deleteSubagentSession: (options: { parentSessionId: string; runId: string }) =>
       ipcRenderer.invoke(CoworkIpcChannel.SubagentDelete, options),
-
-    // Task panel: background jobs
-    listBackgroundJobs: (sessionId: string) =>
-      ipcRenderer.invoke(CoworkIpcChannel.BackgroundJobList, { sessionId }),
-    killBackgroundJob: (options: { sessionId: string; jobId: string }) =>
-      ipcRenderer.invoke(CoworkIpcChannel.BackgroundJobKill, options),
-    clearSettledBackgroundJobs: (sessionId: string) =>
-      ipcRenderer.invoke(CoworkIpcChannel.BackgroundJobClearSettled, { sessionId }),
-    onBackgroundJobsEvent: (listener: (event: CoworkBackgroundJobsEvent) => void) => {
-      const handler = (_event: Electron.IpcRendererEvent, event: CoworkBackgroundJobsEvent) => listener(event);
-      ipcRenderer.on(BACKGROUND_JOB_EVENT_CHANNEL, handler);
-      return () => ipcRenderer.removeListener(BACKGROUND_JOB_EVENT_CHANNEL, handler);
-    },
 
     // Media task management
     cancelMediaTask: (taskId: string) =>
@@ -1103,6 +1093,9 @@ contextBridge.exposeInMainWorld('electron', {
     openSystemNotificationSettings: () =>
       ipcRenderer.invoke(AppIpcChannel.OpenSystemNotificationSettings),
   },
+  subscriptionTrial: {
+    status: () => ipcRenderer.invoke(SubscriptionTrialIpc.Status),
+  },
   activity: {
     getSlot: (input: ActivityHostGetSlotInput) =>
       ipcRenderer.invoke(ActivityIpc.HostGetSlot, input),
@@ -1312,6 +1305,8 @@ contextBridge.exposeInMainWorld('electron', {
 
     // Execution
     runManually: (id: string) => ipcRenderer.invoke(ScheduledTaskIpc.RunManually, id),
+    resendWeixinReport: (taskId: string, runId: string) =>
+      ipcRenderer.invoke(ScheduledTaskIpc.ResendWeixinReport, taskId, runId),
     stop: (id: string) => ipcRenderer.invoke(ScheduledTaskIpc.Stop, id),
 
     // Run history

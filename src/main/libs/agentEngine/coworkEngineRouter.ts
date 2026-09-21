@@ -1,11 +1,6 @@
 import { EventEmitter } from 'events';
 
 import type { OpenClawSessionPatch } from '../../../common/openclawSession';
-import {
-  BackgroundJobKillOutcome,
-  type BackgroundJobKillResult,
-  type CoworkBackgroundJob,
-} from '../../../shared/cowork/backgroundJobs';
 import type {
   CoworkBtwAbortResponse,
   CoworkBtwSubmitResponse,
@@ -209,19 +204,6 @@ export class CoworkEngineRouter extends EventEmitter implements CoworkRuntime {
     return this.runtime.deleteSubagentSession(parentSessionId, runId);
   }
 
-  async listBackgroundJobs(sessionId: string): Promise<CoworkBackgroundJob[]> {
-    return (await this.runtime.listBackgroundJobs?.(sessionId)) ?? [];
-  }
-
-  async killBackgroundJob(sessionId: string, jobId: string): Promise<BackgroundJobKillResult> {
-    return (await this.runtime.killBackgroundJob?.(sessionId, jobId))
-      ?? { outcome: BackgroundJobKillOutcome.Unsupported };
-  }
-
-  async clearSettledBackgroundJobs(sessionId: string): Promise<CoworkBackgroundJob[]> {
-    return (await this.runtime.clearSettledBackgroundJobs?.(sessionId)) ?? [];
-  }
-
   onSessionDeleted(sessionId: string): void {
     this.sessionEngine.delete(sessionId);
     this.clearRequestEngineBySession(sessionId);
@@ -303,10 +285,6 @@ export class CoworkEngineRouter extends EventEmitter implements CoworkRuntime {
 
     runtime.on('sessionStopped', (sessionId) => {
       this.emit('sessionStopped', sessionId);
-    });
-
-    runtime.on('backgroundJobsChanged', (sessionId, event) => {
-      this.emit('backgroundJobsChanged', sessionId, event);
     });
   }
 

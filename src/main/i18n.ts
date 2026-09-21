@@ -16,6 +16,10 @@ export type LanguageType = 'zh' | 'en';
 
 const translations: Record<LanguageType, Record<string, string>> = {
   zh: {
+    browserPasskeyChooseAccountTitle: '使用通行密钥',
+    browserPasskeyChooseAccountMessage: '选择用于登录 {site} 的账号',
+    browserPasskeyUnnamedAccount: '已保存的账号',
+    browserPasskeyCancel: '取消',
     xaiAuthMigrationPending: '请等待 AI 引擎完成认证数据升级后，再更改 xAI 登录；若升级失败，请先修复引擎。',
     xaiAuthStoreFailed: '无法访问 xAI 认证存储，请检查 AI 引擎状态后重试。',
     openClawStartupMigrationFailed: 'AI 引擎状态升级失败：{error}',
@@ -302,6 +306,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     imWeixinNotEnabled: '微信渠道当前未启用。',
     imWeixinQrSessionExpired: '本次微信扫码已结束，请重新获取二维码。',
     imWeixinGatewayUnavailable: 'AI 引擎尚未连接，请启动引擎后重新扫码。',
+    imWeixinQrInvalidResponse: '未能获取有效的微信二维码，请重试；若持续失败，请更新应用。',
     openClawConfigSyncFailed: 'AI 引擎配置同步失败，请重试。',
     imWeixinEnableSuggestion: '请启用微信渠道后重新测试连通性。',
     imWeixinConfigReady: '微信配置已就绪。',
@@ -397,6 +402,10 @@ const translations: Record<LanguageType, Record<string, string>> = {
     'enterprise.updateBlocked': '版本更新由企业统一管理',
   },
   en: {
+    browserPasskeyChooseAccountTitle: 'Use a passkey',
+    browserPasskeyChooseAccountMessage: 'Choose an account to sign in to {site}',
+    browserPasskeyUnnamedAccount: 'Saved account',
+    browserPasskeyCancel: 'Cancel',
     xaiAuthMigrationPending: 'Wait for the AI engine credential migration to finish before changing xAI login. If migration failed, repair the engine first.',
     xaiAuthStoreFailed: 'Unable to access the xAI credential store. Check the AI engine status and retry.',
     openClawStartupMigrationFailed: 'AI engine state migration failed: {error}',
@@ -725,6 +734,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     imWeixinNotEnabled: 'WeChat channel is not currently enabled.',
     imWeixinQrSessionExpired: 'This WeChat login session has ended. Please request a new QR code.',
     imWeixinGatewayUnavailable: 'The AI engine is not connected. Start the engine and try scanning again.',
+    imWeixinQrInvalidResponse: 'Could not get a valid WeChat QR code. Try again; if this continues, update the app.',
     openClawConfigSyncFailed: 'Failed to sync the AI engine configuration. Please try again.',
     imWeixinEnableSuggestion: 'Please enable the WeChat channel and test connectivity again.',
     imWeixinConfigReady: 'WeChat configuration is ready.',

@@ -100,44 +100,4 @@ describe('CoworkEngineRouter', () => {
       .emit('btwResult', 'session-1', result);
     expect(listener).toHaveBeenCalledWith('session-1', result);
   });
-
-  test('forwards background job frames and routes background job requests to the runtime', async () => {
-    const openclawRuntime = createRuntimeMock();
-    const router = new CoworkEngineRouter({
-      getCurrentEngine: () => 'openclaw',
-      openclawRuntime,
-    });
-    const listener = vi.fn();
-    router.on('backgroundJobsChanged', listener);
-
-    const event = {
-      sessionId: 'session-1',
-      timestamp: 1,
-      jobs: [{
-        id: 'task-1',
-        sessionId: 'session-1',
-        engine: 'openclaw' as const,
-        kind: 'exec',
-        label: 'sleep 60',
-        status: 'running' as const,
-        startedAt: 1,
-      }],
-    };
-    (openclawRuntime as CoworkRuntime & { emit: (event: string, ...args: unknown[]) => boolean })
-      .emit('backgroundJobsChanged', 'session-1', event);
-    expect(listener).toHaveBeenCalledWith('session-1', event);
-
-    // Optional runtime methods fall back to empty/unsupported results.
-    await expect(router.listBackgroundJobs('session-1')).resolves.toEqual([]);
-    await expect(router.killBackgroundJob('session-1', 'task-1')).resolves.toEqual({ outcome: 'unsupported' });
-    await expect(router.clearSettledBackgroundJobs('session-1')).resolves.toEqual([]);
-
-    openclawRuntime.listBackgroundJobs = vi.fn().mockResolvedValue(event.jobs);
-    openclawRuntime.killBackgroundJob = vi.fn().mockResolvedValue({ outcome: 'requested', jobs: event.jobs });
-    openclawRuntime.clearSettledBackgroundJobs = vi.fn().mockResolvedValue([]);
-    await expect(router.listBackgroundJobs('session-1')).resolves.toEqual(event.jobs);
-    await expect(router.killBackgroundJob('session-1', 'task-1')).resolves.toMatchObject({ outcome: 'requested' });
-    await expect(router.clearSettledBackgroundJobs('session-1')).resolves.toEqual([]);
-    expect(openclawRuntime.killBackgroundJob).toHaveBeenCalledWith('session-1', 'task-1');
-  });
 });
