@@ -123,12 +123,12 @@ test('a reply after the client timeout cannot settle delivery again or run anoth
     readConfigFile: () => RAW, ensureRpcClient: async () => ({ request }),
     scheduleDeferredRestart, onDiagnostic: event => records.push(event),
   });
-  await vi.advanceTimersByTimeAsync(15_000);
+  await vi.advanceTimersByTimeAsync(18_000);
   expect((await delivery).restartScheduled).toBe(true);
   const recordCount = records.length;
   await vi.advanceTimersByTimeAsync(30_000);
   expect(records).toHaveLength(recordCount);
   expect(scheduleDeferredRestart).toHaveBeenCalledTimes(1);
-  expect(request).toHaveBeenCalledTimes(2);
+  expect(request).toHaveBeenCalledTimes(5);
   expect(records.at(-1)?.evidence).toBe(ConfigRecoveryEvidence.Unconfirmed);
 });

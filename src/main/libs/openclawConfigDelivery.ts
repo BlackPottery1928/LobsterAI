@@ -2,6 +2,12 @@ import {
   OPENCLAW_PLUGIN_INDEX_MANAGED_KEYS,
   OpenClawEnginePhase,
 } from '../../shared/openclawEngine/constants';
+import {
+  CONFIG_APPLICATION_CHECK_TIMEOUT_MS,
+  confirmOpenClawConfigApplied,
+  isOpenClawConfigApplied,
+  type OpenClawConfigSnapshot,
+} from './openclawConfigApplication';
 import { logOpenClawConfigLockDiagnostics } from './openclawConfigDiagnostics';
 import {
   type ConfigDeliveryDiagnostic,
@@ -34,6 +40,8 @@ import {
 export const OpenClawConfigDeliveryMode = {
   /** Gateway accepted config.set and owns its reload follow-up. */
   Rpc: 'rpc',
+  /** The current target matches a gateway snapshot whose application is confirmed. */
+  Applied: 'applied',
   /** Gateway not running; the file on disk will be read at next start. */
   Skipped: 'skipped',
   /** RPC path failed; a deferred gateway restart guarantees convergence. */
@@ -179,7 +187,7 @@ async function requestConfigSet(
   readConfigFile: () => string,
   diagnose: (build: () => ConfigDeliveryDiagnostic) => void,
   attempt: number,
-): Promise<void> {
+): Promise<ConfigRecoveryEvidence> {
   const request = async <T,>(stage: ConfigDiagnosticStage, params: unknown, timeoutMs: number): Promise<T> => {
     const startedAt = Date.now();
     diagnose(() => ({ stage, attempt, outcome: ConfigDiagnosticOutcome.Started, elapsedMs: 0, timeoutMs }));
@@ -199,7 +207,7 @@ async function requestConfigSet(
       throw error;
     }
   };
-  const snapshot = await request<{ hash?: unknown; configRevisionHash?: unknown; appliedConfigHash?: unknown }>(
+  const snapshot = await request<OpenClawConfigSnapshot>(
     OpenClawConfigRpcMethod.Get,
     {},
     CONFIG_GET_TIMEOUT_MS,
@@ -229,11 +237,13 @@ async function requestConfigSet(
     resolvedRevision: typeof snapshot?.configRevisionHash === 'string' ? configDiagnosticDigest(snapshot.configRevisionHash) : undefined,
     appliedRevision: typeof snapshot?.appliedConfigHash === 'string' ? configDiagnosticDigest(snapshot.appliedConfigHash) : undefined,
   }));
+  if (isOpenClawConfigApplied(snapshot, payload)) return ConfigRecoveryEvidence.Applied;
   await request(
     OpenClawConfigRpcMethod.Set,
     { raw: payload, ...(baseHash ? { baseHash } : {}) },
     CONFIG_SET_TIMEOUT_MS,
   );
+  return ConfigRecoveryEvidence.Accepted;
 }
 
 function classifyDiagnosticError(error: unknown): ConfigDiagnosticErrorKind {
@@ -287,7 +297,8 @@ export async function deliverOpenClawConfigToGateway(
       stage: ConfigDiagnosticStage.Complete, attempt: diagnosticAttempt, elapsedMs: result.elapsedMs,
       outcome: mode === OpenClawConfigDeliveryMode.Fallback || mode === OpenClawConfigDeliveryMode.Rejected
         ? ConfigDiagnosticOutcome.Failed : ConfigDiagnosticOutcome.Succeeded,
-      evidence: mode === OpenClawConfigDeliveryMode.Rpc ? ConfigRecoveryEvidence.Accepted
+      evidence: mode === OpenClawConfigDeliveryMode.Applied ? ConfigRecoveryEvidence.Applied
+        : mode === OpenClawConfigDeliveryMode.Rpc ? ConfigRecoveryEvidence.Accepted
         : mode === OpenClawConfigDeliveryMode.Rejected ? ConfigRecoveryEvidence.Rejected
           : mode === OpenClawConfigDeliveryMode.Skipped ? ConfigRecoveryEvidence.NextStart : ConfigRecoveryEvidence.Unconfirmed,
       actualAction: restartScheduled ? ConfigRecoveryAction.Scheduled
@@ -373,7 +384,10 @@ export async function deliverOpenClawConfigToGateway(
   for (let attempt = 0; ; attempt += 1) {
     diagnosticAttempt = attempt + 1;
     try {
-      await requestConfigSet(client, input.readConfigFile, diagnose, diagnosticAttempt);
+      const evidence = await requestConfigSet(client, input.readConfigFile, diagnose, diagnosticAttempt);
+      if (evidence === ConfigRecoveryEvidence.Applied) {
+        return finish(OpenClawConfigDeliveryMode.Applied, 'current config application confirmed; write skipped');
+      }
       return finish(
         OpenClawConfigDeliveryMode.Rpc,
         attempt === 0 ? 'config.set acked' : `config.set acked after hash retry (${attempt} retries)`,
@@ -386,6 +400,33 @@ export async function deliverOpenClawConfigToGateway(
             OpenClawConfigDeliveryMode.Rejected,
             `config.set rejected payload: ${describeError(error)}; restart skipped`,
           );
+        }
+        if (classifyDiagnosticError(error) === ConfigDiagnosticErrorKind.Timeout) {
+          const applied = await confirmOpenClawConfigApplied({
+            readConfigFile: () => stripPluginIndexManagedKeysFromRawConfig(input.readConfigFile()),
+            readSnapshot: async () => {
+              const probeStartedAt = Date.now();
+              try {
+                const snapshot = await client.request<OpenClawConfigSnapshot>(
+                  OpenClawConfigRpcMethod.Get, {}, { timeoutMs: CONFIG_APPLICATION_CHECK_TIMEOUT_MS },
+                );
+                diagnose(() => ({
+                  stage: ConfigDiagnosticStage.Verify, attempt: diagnosticAttempt,
+                  outcome: ConfigDiagnosticOutcome.Succeeded, elapsedMs: Date.now() - probeStartedAt,
+                  timeoutMs: CONFIG_APPLICATION_CHECK_TIMEOUT_MS,
+                }));
+                return snapshot;
+              } catch (probeError) {
+                diagnose(() => ({
+                  stage: ConfigDiagnosticStage.Verify, attempt: diagnosticAttempt,
+                  outcome: ConfigDiagnosticOutcome.Failed, elapsedMs: Date.now() - probeStartedAt,
+                  timeoutMs: CONFIG_APPLICATION_CHECK_TIMEOUT_MS, errorKind: classifyDiagnosticError(probeError),
+                }));
+                throw probeError;
+              }
+            },
+          });
+          if (applied) return finish(OpenClawConfigDeliveryMode.Applied, 'current config application confirmed after timeout');
         }
         return fallback(`config.set failed: ${describeError(error)}`);
       }
