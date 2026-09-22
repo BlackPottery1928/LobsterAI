@@ -17,7 +17,10 @@ import {
   getActivityGroupHeaderLabel,
   getActivityGroupSummary,
   getActivityIndicatorStatusText,
+  getActivityLiveDetail,
+  getActivityLiveStatusText,
   getActivityStepDisplay,
+  getLiveEditDiff,
   getThinkingPhaseLabels,
   getToolInputSummary,
   getToolResultCollapsedDisplay,
@@ -28,6 +31,9 @@ import {
   getTurnMessageIds,
   getTurnStartTimestamp,
   isActivityConsolidatedItem,
+  isActivityItemLive,
+  isToolGroupSettled,
+  splitActivityGroupsPerStep,
   STRUCTURED_TEXT_FORMAT_MAX_CHARS,
   TOOL_RESULT_COLLAPSED_FULL_DISPLAY_MAX_CHARS,
   turnHasSelfIndicatingActivity,
@@ -262,7 +268,7 @@ test('turn end timestamp is the latest message time and duration formats in loca
   expect(formatTurnDuration(3_720_000)).toBe('1小时 2分钟');
 });
 
-test('failed tool steps are counted so the folded process can report them', () => {
+test('failed tool steps are counted for analytics', () => {
   const turn = buildTurn([{
     id: 'user-1', type: 'user', content: 'hello', timestamp: 1000,
   }, {
@@ -479,13 +485,34 @@ test('activity header label summarizes commands, reads, and edits in natural lan
     activityThinkingItem('think-2'),
   ])).toBe('思考过程');
 
-  // Single-step groups show the concrete action instead of an aggregate.
+  // Single-step groups show the concrete action as a past-tense phrase.
   expect(getActivityGroupHeaderLabel([
     activityToolItem('tool-1', 'Bash', undefined, { command: 'npm test -- cowork' }),
-  ])).toBe('Bash npm test -- cowork');
+  ])).toBe('运行了 npm test -- cowork');
   expect(getActivityGroupHeaderLabel([
     activityToolItem('tool-1', 'read_file', undefined, { file_path: '/repo/src/App.tsx' }),
-  ])).toBe('Read App.tsx');
+  ])).toBe('读取了 App.tsx');
+  expect(getActivityGroupHeaderLabel([
+    activityToolItem('tool-1', 'tavily__tavily_search', undefined, { query: 'youdao' }),
+  ])).toBe('使用了 tavily__tavily_search');
+  expect(getActivityGroupHeaderLabel([activityToolItem('tool-1', 'write')])).toBe('写入了文件');
+});
+
+test('a running turn lists one activity group per step and keeps text chunks', () => {
+  const grouped = chunkConsolidatedItemsForDisplay([
+    activityThinkingItem('think-1'),
+    activityToolItem('tool-1'),
+    activityToolItem('tool-2'),
+    activityTextItem('text-1'),
+    activityToolItem('tool-3'),
+  ]);
+  expect(grouped.map(chunk => chunk.kind)).toEqual(['activity_group', 'item', 'activity_group']);
+
+  const perStep = splitActivityGroupsPerStep(grouped);
+  expect(perStep.map(chunk => (chunk.kind === 'activity_group' ? chunk.entries.length : 'text')))
+    .toEqual([1, 1, 1, 'text', 1]);
+  expect(perStep.filter(chunk => chunk.kind === 'activity_group').flatMap(chunk => chunk.entries.map(entry => entry.index)))
+    .toEqual([0, 1, 2, 4]);
 });
 
 test('activity step display shortens file paths to basenames', () => {
@@ -592,4 +619,132 @@ test('completed step count only includes tool groups with a final result', () =>
     ],
   };
   expect(countTurnCompletedSteps(turn)).toBe(2);
+});
+
+const runningToolItem = (
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  result?: { content: string; isFinal: boolean },
+): ConsolidatedItem => ({
+  type: 'tool_group',
+  group: {
+    type: 'tool_group',
+    toolUse: { id: 'use-1', type: 'tool_use', content: '', timestamp: 1, metadata: { toolName, toolInput, toolUseId: 'call-1' } },
+    toolResult: result
+      ? {
+        id: 'result-1',
+        type: 'tool_result',
+        content: result.content,
+        timestamp: 2,
+        metadata: { toolUseId: 'call-1', isStreaming: !result.isFinal, isFinal: result.isFinal },
+      }
+      : null,
+  },
+});
+
+test('a tool step with a streaming result is still live, not settled', () => {
+  const streaming = runningToolItem('exec', { command: 'npm install' }, { content: 'added 3 packages', isFinal: false });
+  const done = runningToolItem('exec', { command: 'npm install' }, { content: 'added 3 packages', isFinal: true });
+  const pending = runningToolItem('exec', { command: 'npm install' });
+  expect(isToolGroupSettled((streaming as Extract<ConsolidatedItem, { type: 'tool_group' }>).group)).toBe(false);
+  expect(isToolGroupSettled((done as Extract<ConsolidatedItem, { type: 'tool_group' }>).group)).toBe(true);
+  expect(isToolGroupSettled((pending as Extract<ConsolidatedItem, { type: 'tool_group' }>).group)).toBe(false);
+});
+
+test('live detail shows the reasoning tail while thinking streams', () => {
+  const reasoning = `${'The runtime says node v24 but the shell has v20. '.repeat(8)}Let me check NODE_PATH.`;
+  const detail = getActivityLiveDetail({
+    type: 'assistant',
+    message: { id: 'think-1', type: 'assistant', content: reasoning, timestamp: 0, metadata: { isThinking: true, isStreaming: true } },
+  });
+  expect(detail?.kind).toBe('reasoning');
+  expect(detail?.text.startsWith('…')).toBe(true);
+  expect(detail?.text.endsWith('Let me check NODE_PATH.')).toBe(true);
+  expect(detail?.text.length).toBeLessThanOrEqual(221);
+  expect(getActivityLiveDetail(activityTextItem('text-1'))).toBeNull();
+});
+
+test('live detail shows the latest output line of a running command and nothing before output', () => {
+  const silent = runningToolItem('exec', { command: 'npm root -g' });
+  expect(getActivityLiveDetail(silent)).toBeNull();
+
+  const streaming = runningToolItem('exec', { command: 'npm root -g' }, {
+    content: '/usr/lib/node_modules\ncorepack\nnpm\n\n',
+    isFinal: false,
+  });
+  expect(getActivityLiveDetail(streaming)).toEqual({ kind: 'output', text: 'npm' });
+
+  const reading = runningToolItem('read', { path: '/tmp/a.md' }, { content: 'partial', isFinal: false });
+  expect(getActivityLiveDetail(reading)).toBeNull();
+});
+
+test('a tool call whose arguments are still streaming reads as generating with live counts', () => {
+  const generating: ConsolidatedItem = {
+    type: 'tool_group',
+    group: {
+      type: 'tool_group',
+      toolUse: {
+        id: 'use-2',
+        type: 'tool_use',
+        content: '',
+        timestamp: 1,
+        metadata: { toolName: 'write', toolInput: {}, toolUseId: 'call-2', isGenerating: true, liveEditDiff: { added: 118, removed: 0 } },
+      },
+      toolResult: null,
+    },
+  };
+  expect(getActivityCurrentActionText(generating)).toBe('正在生成文件内容');
+  expect(getLiveEditDiff((generating as Extract<ConsolidatedItem, { type: 'tool_group' }>).group.toolUse)).toEqual({ added: 118, removed: 0 });
+
+  const started = runningToolItem('write', { path: '/tmp/build.py', content: 'print(1)' });
+  expect(getActivityCurrentActionText(started)).toBe('正在写入 build.py');
+  expect(getLiveEditDiff((started as Extract<ConsolidatedItem, { type: 'tool_group' }>).group.toolUse)).toBeNull();
+});
+
+test('status line phrase follows the running step', () => {
+  expect(getActivityLiveStatusText(runningToolItem('exec', { command: 'npm install' }))).toBe('正在执行命令');
+  expect(getActivityLiveStatusText(runningToolItem('read', { path: '/Users/me/project/README.md' }))).toBe('正在读取文件');
+  expect(getActivityLiveStatusText(runningToolItem('read', { path: '/Users/me/.openclaw/skills/pptx/SKILL.md' }))).toBe('正在读取技能说明');
+  expect(getActivityLiveStatusText(runningToolItem('write', { path: '/tmp/a.py', content: 'x' }))).toBe('正在写入文件');
+  expect(getActivityLiveStatusText(runningToolItem('edit', { path: '/tmp/a.py' }))).toBe('正在修改文件');
+  expect(getActivityLiveStatusText(runningToolItem('grep', { pattern: 'TODO' }))).toBe('正在搜索文件');
+  expect(getActivityLiveStatusText(runningToolItem('web_search', { query: 'tencent 2025' }))).toBe('正在搜索网页');
+  expect(getActivityLiveStatusText(runningToolItem('todowrite', { todos: [] }))).toBe('正在更新任务清单');
+  expect(getActivityLiveStatusText(runningToolItem('ask_user', { question: 'which?' }))).toBe('正在准备提问');
+  expect(getActivityLiveStatusText(runningToolItem('some_plugin_tool', {}))).toBe('正在调用工具');
+  expect(getActivityLiveStatusText({
+    type: 'assistant',
+    message: { id: 'a', type: 'assistant', content: 'partial reply', timestamp: 0, metadata: { isStreaming: true } },
+  })).toBe('正在生成回复');
+  expect(getActivityLiveStatusText({
+    type: 'assistant',
+    message: { id: 't', type: 'assistant', content: 'hmm', timestamp: 0, metadata: { isThinking: true, isStreaming: true } },
+  })).toBe('正在思考');
+});
+
+test('status line says a file is being prepared while its arguments stream', () => {
+  const generating: ConsolidatedItem = {
+    type: 'tool_group',
+    group: {
+      type: 'tool_group',
+      toolUse: {
+        id: 'use-3', type: 'tool_use', content: '', timestamp: 1,
+        metadata: { toolName: 'write', toolInput: {}, toolUseId: 'call-3', isGenerating: true, liveEditDiff: { added: 4, removed: 0 } },
+      },
+      toolResult: null,
+    },
+  };
+  expect(getActivityLiveStatusText(generating)).toBe('正在准备写入文件');
+  expect(isActivityItemLive(generating)).toBe(true);
+});
+
+test('a work item is live until its result is final', () => {
+  expect(isActivityItemLive(runningToolItem('exec', { command: 'ls' }))).toBe(true);
+  expect(isActivityItemLive(runningToolItem('exec', { command: 'ls' }, { content: 'a', isFinal: false }))).toBe(true);
+  expect(isActivityItemLive(runningToolItem('exec', { command: 'ls' }, { content: 'a', isFinal: true }))).toBe(false);
+  expect(isActivityItemLive({
+    type: 'assistant',
+    message: { id: 'a', type: 'assistant', content: 'partial', timestamp: 0, metadata: { isStreaming: true } },
+  })).toBe(true);
+  expect(isActivityItemLive(activityTextItem('done'))).toBe(false);
 });

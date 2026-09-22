@@ -461,6 +461,12 @@ export interface UpdateAgentRequest {
 }
 
 
+/** Live +N/-M line counts streamed while a file tool call's arguments are generated. */
+export interface CoworkLiveEditDiff {
+  added: number;
+  removed: number;
+}
+
 export interface CoworkMessageMetadata {
   toolName?: string;
   toolInput?: Record<string, unknown>;
@@ -471,6 +477,9 @@ export interface CoworkMessageMetadata {
   isError?: boolean;
   isStreaming?: boolean;
   isFinal?: boolean;
+  /** True while the model is still streaming this tool call's arguments. */
+  isGenerating?: boolean;
+  liveEditDiff?: CoworkLiveEditDiff;
   skillIds?: string[];
   kitIds?: string[];
   kitReferences?: KitReference[];

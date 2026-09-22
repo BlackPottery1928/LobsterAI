@@ -15,6 +15,7 @@ import DiffView, { extractDiffFromToolInput } from './DiffView';
 import {
   formatElapsedDuration,
   formatToolInput,
+  getActivityLiveDetail,
   getLargeToolResultSummary,
   getRetainedMediaPollCount,
   getToolDisplayName,
@@ -30,6 +31,7 @@ import {
   isMediaStatusPoll,
   isMediaStatusPollRunning,
   isTodoWriteToolName,
+  isToolGroupSettled,
   normalizeToolName,
   type ParsedTodoItem,
   parseMediaStreamingInfo,
@@ -38,6 +40,7 @@ import {
   type ToolGroupItem,
   truncatePreview,
 } from './messageDisplayUtils';
+import { DiffStatsBadge, getToolGroupDiffStats } from './toolDiffStats';
 
 // ── TodoWriteInputView ───────────────────────────────────────────────────────
 
@@ -130,7 +133,12 @@ const ToolCallGroup: React.FC<{
   const mapText = mapDisplayText ?? ((value: string) => value);
   const toolInputDisplayRaw = formatToolInput(rawToolName, toolInput);
   const toolInputDisplay = toolInputDisplayRaw ? mapText(toolInputDisplayRaw) : null;
-  const toolInputSummaryRaw = getToolInputSummary(rawToolName, toolInput) ?? toolInputDisplayRaw;
+  // A placeholder step whose arguments are still streaming has no input to
+  // summarize yet; an empty "{}" would only look like a broken call.
+  const isGenerating = Boolean(toolUse.metadata?.isGenerating);
+  const toolInputSummaryRaw = isGenerating
+    ? null
+    : getToolInputSummary(rawToolName, toolInput) ?? toolInputDisplayRaw;
   const toolInputSummary = toolInputSummaryRaw ? mapText(toolInputSummaryRaw) : null;
   const [isExpanded, setIsExpanded] = useState(shouldExpandByDefault);
   const collapsedToolResult = useMemo(
@@ -171,6 +179,11 @@ const ToolCallGroup: React.FC<{
     [rawToolName, toolInput],
   );
   const isEditWithDiff = diffDataList !== null && diffDataList.length > 0;
+  // A step is live until its result is final: a streaming result keeps the
+  // pulse and shows the latest output line instead of a line count.
+  const isRunning = isSessionStreaming && !isToolGroupSettled(group);
+  const liveDetail = isRunning ? getActivityLiveDetail({ type: 'tool_group', group }) : null;
+  const diffStats = useMemo(() => getToolGroupDiffStats(group), [group]);
   const reportToolToggle = (nextExpanded: boolean) => {
     const resultLength = toolResultDisplayRaw.length || collapsedToolResult?.text?.length || 0;
     reportConversationBlockAction({
@@ -369,13 +382,13 @@ const ToolCallGroup: React.FC<{
           className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-surface-raised/40 transition-colors"
           aria-expanded={isExpanded}
         >
-          {!toolResult && isSessionStreaming && (
+          {isRunning && (
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse flex-shrink-0" />
           )}
           {isToolError && (
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
           )}
-          <span className={`text-xs text-foreground/90 flex-shrink-0 ${!toolResult && isSessionStreaming ? 'shimmer-text' : ''}`}>
+          <span className={`text-xs text-foreground/90 flex-shrink-0 ${isRunning ? 'shimmer-text' : ''}`}>
             {toolName}
           </span>
           {rowSummary && (
@@ -383,7 +396,7 @@ const ToolCallGroup: React.FC<{
               {rowSummary}
             </span>
           )}
-          {!toolResult && isSessionStreaming && (
+          {isRunning && (
             <span className="text-xs text-muted flex-shrink-0">
               <ToolRunningElapsed startTimestamp={toolUse.timestamp} />
             </span>
@@ -419,7 +432,7 @@ const ToolCallGroup: React.FC<{
         className="w-full flex items-start gap-2 text-left group relative z-10"
       >
         <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${
-          !toolResult && isSessionStreaming
+          isRunning
             ? 'bg-blue-500 animate-pulse'
             : !toolResult
               ? 'bg-blue-500'
@@ -429,7 +442,7 @@ const ToolCallGroup: React.FC<{
         }`} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-sm font-medium text-secondary ${!toolResult && isSessionStreaming ? 'shimmer-text' : ''}`}>
+            <span className={`text-sm font-medium text-secondary ${isRunning ? 'shimmer-text' : ''}`}>
               {toolName}
             </span>
             {toolInputSummary && (
@@ -437,8 +450,9 @@ const ToolCallGroup: React.FC<{
                 {toolInputSummary}
               </code>
             )}
+            {diffStats && <DiffStatsBadge stats={diffStats} className="text-xs" />}
           </div>
-          {toolResult && !isTodoWriteTool && (hasToolResultText || showNoDetailError) && (
+          {toolResult && !isRunning && !isTodoWriteTool && (hasToolResultText || showNoDetailError) && (
             <div className={`text-xs mt-0.5 ${
               hasToolResultText
                 ? 'text-muted'
@@ -451,10 +465,20 @@ const ToolCallGroup: React.FC<{
                 : toolResultFallback}
             </div>
           )}
-          {!toolResult && isSessionStreaming && (
-            <div className="text-xs text-muted mt-0.5">
-              {i18nService.t('coworkToolRunning')}
-              <ToolRunningElapsed startTimestamp={toolUse.timestamp} />
+          {isRunning && (
+            <div className="mt-0.5 flex min-w-0 items-baseline text-xs text-muted">
+              {liveDetail?.kind === 'output' ? (
+                <span className="min-w-0 truncate font-mono" data-activity-live-detail="output">
+                  {liveDetail.text}
+                </span>
+              ) : (
+                <span className="flex-shrink-0">
+                  {i18nService.t(isGenerating ? 'coworkActivityLiveGenerating' : 'coworkToolRunning')}
+                </span>
+              )}
+              <span className="flex-shrink-0 whitespace-pre">
+                <ToolRunningElapsed startTimestamp={toolUse.timestamp} />
+              </span>
             </div>
           )}
         </div>

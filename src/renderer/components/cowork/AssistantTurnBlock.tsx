@@ -57,6 +57,7 @@ import {
   formatElapsedDuration,
   formatTurnDuration,
   getActivityIndicatorStatusText,
+  getActivityLiveStatusText,
   getContextCompactionMessageLabel,
   getMediaCompletionDisplayText,
   getRetainedMediaPollCount,
@@ -72,8 +73,10 @@ import {
   getVisibleAssistantItems,
   hasText,
   isActivityConsolidatedItem,
+  isActivityItemLive,
   isContextCompactionMessage,
   isDuplicateGeneratedVideoAssistantMessage,
+  splitActivityGroupsPerStep,
   type ToolGroupItem,
 } from './messageDisplayUtils';
 import ThinkingBlock from './ThinkingBlock';
@@ -161,8 +164,9 @@ const ContextCompactionDivider: React.FC<{ label: string; active?: boolean }> = 
 // ── ActivityIndicator ────────────────────────────────────────────────────────
 // Persistent busy-state line at the insertion point of the last turn
 // (Codex / ChatGPT style): breathing dot + shimmering status text + elapsed
-// time, visible for the whole run. The label starts as "thinking" and
-// switches to "working" once the turn has shown any content.
+// time, visible for the whole run. The label follows what is happening:
+// the running step's phrase ("Running a command") while a step is live,
+// rotating thinking words while the model is silent.
 
 // One tick: the first value the user sees is "1s", counting up naturally.
 const ACTIVITY_TIMER_APPEAR_DELAY_MS = 1000;
@@ -173,16 +177,19 @@ const ACTIVITY_PHASE_INTERVAL_MS = 2200;
 
 export const ActivityIndicator: React.FC<{
   fingerprint: string;
-  hasContent: boolean;
   startTimestamp: number | null;
+  /** Session-level override (e.g. context maintenance); wins over everything else. */
   statusTextOverride?: string | null;
+  /** What the running step is doing right now; null while the model is silent. */
+  liveStatusText?: string | null;
   /** Tool steps of the turn that already finished; rendered as a small "N steps done" cue. */
   completedSteps?: number;
-}> = ({ fingerprint, hasContent, startTimestamp, statusTextOverride, completedSteps = 0 }) => {
+}> = ({ fingerprint, startTimestamp, statusTextOverride, liveStatusText = null, completedSteps = 0 }) => {
   const [isLongWaiting, setIsLongWaiting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [phaseIndex, setPhaseIndex] = useState(0);
-  const thinking = !statusTextOverride && !hasContent && !isLongWaiting;
+  // The model is silent: nothing overrides the label and no step is running.
+  const thinking = !statusTextOverride && !liveStatusText && !isLongWaiting;
 
   useEffect(() => {
     if (!thinking) {
@@ -218,8 +225,11 @@ export const ActivityIndicator: React.FC<{
   // counter rather than one restarted from zero.
   const elapsedMs = startTimestamp != null ? Math.max(0, now - startTimestamp) : null;
   const phases = getThinkingPhaseLabels();
+  // A running step always names itself; the long-wait hint only applies to a
+  // silent model, never to a command that is simply taking its time.
   const statusText = statusTextOverride
-    ?? (thinking ? phases[phaseIndex % phases.length] : getActivityIndicatorStatusText(false, isLongWaiting, hasContent));
+    ?? liveStatusText
+    ?? (isLongWaiting ? getActivityIndicatorStatusText(false, true) : phases[phaseIndex % phases.length]);
 
   return (
     <div className="flex items-center gap-2 py-1 animate-fade-in">
@@ -767,11 +777,16 @@ const AssistantTurnBlock: React.FC<{
   };
 
   // Tool groups with an override (e.g. subagent cards) stay visible on their own.
-  const renderChunks = chunkConsolidatedItemsForDisplay(
+  const groupedChunks = chunkConsolidatedItemsForDisplay(
     consolidatedItems,
     (item) => isActivityConsolidatedItem(item)
       && !(item.type === 'tool_group' && toolGroupOverrides.has(item.group.toolUse.id)),
   );
+  // While the turn runs, each step keeps its own compact line and new steps
+  // append below (WorkBuddy style) instead of re-labelling one collapsed
+  // line; consecutive steps only merge into a summary inside the folded
+  // process once the turn is done.
+  const renderChunks = isStreamingTurn ? splitActivityGroupsPerStep(groupedChunks) : groupedChunks;
 
   // Indices that render as standalone timeline rows; the timeline connector
   // only draws between two consecutive ones (collapsed groups broke the old
@@ -950,12 +965,20 @@ const AssistantTurnBlock: React.FC<{
   const processBaseLabel = processDurationMs != null && processDurationMs >= 1000
     ? i18nService.t('coworkTurnProcessDuration').replace('{duration}', formatTurnDuration(processDurationMs))
     : i18nService.t('coworkTurnProcess');
-  // Failed steps fold with the rest of the process; the duration line reports
-  // how many there were so the fold never hides a failure silently.
+  // The folded line is just the duration. Step and failure counts only feed
+  // analytics: a turn that reached an answer worked around any failed step
+  // on its own, and the expanded rows still mark each one.
+  const processStepCount = countTurnCompletedSteps(turn);
   const failedStepCount = countTurnFailedSteps(turn);
-  const processLabel = failedStepCount > 0
-    ? `${processBaseLabel} · ${i18nService.t('coworkTurnProcessFailedSteps').replace('{count}', String(failedStepCount))}`
-    : processBaseLabel;
+  const processLabel = processBaseLabel;
+  // What the running step is doing right now, for the status line: the last
+  // work item while it is still live; null in the silent gaps between steps.
+  const liveTailItem = isStreamingTurn && consolidatedItems.length > 0
+    ? consolidatedItems[consolidatedItems.length - 1]
+    : null;
+  const liveStatusText = liveTailItem && isActivityItemLive(liveTailItem)
+    ? getActivityLiveStatusText(liveTailItem)
+    : null;
 
   const handleProcessToggle = () => {
     const nextExpanded = !isProcessExpanded;
@@ -964,6 +987,8 @@ const AssistantTurnBlock: React.FC<{
       blockType: 'turn_process',
       params: {
         processChunkCount: processChunks.length,
+        stepCount: processStepCount,
+        failedStepCount,
         durationMs: processDurationMs ?? undefined,
       },
     });
@@ -1007,9 +1032,9 @@ const AssistantTurnBlock: React.FC<{
             {showActivityIndicator && (
               <ActivityIndicator
                 fingerprint={getTurnActivityFingerprint(turn)}
-                hasContent={visibleAssistantItems.length > 0}
                 startTimestamp={getTurnStartTimestamp(turn)}
                 statusTextOverride={activityStatusOverride}
+                liveStatusText={liveStatusText}
                 completedSteps={countTurnCompletedSteps(turn)}
               />
             )}
