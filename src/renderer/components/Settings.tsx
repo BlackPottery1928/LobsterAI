@@ -36,7 +36,7 @@ import { decryptSecret, decryptWithPassword, EncryptedPayload, encryptWithPasswo
 import { i18nService, LanguageType } from '../services/i18n';
 import { imService } from '../services/im';
 import { LogReporterAction, reportYdAnalyzer } from '../services/logReporter';
-import { resolveOpenClawRepairError } from '../services/openclawRepair';
+import { resolveOpenClawRepairError, resolveOpenClawRepairHistoryWarning } from '../services/openclawRepair';
 import { clearPendingPublishingConversionAttribution } from '../services/publishingConversionAttribution';
 import { clearPublishingSubscriptionRecoveryAnalytics } from '../services/publishingSubscriptionRecovery';
 import { formatShortcutForDisplay, getShortcutConflictSignature, isTextEditingSafeShortcut, matchesShortcut } from '../services/shortcuts';
@@ -2969,9 +2969,10 @@ const Settings: React.FC<SettingsProps> = ({
 
   const resolveOpenClawRepairMessage = (result: OpenClawGatewayRepairResult): string => {
     if (result.success) {
-      return result.backupPath
+      const message = result.backupPath
         ? i18nService.t('openClawRepairSuccess')
         : i18nService.t('openClawRepairSuccessNoBackup');
+      return [message, resolveOpenClawRepairHistoryWarning(result)].filter(Boolean).join('\n');
     }
     return resolveOpenClawRepairError(result, false);
   };

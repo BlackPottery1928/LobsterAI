@@ -1,5 +1,29 @@
 # OpenClaw v2026.8.1 patch notes
 
+## Device identity conflicts without an import receipt
+
+`openclaw-device-identity-preservation.patch` aligns the identity migration owner
+with the runtime reader. A valid canonical SQLite identity remains authoritative
+when a different valid retired `identity/device.json` exists without a migration
+receipt. Startup and Doctor preserve both identities and report a notice instead
+of refusing Gateway startup. Neither key material nor device auth/pairing rows
+are changed, and no receipt is fabricated for an identity that was not imported.
+
+The existing stopped-Gateway lease, identity coordinator, safe source validation,
+native claim and simultaneous source/Doctor claim checks run before preservation.
+A conflicting interrupted Doctor claim still follows the existing recovery error
+path. Matching identities and invalid canonical repair retain their existing rules.
+The startup helper bundler requires the patch. Rebuild both the Gateway/CLI runtime
+and startup helpers; changing only the helper leaves Gateway's own preflight stale.
+
+Verify upstream `state-migrations.device-identity.test.ts` and
+`state-migrations.lock.test.ts`, then run LobsterAI's `openclawStartupStateMigration`
+tests with `OPENCLAW_STARTUP_MIGRATION_RUNTIME` pointing to the rebuilt runtime.
+Set `OPENCLAW_STARTUP_MIGRATION_GATEWAY=1` to exercise real Gateway restart with
+a conflicting identity, no receipt and a cleared startup checkpoint. Also verify
+startup, one-click repair and a cold restart through the Electron client.
+Remove this patch when the pinned upstream owner provides equivalent preservation.
+
 ## Channel-scoped QR login
 
 `openclaw-web-login-channel-routing.patch` adds optional `channel` selection to
@@ -317,3 +341,121 @@ All 44 patches apply successfully to a clean pinned checkout and on reapplicatio
 The isolated Gateway proof uses the rebuilt startup helper with the existing
 mac-arm64 Gateway payload; a full runtime rebuild, Windows package, actual app UI
 and provider request against the customer's environment have not been validated.
+
+## Scheduling from admitted IM conversations
+
+`zz-openclaw-channel-scheduling-authority.patch` adds the opt-in
+`cron.allowChannelScheduling` setting. LobsterAI enables it for fresh user turns
+that have already passed the IM channel's access policy. OpenClaw v2026.8.1
+ignores wildcard command owners, so the previous `ownerAllowFrom: ["*"]`
+integration did not expose the native `automations` tool to these conversations.
+The gateway RPC methods remain named `cron.*`.
+
+The patch admits a scheduling capability for the exact channel run. It uses the
+existing final executable tool surface and cron authority resolver, leaving
+explicit tool policies and other owner-only tools unchanged. Non-owner channel
+capabilities cannot acquire operator-turn authority. Missing senders, internal
+sources, heartbeats, room events, relayed inputs, spawned sessions and replayed
+turns remain excluded; the capability expires when its originating run settles.
+The setting is disabled by default outside LobsterAI. The `zz-` prefix places
+the patch after the existing cron schema patches.
+
+The built-in embedded executor must also bind that capability when constructing
+tools, as the Codex executor already does. Its resolver reads the completed tool
+capture at execution time, so scheduling stays unavailable until the final
+callable surface is known and retained tool callbacks cannot outlive the run.
+
+Creator grants and scheduling-only capability markers share process-local
+registries across the gateway bundle and plugin SDK chunks. Otherwise an SDK
+grant cannot be redeemed by the gateway, and a capability can lose its
+scheduling-only restriction when transported between module copies. Grant
+consumption stays single-use and gateway lifecycle resets revoke pending grants.
+
+Native creation also retains the active channel account when a model supplies
+an explicit recipient on that same channel. Explicit accounts and other channels
+remain unchanged, and no thread is inherited for an explicit recipient. Without
+this, a multi-account Feishu reminder can be created successfully but then try
+to send through the unconfigured `default` account.
+
+This belongs in a version-scoped patch because capability admission is internal
+to OpenClaw's reply runner; marking every IM user as a global command owner would
+also expose unrelated administrative tools. When upgrading, remove this patch
+only after verifying equivalent channel scheduling admission and authority
+isolation. Rebuild the runtime and gateway bundle before validating or shipping.
+
+Regression coverage lives in the patch's admission, capability and schema tests.
+LobsterAI config-sync tests verify the opt-in and removal of the ineffective
+wildcard. Validate the complete flow with a real channel message, the Electron
+scheduled-task view, native `automations` calls, and the reminder's delivery to
+the originating channel account.
+
+## Native Windows private directories
+
+`openclaw-windows-private-directory-native.patch` backports upstream commit
+d1175e88b4 (PR #140593, first released in v2026.9.3). v2026.8.1 creates private
+Windows SQLite staging directories by spawning `powershell.exe` with an
+`Add-Type` compiler step. Security software or policy that denies that child
+process (CreateProcess `ERROR_ACCESS_DENIED`, surfaced by Node as `spawn EPERM`)
+breaks legacy session import, device-identity migration, the Gateway
+write-admission preflight and Doctor itself, so neither Quick Repair nor a
+reinstall can recover. The patch creates the directory through Koffi and the
+Win32 security APIs with the same atomic protected DACL and exclusive creation.
+
+LobsterAI adds one guard on top of upstream: when the native helper cannot load
+(stubbed Koffi or a blocked addon), roots inside `%USERPROFILE%` fall back to an
+exclusive `mkdir` that inherits the owner/SYSTEM/Administrators ACL of the
+profile; every other root remains fail-closed with the load error as its cause.
+The upstream restart-helper changes are not included.
+
+Windows runtimes must ship the real `koffi` package and its
+`@koromix/koffi-win32-*` binary: `prune-openclaw-runtime.cjs` keeps them (and
+trims build-only koffi content) when `runtime-build-info.json` reports a `win-*`
+target. The runtime payload then keeps exactly the target's platform package
+and refuses to package a real loader without it; a stubbed `koffi` still drops
+every platform binary. The startup helper bundler refuses a source tree without
+the native helper, and every bundle is checked for the removed PowerShell
+implementation.
+
+Verify with upstream `sqlite-private-directory.test.ts`,
+`windows-private-directory.test.ts` and, on Windows,
+`sqlite-private-directory.windows.test.ts`, then LobsterAI's
+`openclawNativePrivateDirectory`, `pruneOpenClawRuntime`,
+`openclawWindowsPayload` and `openclawSqliteWorkerProtocol.runtime` tests.
+Rebuild the runtime (`OPENCLAW_FORCE_BUILD=1` if the patch hash did not change)
+and, on a Windows machine, simulate the block by denying execute on
+`powershell.exe` for the test user (`icacls ... /deny <user>:(X)`) before running
+a legacy session import, Quick Repair and a cold Gateway start. Remove this
+patch when the pinned upstream includes the native helper.
+
+## Active exec sessions below the system prompt cache boundary
+
+`openclaw-active-exec-sessions-runtime-context.patch` moves the per-turn
+`Active exec sessions:` snapshot out of the `## Runtime` section of the system
+prompt and into the hidden runtime-context carrier of the current user turn,
+mirroring upstream `#140799` (shipped in v2026.9.3). The stable guidance line
+(`Before input: process log; ...`) stays in the system prompt whenever the
+`process` tool is callable. The carrier block is emitted only when the session
+scope has running background processes, so idle turns add no bytes; upstream
+still emits a `none` placeholder there (`#150286`, fix PR `#150290` open).
+
+Why: on the OpenAI Completions route the whole system prompt is one message in
+front of the history, so a background process starting or finishing between
+turns rewrote the first bytes of the request and the provider prefix cache
+missed on the entire history. The 2026-09-22 credit report showed each such
+miss re-billing ~850K tokens at full price; within one run the snapshot was
+built once per attempt, so in-run calls were already stable.
+
+Behavior kept: runtime-only turns (heartbeat/cron without a user message) never
+install the carrier in v2026.8.1, so they no longer see the process list; raw
+model probes and settled tool finalization skip it too. Compaction hooks keep
+the structured `activeProcessSessions` data. `prepareEmbeddedAttemptPromptContext`
+now requires `capabilityToolNames` and `sandboxSessionKey`, supplied by the
+settled phase from the prepared tool catalog and attempt setup.
+
+Verify with upstream `runtime-facts-prompt.test.ts`,
+`embedded-agent-runner/system-prompt.test.ts` and
+`run/attempt-prompt-context.test.ts`, then in the Electron client confirm that
+`systemPromptChars` in `[context-diag] pre-prompt` stays constant across turns
+while a background `exec` is running and that the gateway log no longer reports
+`[prompt-cache] cache read dropped` at run boundaries. Remove this patch when
+the pinned upstream includes `#140799`.

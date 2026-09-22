@@ -103,10 +103,12 @@ const EngineFailureOverlay: React.FC<EngineFailureOverlayProps> = ({
   const isRuntimeMissing = status.errorCode === OpenClawEngineErrorCode.RuntimeEntryMissing;
   const isRuntimeDamaged = status.errorCode === OpenClawEngineErrorCode.RuntimeFilesMissing;
   const needsMediaMigration = status.errorCode === OpenClawEngineErrorCode.AgentMediaMigrationRequired;
+  const migrationRefused = status.errorCode === OpenClawEngineErrorCode.StartupMigrationRefused;
   const titleKey = isRepairingGateway ? 'openClawRepairRunning' : isRuntimeDamaged ? 'coworkOpenClawRuntimeDamagedError'
     : isRuntimeMissing ? 'coworkOpenClawRuntimeMissingError' : needsMediaMigration ? 'openClawAgentMediaMigrationTitle' : 'coworkOpenClawError';
   const hintKey = isRuntimeDamaged ? 'coworkOpenClawRuntimeDamagedRepairHint'
-    : isRuntimeMissing ? 'coworkOpenClawRuntimeMissingRepairHint' : needsMediaMigration ? 'openClawAgentMediaMigrationHint' : 'coworkOpenClawErrorRepairHint';
+    : isRuntimeMissing ? 'coworkOpenClawRuntimeMissingRepairHint' : needsMediaMigration ? 'openClawAgentMediaMigrationHint'
+      : migrationRefused ? 'openClawStartupMigrationRefusedHint' : 'coworkOpenClawErrorRepairHint';
 
   if (isDeferred) {
     return (
