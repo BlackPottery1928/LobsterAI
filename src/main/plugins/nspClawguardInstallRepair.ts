@@ -57,26 +57,33 @@ export async function repairNspClawguardInstall(
   if (!plugins.load?.paths?.some(value => typeof value === 'string' && path.isAbsolute(value)
     && (samePath(value, pluginDir) || samePath(value, path.dirname(pluginDir))))) return [];
 
+  const oldPath = path.join(stateDir, 'extensions', id);
+  if (!isMissingUnaliasedPluginPath(oldPath)) return [];
+  const payloadPaths = ['package.json', 'openclaw.plugin.json', NSP_CLAWGUARD.Entry]
+    .map(file => path.join(pluginDir, file));
+  const readRepairPackage = () => {
+    for (const file of payloadPaths) assertOwnedRepairPath(userDataDir, file);
+    try { return readSupportedNspClawguardPackage(pluginDir); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return undefined;
+      throw error;
+    }
+  };
+  // Skip unrelated or missing payloads before waiting on a shared SQLite lease.
+  // These are only preliminary checks; repeat them after acquiring ownership.
+  if (!readRepairPackage()) return [];
+
   // Acquire the pinned plugin lifecycle lease before taking the record snapshot.
   // It excludes plugin CLI updates as well as the outer lock excluding gateways.
   return withOwners(async owners => {
     const records = owners.read();
     const record = records[id];
-    const oldPath = path.join(stateDir, 'extensions', id);
     if (record?.source !== OpenClawRepairPluginSource.Npm
       || !NSP_CLAWGUARD.Releases.some(release => record.spec === `${id}@${release.version}`)
       || (record.resolvedName !== undefined && record.resolvedName !== id)
       || typeof record.installPath !== 'string' || !path.isAbsolute(record.installPath)
       || !samePath(record.installPath, oldPath) || !isMissingUnaliasedPluginPath(oldPath)) return [];
 
-    const payloadPaths = ['package.json', 'openclaw.plugin.json', NSP_CLAWGUARD.Entry]
-      .map(file => path.join(pluginDir, file));
-    for (const file of payloadPaths) assertOwnedRepairPath(userDataDir, file);
-    let pkg: ReturnType<typeof readSupportedNspClawguardPackage>;
-    try { pkg = readSupportedNspClawguardPackage(pluginDir); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return [];
-      throw error;
-    }
+    const pkg = readRepairPackage();
     if (!pkg) return [];
     const payload = payloadPaths.map(file => fs.readFileSync(file));
     // Use the pinned static payload validator, without executing plugin code.

@@ -53,10 +53,11 @@ function fixture(release: typeof NSP_CLAWGUARD.Releases[number] = NSP_CLAWGUARD.
     validate: vi.fn(async () => {}),
   };
   const options = { stateDir, configPath, backups: [] as string[] };
-  return { options, owners, config, pluginDir, oldPath, db,
+  const withOwners = vi.fn<Parameters<typeof repairNspClawguardInstall>[1]>(run => run(owners));
+  return { options, owners, withOwners, config, pluginDir, oldPath, db,
     saveConfig: () => fs.writeFileSync(configPath, JSON.stringify(config)),
     setRecord: (patch: Partial<RepairInstallRecord>) => { Object.assign(records[id], patch); },
-    run: () => repairNspClawguardInstall(options, run => run(owners)) };
+    run: () => repairNspClawguardInstall(options, withOwners) };
 }
 
 afterEach(() => {
@@ -112,6 +113,49 @@ test.each(['custom-path', 'other-source', 'other-package', 'unknown-version', 'l
   if (state === 'unsupported-payload') fs.writeFileSync(path.join(f.pluginDir, 'openclaw.plugin.json'), JSON.stringify({ id, version: '2.4.13' }));
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   expect(await f.run()).toEqual([]);
+  expect(f.owners.write).not.toHaveBeenCalled();
+  expect(f.options.backups).toEqual([]);
+});
+
+test.each(['live-old-path', 'missing-payload', 'malformed-payload', 'unsupported-2.5.3'])('skips %s even when the plugin lease is unavailable', async state => {
+  const f = fixture();
+  if (state === 'live-old-path') fs.mkdirSync(f.oldPath, { recursive: true });
+  if (state === 'missing-payload') fs.unlinkSync(path.join(f.pluginDir, 'package.json'));
+  if (state === 'malformed-payload') fs.writeFileSync(path.join(f.pluginDir, 'package.json'), '{');
+  if (state === 'unsupported-2.5.3') {
+    const packagePath = path.join(f.pluginDir, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+    fs.writeFileSync(packagePath, JSON.stringify({ ...pkg, version: '2.5.3' }));
+    fs.writeFileSync(path.join(f.pluginDir, 'openclaw.plugin.json'), JSON.stringify({ id, version: '2.5.3' }));
+  }
+  f.withOwners.mockRejectedValue(new Error('Plugin lifecycle lease unavailable'));
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  expect(await f.run()).toEqual([]);
+  expect(f.withOwners).not.toHaveBeenCalled();
+  expect(f.owners.read).not.toHaveBeenCalled();
+  expect(f.owners.write).not.toHaveBeenCalled();
+  expect(f.options.backups).toEqual([]);
+});
+
+test.each(['old-install', 'payload'])('rechecks %s after waiting for the plugin lease', async changed => {
+  const f = fixture();
+  f.withOwners.mockImplementation(async run => {
+    if (changed === 'old-install') fs.mkdirSync(f.oldPath, { recursive: true });
+    if (changed === 'payload') fs.unlinkSync(path.join(f.pluginDir, 'package.json'));
+    return run(f.owners);
+  });
+  expect(await f.run()).toEqual([]);
+  expect(f.withOwners).toHaveBeenCalledOnce();
+  expect(f.owners.validate).not.toHaveBeenCalled();
+  expect(f.owners.write).not.toHaveBeenCalled();
+  expect(f.options.backups).toEqual([]);
+});
+
+test('does not continue an applicable repair without the plugin lease', async () => {
+  const f = fixture();
+  f.withOwners.mockRejectedValue(new Error('Plugin lifecycle lease unavailable'));
+  await expect(f.run()).rejects.toThrow('Plugin lifecycle lease unavailable');
+  expect(f.owners.read).not.toHaveBeenCalled();
   expect(f.owners.write).not.toHaveBeenCalled();
   expect(f.options.backups).toEqual([]);
 });
