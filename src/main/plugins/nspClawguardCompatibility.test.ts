@@ -51,19 +51,19 @@ function createRoot(): string {
   return root;
 }
 
-function createPlugin(root: string, inStateDir = false): string {
+function createPlugin(root: string, inStateDir = false, release: typeof NSP_CLAWGUARD.Releases[number] = NSP_CLAWGUARD.Releases[1]): string {
   const pluginDir = path.join(root, inStateDir ? 'state/extensions' : 'third-party-extensions', NSP_CLAWGUARD.Id);
   fs.mkdirSync(path.join(pluginDir, 'dist'), { recursive: true });
   fs.writeFileSync(path.join(pluginDir, 'package.json'), JSON.stringify({
     name: NSP_CLAWGUARD.Id,
-    version: NSP_CLAWGUARD.SupportedVersion,
+    version: release.version,
     main: NSP_CLAWGUARD.Entry,
     type: 'module',
     openclaw: { extensions: [NSP_CLAWGUARD.Entry] },
   }));
   fs.writeFileSync(path.join(pluginDir, 'openclaw.plugin.json'), JSON.stringify({
     id: NSP_CLAWGUARD.Id,
-    version: NSP_CLAWGUARD.SupportedVersion,
+    version: release.manifestVersion,
   }));
   const entryPath = path.join(pluginDir, NSP_CLAWGUARD.Entry);
   fs.writeFileSync(entryPath, pluginSource);
@@ -132,9 +132,10 @@ test('disabled installed plugin stays untouched until enabled; disabling later k
   expect(fs.readFileSync(entry, 'utf8')).toBe(patched);
 });
 
-test.each([false, true])('patches a supported enabled installation (state directory: %s) with a byte-exact backup', inStateDir => {
+test.each(NSP_CLAWGUARD.Releases.flatMap(release => [false, true].map(inStateDir => ({ release, inStateDir }))))(
+  'patches $release.version (state directory: $inStateDir) with a byte-exact backup', ({ release, inStateDir }) => {
   const root = createRoot();
-  const entry = createPlugin(root, inStateDir);
+  const entry = createPlugin(root, inStateDir, release);
   const manifest = path.join(path.dirname(path.dirname(entry)), 'openclaw.plugin.json');
   const originalManifest = fs.readFileSync(manifest);
   expect(patch(root)).toBe(true);
@@ -158,10 +159,10 @@ test.each([false, true])('patches a supported enabled installation (state direct
   expect(fs.readdirSync(path.dirname(entry)).filter(name => name.endsWith('.bak'))).toEqual(backups);
 });
 
-describe('runtime require compatibility', () => {
+describe.each(NSP_CLAWGUARD.Releases)('runtime require compatibility $version', release => {
   test.each([false, true])('preserves registration and host fs.closeSync (interop proxy: %s)', interopProxy => {
     const root = createRoot();
-    const entry = createPlugin(root);
+    const entry = createPlugin(root, false, release);
     expect(() => runPlugin(entry, interopProxy)).toThrow(
       interopProxy ? /Cannot read properties of undefined/ : /Dynamic require/,
     );
@@ -170,9 +171,10 @@ describe('runtime require compatibility', () => {
   });
 });
 
-test.each([false, true])('initializes an async startup hook in a decoded module directory (previous v1 patch: %s)', previouslyPatched => {
+test.each(NSP_CLAWGUARD.Releases.flatMap(release => [false, true].map(previouslyPatched => ({ release, previouslyPatched }))))(
+  'initializes $release.version async startup in a decoded module directory (previous v1: $previouslyPatched)', ({ release, previouslyPatched }) => {
   const root = path.join(createRoot(), '插件 #100%');
-  const entry = createPlugin(root);
+  const entry = createPlugin(root, false, release);
   const original = previouslyPatched ? startupSource.replace(legacyRequire, nativeRequireV1) : startupSource;
   fs.writeFileSync(entry, original);
   const runStartup = () => execFileSync(process.execPath, ['--input-type=module', '--eval', `
@@ -247,6 +249,33 @@ test('does not recreate a missing installation from a stale enabled record', () 
   const root = createRoot();
   expect(patch(root)).toBe(false);
   expect(fs.readdirSync(root)).toEqual([]);
+});
+
+test.each([
+  ['2.4.13', '2.4.13'], ['2.5.0', '2.4.12'], ['2.4.12', '2.4.12'],
+])('rejects an unpublished package/manifest pair %s / %s', (version, manifestVersion) => {
+  const root = createRoot();
+  const entry = createPlugin(root);
+  const pluginDir = path.dirname(path.dirname(entry));
+  for (const [file, value] of [['package.json', version], ['openclaw.plugin.json', manifestVersion]]) {
+    const filePath = path.join(pluginDir, file);
+    const json = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    fs.writeFileSync(filePath, JSON.stringify({ ...json, version: value }));
+  }
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  expect(patch(root)).toBe(false);
+  expect(fs.readFileSync(entry, 'utf8')).toBe(pluginSource);
+});
+
+test('does not turn an unknown 2.4.13 async registration into a synchronous function', () => {
+  const root = createRoot();
+  const entry = createPlugin(root, false, NSP_CLAWGUARD.Releases[0]);
+  const source = `${legacyRequire}\nasync function register(api) { await Promise.resolve(); api.on('gateway_start', () => {}); }\nexport {\n  register as default\n};`;
+  fs.writeFileSync(entry, source);
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  expect(patch(root)).toBe(false);
+  expect(fs.readFileSync(entry, 'utf8')).toBe(source);
+  expect(fs.readdirSync(path.dirname(entry))).toEqual(['index.mjs']);
 });
 
 test('does not follow a plugin junction into an external installation', () => {

@@ -66,6 +66,7 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedE
       '#openclaw-repair-agent-targets': path.join(openclawSrc, 'src/config/sessions/targets.ts'),
       '#openclaw-repair-vectors': path.join(openclawSrc, 'packages/memory-host-sdk/src/host/sqlite-vec.ts'),
       '#openclaw-repair-plugin-records': path.join(openclawSrc, 'src/plugins/installed-plugin-index-records.ts'),
+      '#openclaw-plugin-lifecycle-lease': path.join(openclawSrc, 'src/plugins/plugin-lifecycle-lease.ts'),
       '#openclaw-repair-plugin-payload': path.join(openclawSrc, 'src/cli/update-cli/plugin-payload-validation.ts'),
       '#openclaw-repair-plugin-consent': path.join(openclawSrc, 'src/plugins/capability-consent.ts'),
       '#openclaw-dreaming-workspaces': path.join(openclawSrc, 'src/memory-host-sdk/dreaming.ts'),
