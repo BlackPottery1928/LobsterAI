@@ -16,6 +16,7 @@ export type ConfigWorkloadState = typeof ConfigWorkloadState[keyof typeof Config
 export const ConfigRecoveryEvidence = {
   Unconfirmed: 'unconfirmed',
   Accepted: 'accepted',
+  Applied: 'applied',
   Rejected: 'rejected',
   NextStart: 'next-start',
 } as const;
@@ -30,6 +31,7 @@ export const ConfigRecoveryAction = {
 export type ConfigRecoveryAction = typeof ConfigRecoveryAction[keyof typeof ConfigRecoveryAction];
 
 export const ConfigRecoverySuggestion = {
+  None: 'none',
   WaitBusy: 'wait-busy',
   WaitEvidence: 'wait-evidence',
   RetainPending: 'retain-pending',
@@ -45,8 +47,10 @@ export function observeConfigRecovery(input: {
   actualAction: ConfigRecoveryAction;
   workloadState: ConfigWorkloadState;
 }) {
-  const suggestion = input.evidence === ConfigRecoveryEvidence.Accepted
-    ? ConfigRecoverySuggestion.VerifyApplied
+  const suggestion = input.evidence === ConfigRecoveryEvidence.Applied
+    ? ConfigRecoverySuggestion.None
+    : input.evidence === ConfigRecoveryEvidence.Accepted
+      ? ConfigRecoverySuggestion.VerifyApplied
     : input.evidence === ConfigRecoveryEvidence.Rejected
       ? ConfigRecoverySuggestion.ReportRejection
       : input.evidence === ConfigRecoveryEvidence.NextStart
@@ -66,6 +70,7 @@ export const ConfigDiagnosticStage = {
   Connect: 'connect',
   Get: 'config.get',
   Set: 'config.set',
+  Verify: 'verify-applied',
   Complete: 'complete',
 } as const;
 export type ConfigDiagnosticStage = typeof ConfigDiagnosticStage[keyof typeof ConfigDiagnosticStage];
