@@ -388,3 +388,41 @@ LobsterAI config-sync tests verify the opt-in and removal of the ineffective
 wildcard. Validate the complete flow with a real channel message, the Electron
 scheduled-task view, native `automations` calls, and the reminder's delivery to
 the originating channel account.
+
+## Native Windows private directories
+
+`openclaw-windows-private-directory-native.patch` backports upstream commit
+d1175e88b4 (PR #140593, first released in v2026.9.3). v2026.8.1 creates private
+Windows SQLite staging directories by spawning `powershell.exe` with an
+`Add-Type` compiler step. Security software or policy that denies that child
+process (CreateProcess `ERROR_ACCESS_DENIED`, surfaced by Node as `spawn EPERM`)
+breaks legacy session import, device-identity migration, the Gateway
+write-admission preflight and Doctor itself, so neither Quick Repair nor a
+reinstall can recover. The patch creates the directory through Koffi and the
+Win32 security APIs with the same atomic protected DACL and exclusive creation.
+
+LobsterAI adds one guard on top of upstream: when the native helper cannot load
+(stubbed Koffi or a blocked addon), roots inside `%USERPROFILE%` fall back to an
+exclusive `mkdir` that inherits the owner/SYSTEM/Administrators ACL of the
+profile; every other root remains fail-closed with the load error as its cause.
+The upstream restart-helper changes are not included.
+
+Windows runtimes must ship the real `koffi` package and its
+`@koromix/koffi-win32-*` binary: `prune-openclaw-runtime.cjs` keeps them (and
+trims build-only koffi content) when `runtime-build-info.json` reports a `win-*`
+target. The runtime payload then keeps exactly the target's platform package
+and refuses to package a real loader without it; a stubbed `koffi` still drops
+every platform binary. The startup helper bundler refuses a source tree without
+the native helper, and every bundle is checked for the removed PowerShell
+implementation.
+
+Verify with upstream `sqlite-private-directory.test.ts`,
+`windows-private-directory.test.ts` and, on Windows,
+`sqlite-private-directory.windows.test.ts`, then LobsterAI's
+`openclawNativePrivateDirectory`, `pruneOpenClawRuntime`,
+`openclawWindowsPayload` and `openclawSqliteWorkerProtocol.runtime` tests.
+Rebuild the runtime (`OPENCLAW_FORCE_BUILD=1` if the patch hash did not change)
+and, on a Windows machine, simulate the block by denying execute on
+`powershell.exe` for the test user (`icacls ... /deny <user>:(X)`) before running
+a legacy session import, Quick Repair and a cold Gateway start. Remove this
+patch when the pinned upstream includes the native helper.

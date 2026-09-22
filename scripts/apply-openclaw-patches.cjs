@@ -1134,6 +1134,26 @@ const v20260801StrongPatchValidators = {
       ],
     },
   ],
+  'openclaw-windows-private-directory-native.patch': [
+    {
+      file: 'src/infra/windows-private-directory.ts',
+      snippets: [
+        'const koffi: typeof import("koffi").default = require("koffi");',
+        'export function createPrivateWindowsDirectory(directoryPath: string): void {',
+        'export function createProfileScopedWindowsDirectory(',
+        'export function isWindowsPathInsideUserProfile(',
+      ],
+    },
+    {
+      file: 'src/infra/sqlite-private-directory.ts',
+      snippets: ['import { createPrivateWindowsDirectory } from "./windows-private-directory.js";'],
+      forbiddenSnippets: [
+        'Add-Type -TypeDefinition',
+        'resolveSystemBin("powershell")',
+        'OpenClawPrivateDirectory',
+      ],
+    },
+  ],
   'openclaw-workspace-attestation-quarantine.patch': [
     {
       file: 'src/infra/state-migrations.workspace-setup.ts',

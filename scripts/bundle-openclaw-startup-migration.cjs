@@ -4,6 +4,11 @@ const fs = require('fs');
 const path = require('path');
 const esbuild = require('esbuild');
 
+const {
+  assertOpenClawBundleUsesNativePrivateDirectory,
+  assertOpenClawSourceUsesNativePrivateDirectory,
+} = require('./openclaw-native-private-directory.cjs');
+
 const rootDir = path.resolve(__dirname, '..');
 const entryPath = path.join(__dirname, 'openclaw-startup-state-migration.mjs');
 const authStoreEntryPath = path.join(__dirname, 'openclaw-xai-auth-store.mjs');
@@ -33,6 +38,9 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedE
   if (!identityOwner.includes('its keys differ from the valid canonical identity; canonical SQLite identity remains authoritative')) {
     throw new Error('Startup identity migration requires openclaw-device-identity-preservation.patch; run openclaw:patch first.');
   }
+  // Every helper that stages SQLite must create private Windows directories
+  // natively; a PowerShell spawn here blocks startup on locked-down machines.
+  assertOpenClawSourceUsesNativePrivateDirectory(openclawSrc);
   const outputPath = path.join(runtimeDir, path.basename(selectedEntry));
   // Rebuild even when the gateway cache is current: this entry is maintained by
   // LobsterAI and must match the pinned upstream migration/schema implementation.
@@ -119,6 +127,7 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedE
     logLevel: 'warning',
   });
   console.log(`[OpenClaw] Built ${path.basename(outputPath)} (${fs.statSync(outputPath).size} bytes).`);
+  assertOpenClawBundleUsesNativePrivateDirectory(outputPath);
   if (selectedEntry === entryPath) {
     await bundleOpenClawStartupMigration(runtimeDir, openclawSrc, authStoreEntryPath);
     await bundleOpenClawStartupMigration(runtimeDir, openclawSrc, compatibilityEntryPath);
