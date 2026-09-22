@@ -1029,6 +1029,51 @@ const v20260801StrongPatchValidators = {
       snippets: ['expect(promptCall?.runtimeCwd).toBe(taskRepo)'],
     },
   ],
+  'openclaw-active-exec-sessions-runtime-context.patch': [
+    {
+      file: 'src/agents/runtime-facts-prompt.ts',
+      snippets: [
+        'export function buildActiveProcessSessionRuntimeFacts',
+        'export const ACTIVE_EXEC_SESSIONS_HEADER = "Active exec sessions:"',
+      ],
+    },
+    {
+      file: 'src/agents/system-prompt.ts',
+      snippets: [
+        'Before input: process log; log/poll shows waitingForInput/stdinWritable. Lost id: process list.',
+      ],
+      forbiddenSnippets: ['activeProcessSessions', 'buildActiveProcessSessionReferenceLines'],
+    },
+    {
+      file: 'src/agents/embedded-agent-runner/run/attempt-system-prompt-prepare.ts',
+      snippets: ['senderIsOwner: attempt.senderIsOwner,'],
+      forbiddenSnippets: ['listActiveProcessSessionReferences', 'activeProcessSessions'],
+    },
+    {
+      file: 'src/agents/embedded-agent-runner/run/attempt-prompt-build.ts',
+      snippets: [
+        'buildActiveProcessSessionRuntimeFacts({',
+        '!input.capabilityToolNames.has("process")',
+      ],
+    },
+    {
+      file: 'src/agents/embedded-agent-runner/run/attempt-settle.ts',
+      snippets: [
+        'capabilityToolNames: toolSearchRunPlan.capabilityToolNames',
+        'sandboxSessionKey: input.setup.sandboxSessionKey',
+      ],
+    },
+    {
+      file: 'src/agents/embedded-agent-runner/run/attempt-prompt-context.test.ts',
+      snippets: [
+        'carries background process snapshots as hidden runtime context, not system prompt',
+      ],
+    },
+    {
+      file: 'src/agents/embedded-agent-runner/system-prompt.test.ts',
+      snippets: ['keeps process guidance static and never renders background process snapshots'],
+    },
+  ],
   'openclaw-omit-default-model-from-system-prompt.patch': [
     {
       file: 'src/agents/system-prompt.ts',

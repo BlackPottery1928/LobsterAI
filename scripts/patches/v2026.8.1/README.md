@@ -426,3 +426,36 @@ and, on a Windows machine, simulate the block by denying execute on
 `powershell.exe` for the test user (`icacls ... /deny <user>:(X)`) before running
 a legacy session import, Quick Repair and a cold Gateway start. Remove this
 patch when the pinned upstream includes the native helper.
+
+## Active exec sessions below the system prompt cache boundary
+
+`openclaw-active-exec-sessions-runtime-context.patch` moves the per-turn
+`Active exec sessions:` snapshot out of the `## Runtime` section of the system
+prompt and into the hidden runtime-context carrier of the current user turn,
+mirroring upstream `#140799` (shipped in v2026.9.3). The stable guidance line
+(`Before input: process log; ...`) stays in the system prompt whenever the
+`process` tool is callable. The carrier block is emitted only when the session
+scope has running background processes, so idle turns add no bytes; upstream
+still emits a `none` placeholder there (`#150286`, fix PR `#150290` open).
+
+Why: on the OpenAI Completions route the whole system prompt is one message in
+front of the history, so a background process starting or finishing between
+turns rewrote the first bytes of the request and the provider prefix cache
+missed on the entire history. The 2026-09-22 credit report showed each such
+miss re-billing ~850K tokens at full price; within one run the snapshot was
+built once per attempt, so in-run calls were already stable.
+
+Behavior kept: runtime-only turns (heartbeat/cron without a user message) never
+install the carrier in v2026.8.1, so they no longer see the process list; raw
+model probes and settled tool finalization skip it too. Compaction hooks keep
+the structured `activeProcessSessions` data. `prepareEmbeddedAttemptPromptContext`
+now requires `capabilityToolNames` and `sandboxSessionKey`, supplied by the
+settled phase from the prepared tool catalog and attempt setup.
+
+Verify with upstream `runtime-facts-prompt.test.ts`,
+`embedded-agent-runner/system-prompt.test.ts` and
+`run/attempt-prompt-context.test.ts`, then in the Electron client confirm that
+`systemPromptChars` in `[context-diag] pre-prompt` stays constant across turns
+while a background `exec` is running and that the gateway log no longer reports
+`[prompt-cache] cache read dropped` at run boundaries. Remove this patch when
+the pinned upstream includes `#140799`.
