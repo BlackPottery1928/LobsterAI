@@ -145,7 +145,8 @@ try {
         if (mode === OpenClawStartupCompatibilityMode.PrepareStartup) {
           report.changes.push(...await repairNspClawguardInstall(
             { stateDir, configPath, backups: report.backups },
-            run => withPluginLifecycleLease({ env, waitMs: 500 }, lease => run({
+            // Lease acquisition includes synchronous SQLite work on slow Windows disks.
+            run => withPluginLifecycleLease({ env, waitMs: 5_000 }, lease => run({
               read: () => loadInstalledPluginIndexInstallRecordsSync({ env }),
               write: (records, config) => writePersistedInstalledPluginIndexInstallRecordsWithLease(records, { env, config, lease }),
               validate: async rootDir => {
