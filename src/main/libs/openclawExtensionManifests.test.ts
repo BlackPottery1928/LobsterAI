@@ -49,7 +49,15 @@ describe('OpenClaw extension manifests', () => {
   test('declares a strict allowlisted model-profile config for LobsterAI compatibility', () => {
     const manifest = readManifest('lobsterai-model-compat');
     expect(manifest.providers).toEqual(['lobsterai-model-compat']);
-    expect(manifest.activation).toBeUndefined();
+    // The v2026.8.1 Gateway only imports provider plugins whose provider ids are
+    // referenced by configured agent models; the "lobsterai-server" API owner hint
+    // is not consulted, and runs cannot lazy-load plugins inside a prepared plugin
+    // generation. Startup activation keeps the compatibility owner in every
+    // Gateway generation so package and custom K3 hooks apply from the first run.
+    expect(manifest.activation).toEqual({
+      onStartup: true,
+      onProviders: ['lobsterai-server'],
+    });
     expect(manifest.configSchema).toEqual({
       type: 'object',
       additionalProperties: false,
