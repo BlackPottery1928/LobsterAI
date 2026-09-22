@@ -151,6 +151,7 @@ import SubagentIcon from '../icons/SubagentIcon';
 import MarkdownContent from '../MarkdownContent';
 import { type ToastEventDetail } from '../Toast';
 import { resolveAgentModelSelection, useAgentSelectedModel } from './agentModelSelection';
+import ArtifactPreviewTabItem from './ArtifactPreviewTabItem';
 import AssistantTurnBlock, { ContextCompactionDivider } from './AssistantTurnBlock';
 import type { BrowserAnnotationAttachmentOpenPayload } from './BrowserAnnotationMessageAttachments';
 import { type CoworkOpenShareOptionsEventDetail, CoworkUiEvent } from './constants';
@@ -1248,20 +1249,11 @@ const PromptInputExpandIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) =
   </svg>
 );
 
-const ArtifactTabCloseIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
-  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" {...props}>
-    <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-  </svg>
-);
-
 const ArtifactTabPlusIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" {...props}>
     <path d="M8 3.5v9M3.5 8h9" />
   </svg>
 );
-
-const artifactTabCloseButtonClassName =
-  'mr-1 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-transparent transition-colors group-hover:bg-muted group-hover:text-background hover:!bg-foreground hover:!text-background';
 
 const ArtifactBrowserTabIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" {...props}>
@@ -6123,225 +6115,78 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
                   ref={artifactTabsScrollRef}
                   className="scrollbar-hidden flex h-full min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
                 >
-                  <div className={`flex h-full min-w-max items-center gap-1 pr-3 ${
+                  <div className={`flex h-full min-w-0 flex-1 items-center gap-1 pr-3 ${
                     isArtifactPanelExpanded ? 'pl-3' : 'pl-4'
                   }`}
                   >
                   {isFileListPreviewTabOpen && (
-                    <div
-                      data-artifact-preview-active={
-                        !activeArtifactPreviewTab && activeSpecialPreviewTab === ArtifactSpecialTab.FileList
-                          ? 'true'
-                          : undefined
-                      }
-                      className={`non-draggable group flex h-7 max-w-[190px] items-center rounded-lg text-xs transition-colors ${
-                        activeArtifactPreviewTab || activeSpecialPreviewTab !== ArtifactSpecialTab.FileList
-                          ? 'text-secondary hover:bg-surface hover:text-foreground'
-                          : 'bg-surface-raised text-foreground shadow-sm'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={handleActivateArtifactFileListTab}
-                        className="flex min-w-0 items-center gap-1.5 px-2 text-left"
-                        title={i18nService.t('artifactFileList')}
-                      >
-                        <ArtifactPanelIcon className="h-3.5 w-3.5 shrink-0" open />
-                        <span className="truncate">{i18nService.t('artifactFileList')}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleCloseArtifactFileListTab();
-                        }}
-                        className={artifactTabCloseButtonClassName}
-                        title={i18nService.t('artifactCloseTab')}
-                      >
-                        <ArtifactTabCloseIcon className="h-2.5 w-2.5" />
-                      </button>
-                    </div>
+                    <ArtifactPreviewTabItem
+                      active={!activeArtifactPreviewTab && activeSpecialPreviewTab === ArtifactSpecialTab.FileList}
+                      icon={<ArtifactPanelIcon className="h-3.5 w-3.5" open />}
+                      label={i18nService.t('artifactFileList')}
+                      closeLabel={i18nService.t('artifactCloseTab')}
+                      onActivate={handleActivateArtifactFileListTab}
+                      onClose={handleCloseArtifactFileListTab}
+                    />
                   )}
                   {isBrowserPreviewTabOpen && (
-                    <div
-                      data-artifact-preview-active={
-                        !activeArtifactPreviewTab && activeSpecialPreviewTab === ArtifactSpecialTab.Browser
-                          ? 'true'
-                          : undefined
-                      }
-                      className={`non-draggable group flex h-7 max-w-[190px] items-center rounded-lg text-xs transition-colors ${
-                        activeArtifactPreviewTab || activeSpecialPreviewTab !== ArtifactSpecialTab.Browser
-                          ? 'text-secondary hover:bg-surface hover:text-foreground'
-                          : 'bg-surface-raised text-foreground shadow-sm'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={handleActivateArtifactBrowserTab}
-                        className="flex min-w-0 items-center gap-1.5 px-2 text-left"
-                        title={browserPreviewTabTitle}
-                      >
-                        <ArtifactBrowserTabIcon className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{browserPreviewTabTitle}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleCloseArtifactBrowserTab();
-                        }}
-                        className={artifactTabCloseButtonClassName}
-                        title={i18nService.t('artifactCloseTab')}
-                      >
-                        <ArtifactTabCloseIcon className="h-2.5 w-2.5" />
-                      </button>
-                    </div>
+                    <ArtifactPreviewTabItem
+                      active={!activeArtifactPreviewTab && activeSpecialPreviewTab === ArtifactSpecialTab.Browser}
+                      icon={<ArtifactBrowserTabIcon className="h-3.5 w-3.5" />}
+                      label={browserPreviewTabTitle}
+                      closeLabel={i18nService.t('artifactCloseTab')}
+                      onActivate={handleActivateArtifactBrowserTab}
+                      onClose={handleCloseArtifactBrowserTab}
+                    />
                   )}
                   {isAgentBrowserPreviewTabOpen && (
-                    <div
-                      data-artifact-preview-active={
-                        !activeArtifactPreviewTab && activeSpecialPreviewTab === ArtifactSpecialTab.AgentBrowser
-                          ? 'true'
-                          : undefined
-                      }
-                      className={`non-draggable group flex h-7 max-w-[190px] items-center rounded-lg text-xs transition-colors ${
-                        activeArtifactPreviewTab || activeSpecialPreviewTab !== ArtifactSpecialTab.AgentBrowser
-                          ? 'text-secondary hover:bg-surface hover:text-foreground'
-                          : 'bg-surface-raised text-foreground shadow-sm'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={handleActivateArtifactAgentBrowserTab}
-                        className="relative flex min-w-0 items-center gap-1.5 px-2 text-left"
-                        title={i18nService.t('agentBrowserTab')}
-                      >
-                        <ComputerDesktopIcon className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{i18nService.t('agentBrowserTab')}</span>
-                        {hasUnreadAgentBrowserActivity && (
-                          <span
-                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
-                            title={i18nService.t('agentBrowserLiveActivity')}
-                          />
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleCloseArtifactAgentBrowserTab();
-                        }}
-                        className={artifactTabCloseButtonClassName}
-                        title={i18nService.t('artifactCloseTab')}
-                      >
-                        <ArtifactTabCloseIcon className="h-2.5 w-2.5" />
-                      </button>
-                    </div>
+                    <ArtifactPreviewTabItem
+                      active={!activeArtifactPreviewTab && activeSpecialPreviewTab === ArtifactSpecialTab.AgentBrowser}
+                      icon={<ComputerDesktopIcon className="h-3.5 w-3.5" />}
+                      label={i18nService.t('agentBrowserTab')}
+                      closeLabel={i18nService.t('artifactCloseTab')}
+                      indicator={hasUnreadAgentBrowserActivity ? (
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
+                          title={i18nService.t('agentBrowserLiveActivity')}
+                        />
+                      ) : undefined}
+                      onActivate={handleActivateArtifactAgentBrowserTab}
+                      onClose={handleCloseArtifactAgentBrowserTab}
+                    />
                   )}
                   {isSubagentPreviewTabOpen && (
-                    <div
-                      data-artifact-preview-active={
-                        !activeArtifactPreviewTab && activeSpecialPreviewTab === ArtifactSpecialTab.Subagents
-                          ? 'true'
-                          : undefined
-                      }
-                      className={`non-draggable group flex h-7 max-w-[190px] items-center rounded-lg text-xs transition-colors ${
-                        activeArtifactPreviewTab || activeSpecialPreviewTab !== ArtifactSpecialTab.Subagents
-                          ? 'text-secondary hover:bg-surface hover:text-foreground'
-                          : 'bg-surface-raised text-foreground shadow-sm'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={handleActivateArtifactSubagentTab}
-                        className="flex min-w-0 items-center gap-1.5 px-2 text-left"
-                        title={i18nService.t('subagentPanelTitle')}
-                      >
-                        <SubagentIcon className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{i18nService.t('subagentPanelTitle')}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleCloseArtifactSubagentTab();
-                        }}
-                        className={artifactTabCloseButtonClassName}
-                        title={i18nService.t('artifactCloseTab')}
-                      >
-                        <ArtifactTabCloseIcon className="h-2.5 w-2.5" />
-                      </button>
-                    </div>
+                    <ArtifactPreviewTabItem
+                      active={!activeArtifactPreviewTab && activeSpecialPreviewTab === ArtifactSpecialTab.Subagents}
+                      icon={<SubagentIcon className="h-3.5 w-3.5" />}
+                      label={i18nService.t('subagentPanelTitle')}
+                      closeLabel={i18nService.t('artifactCloseTab')}
+                      onActivate={handleActivateArtifactSubagentTab}
+                      onClose={handleCloseArtifactSubagentTab}
+                    />
                   )}
                   {isUserAttachmentPreviewTabOpen && (
-                    <div
-                      data-artifact-preview-active={
-                        !activeArtifactPreviewTab && activeSpecialPreviewTab === ArtifactSpecialTab.UserAttachment
-                          ? 'true'
-                          : undefined
-                      }
-                      className={`non-draggable group flex h-7 max-w-[190px] items-center rounded-lg text-xs transition-colors ${
-                        activeArtifactPreviewTab || activeSpecialPreviewTab !== ArtifactSpecialTab.UserAttachment
-                          ? 'text-secondary hover:bg-surface hover:text-foreground'
-                          : 'bg-surface-raised text-foreground shadow-sm'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={handleActivateArtifactUserAttachmentTab}
-                        className="flex min-w-0 items-center gap-1.5 px-2 text-left"
-                        title={i18nService.t('artifactUserAttachmentTab')}
-                      >
-                        <PaperClipIcon className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{i18nService.t('artifactUserAttachmentTab')}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleCloseArtifactUserAttachmentTab();
-                        }}
-                        className={artifactTabCloseButtonClassName}
-                        title={i18nService.t('artifactCloseTab')}
-                      >
-                        <ArtifactTabCloseIcon className="h-2.5 w-2.5" />
-                      </button>
-                    </div>
+                    <ArtifactPreviewTabItem
+                      active={!activeArtifactPreviewTab && activeSpecialPreviewTab === ArtifactSpecialTab.UserAttachment}
+                      icon={<PaperClipIcon className="h-3.5 w-3.5" />}
+                      label={i18nService.t('artifactUserAttachmentTab')}
+                      closeLabel={i18nService.t('artifactCloseTab')}
+                      onActivate={handleActivateArtifactUserAttachmentTab}
+                      onClose={handleCloseArtifactUserAttachmentTab}
+                    />
                   )}
                   {artifactTabsWithArtifacts.map(({ tab, artifact }) => {
-                    const isActive = tab.id === activeArtifactPreviewTab?.id;
                     const fileName = artifact.fileName || artifact.title;
                     return (
-                      <div
+                      <ArtifactPreviewTabItem
                         key={tab.id}
-                        data-artifact-preview-active={isActive ? 'true' : undefined}
-                        className={`non-draggable group flex h-7 max-w-[190px] shrink-0 items-center rounded-lg text-xs transition-colors ${
-                          isActive
-                            ? 'bg-surface-raised text-foreground shadow-sm'
-                            : 'text-secondary hover:bg-surface hover:text-foreground'
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => handleActivateArtifactTab(tab.id)}
-                          className="flex min-w-0 max-w-[158px] items-center gap-1.5 px-2 text-left"
-                          title={fileName}
-                        >
-                          <FileTypeIcon fileName={fileName} className="h-3.5 w-3.5 shrink-0" />
-                          <span className="truncate">{fileName}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleCloseArtifactTab(tab.id);
-                          }}
-                          className={artifactTabCloseButtonClassName}
-                          title={i18nService.t('artifactCloseTab')}
-                        >
-                          <ArtifactTabCloseIcon className="h-2.5 w-2.5" />
-                        </button>
-                      </div>
+                        active={tab.id === activeArtifactPreviewTab?.id}
+                        icon={<FileTypeIcon fileName={fileName} className="h-3.5 w-3.5" />}
+                        label={fileName}
+                        closeLabel={i18nService.t('artifactCloseTab')}
+                        onActivate={() => handleActivateArtifactTab(tab.id)}
+                        onClose={() => handleCloseArtifactTab(tab.id)}
+                      />
                     );
                   })}
                   {shouldPinArtifactAddTab ? (
