@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual, promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -34,6 +35,116 @@ describe.skipIf(!runtimeRoot)('bundled OpenClaw model policy roundtrip', () => {
     }
     fs.rmSync(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
+
+  test('matches the pinned policy schema across ASCII, Unicode, aliases and reference structure', async () => {
+    const characters = [
+      ...Array.from({ length: 128 }, (_, code) => String.fromCodePoint(code)),
+      '\u0085', '\u00a0', '\u1680', '\u2000', '\u2007', '\u200b', '\u2028', '\u2029',
+      '\u202f', '\u205f', '\u2060', '\u3000', '\ufeff', '中', '🚀',
+    ];
+    const refs = [
+      ...characters.flatMap(char => [`pro${char}vider/model`, `provider/mo${char}del`]),
+      'provider', '/model', 'provider/', 'provider//model', 'provider/model/',
+      'provider/model*', 'provider/**', '*/model', 'provider/*/model', 'provider/a /b',
+      'provider/a/b', 'provider/*', ' provider / namespace / * ', ' provider / model ',
+      'openrouter:auto', 'openrouter:free', 'unresolved-alias', 'known alias',
+    ];
+    const fixtures = refs.map(ref => {
+      const legacy = { agents: {
+        defaults: { models: { 'fixture/base-model': { alias: 'known alias' }, [ref]: {} } },
+        entries: { [AgentId.Main]: { default: true } },
+      } };
+      const explicit = {
+        agents: { ...legacy.agents, defaults: {
+          ...legacy.agents.defaults, modelPolicy: { allow: Object.keys(legacy.agents.defaults.models) },
+        } },
+        meta: { migrations: { modelPolicyAllowlist: true } },
+      };
+      return { ref, legacy, explicit,
+        generated: withManagedOpenClawModelPolicy(legacy, legacy),
+        repaired: withManagedOpenClawModelPolicy(explicit, explicit),
+      };
+    });
+    const fixturePath = path.join(tempDir, 'reference-boundaries.json');
+    fs.writeFileSync(fixturePath, JSON.stringify(fixtures));
+    const result = await execFileAsync(process.execPath, ['--input-type=module', '-e', `
+      import fs from 'node:fs';
+      const { validateConfigObject } = await import(${JSON.stringify(pathToFileURL(path.join(runtimeRoot!, 'dist/config/config.js')).href)});
+      const fixtures = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+      console.log(JSON.stringify(fixtures.map(({ ref, legacy, explicit, generated, repaired }) => ({
+        ref, legacyValid: validateConfigObject(legacy).ok, explicitValid: validateConfigObject(explicit).ok,
+        generatedValid: validateConfigObject(generated).ok, repairedValid: validateConfigObject(repaired).ok,
+        generatedPolicy: !!generated.agents.defaults.modelPolicy, repairedPolicy: !!repaired.agents.defaults.modelPolicy,
+        generatedMarked: generated.meta?.migrations?.modelPolicyAllowlist === true,
+        repairedMarked: repaired.meta?.migrations?.modelPolicyAllowlist === true,
+      }))));
+    `, fixturePath], { cwd: runtimeRoot, windowsHide: true, timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
+    for (const item of JSON.parse(result.stdout)) {
+      expect(item, JSON.stringify(item.ref)).toMatchObject({
+        legacyValid: true, generatedValid: true, repairedValid: true,
+        generatedPolicy: item.explicitValid, repairedPolicy: item.explicitValid,
+        generatedMarked: item.explicitValid, repairedMarked: item.explicitValid,
+      });
+    }
+  }, 90_000);
+
+  test('recovers an invalid generated policy through real startup migration and config writes', async () => {
+    const refs = [
+      'qwen/qwen3.6-plus', 'qwen/qwen3.5-plus', 'anthropic/claude-opus-4-6',
+      'anthropic/claude-sonnet-4-6', 'custom_0/DeepSeek V4 Pro',
+    ];
+    const corrupted = {
+      agents: {
+        defaults: {
+          model: { primary: refs[0] },
+          models: Object.fromEntries(refs.map(ref => [ref, {}])),
+          modelPolicy: { allow: refs },
+        },
+        entries: { [AgentId.Main]: { default: true } },
+      },
+      meta: { migrations: { modelPolicyAllowlist: true } },
+    };
+    const env: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR,
+      USERPROFILE: tempDir, HOME: tempDir, TMPDIR: tempDir, TEMP: tempDir, TMP: tempDir,
+      OPENCLAW_HOME: tempDir, OPENCLAW_STATE_DIR: stateDir, OPENCLAW_CONFIG_PATH: configPath,
+      OPENCLAW_SERVICE_REPAIR_POLICY: 'external', OPENCLAW_PACKAGED_COMPILE_CACHE_RESPAWNED: '1',
+      NODE_COMPILE_CACHE: path.join(tempDir, 'compile-cache'), NODE_ENV: 'production',
+    };
+    const run = (args: string[]) => execFileAsync(process.execPath, args, {
+      cwd: runtimeRoot, env, windowsHide: true, timeout: 60_000, maxBuffer: 4 * 1024 * 1024,
+    });
+    const validate = async () => {
+      const result = await run(['--input-type=module', '-e', `
+        import fs from 'node:fs';
+        const { validateConfigObject } = await import(${JSON.stringify(pathToFileURL(path.join(runtimeRoot!, 'dist/config/config.js')).href)});
+        const result = validateConfigObject(JSON.parse(fs.readFileSync(process.argv[1], 'utf8')));
+        console.log(JSON.stringify({ ok: result.ok, issues: result.issues }));
+      `, configPath]);
+      return JSON.parse(result.stdout);
+    };
+    const startup = () => run([path.join(runtimeRoot!, 'openclaw-startup-state-migration.mjs')]);
+    fs.writeFileSync(configPath, JSON.stringify(corrupted));
+    expect(await validate()).toMatchObject({ ok: false, issues: [
+      expect.objectContaining({ path: 'agents.defaults.modelPolicy.allow.4' }),
+    ] });
+    await expect(startup()).rejects.toMatchObject({
+      code: 1, stdout: expect.stringContaining('Auth migration cannot repair unrelated config errors at: agents.defaults.modelPolicy.allow.4'),
+    });
+
+    const repaired = withManagedOpenClawModelPolicy(corrupted, corrupted);
+    fs.writeFileSync(configPath, JSON.stringify(repaired));
+    expect(await validate()).toMatchObject({ ok: true });
+    expect((await startup()).stdout).toContain('"status":"skipped"');
+    await run([path.join(runtimeRoot!, 'openclaw.mjs'), 'config', 'set', 'agents.defaults.model.primary', refs[0]]);
+    const persisted = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(Object.keys(persisted.agents.defaults.models)).toEqual(refs);
+    expect(persisted.agents.defaults.modelPolicy).toBeUndefined();
+    expect(persisted.meta?.migrations?.modelPolicyAllowlist).toBeUndefined();
+    expect(withoutOpenClawWriteMetadata(withManagedOpenClawModelPolicy(persisted, persisted)))
+      .toEqual(withoutOpenClawWriteMetadata(persisted));
+    expect((await startup()).stdout).toContain('"status":"skipped"');
+  }, 240_000);
 
   test('migrates legacy policy, starts the gateway, and converges after config.set and model changes', async () => {
     const workspace = path.join(stateDir, 'workspace-main');

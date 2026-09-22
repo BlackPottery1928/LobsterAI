@@ -4188,6 +4188,12 @@ export class OpenClawConfigSync {
     mergedConfig = withRequiredOpenClawSessionStoreOwner(mergedConfig, {
       stateDir: this.engineManager.getStateDir(),
     });
+    // Recover a previously generated invalid model policy even while provider
+    // credentials are unavailable; startup migration still validates this config.
+    // Do not mark fresh, not-yet-configured installations as already migrated.
+    if (asConfigRecord(agentDefaults?.modelPolicy)) {
+      mergedConfig = withManagedOpenClawModelPolicy(mergedConfig, mergedConfig);
+    }
     const nextContent = `${JSON.stringify(mergedConfig, null, 2)}\n`;
 
     // Preserve migration semantics while ignoring write provenance.
