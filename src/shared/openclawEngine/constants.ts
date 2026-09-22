@@ -70,6 +70,12 @@ export const OpenClawEngineErrorCode = {
   MemoryDreamingMigrationFailed: 'memory_dreaming_migration_failed',
   AgentMediaMigrationRequired: 'agent_media_migration_required',
   PluginVerificationFailed: 'plugin_verification_failed',
+  /**
+   * The gateway refused readiness because OpenClaw startup migrations left
+   * legacy state unresolved. Restarting replays the same migration, so the
+   * listed sources must be handled first.
+   */
+  StartupMigrationRefused: 'startup_migration_refused',
 } as const;
 
 export type OpenClawEngineErrorCode =

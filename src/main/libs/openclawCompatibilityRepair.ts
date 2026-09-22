@@ -11,6 +11,7 @@ import {
 } from '../../shared/openclawEngine/repair';
 import { OpenClawStartupCompatibilityMode } from '../../shared/openclawEngine/startupCompatibility';
 import { OpenClawStartupMigrationStatus } from '../../shared/openclawEngine/startupMigration';
+import { runOpenClawRepairPreflight } from './openclawRepairPreflight';
 import { isOpenClawBindingSchemaFailure, runOpenClawStartupCompatibility } from './openclawStartupCompatibility';
 import type { StartupMigrationRunner } from './openclawStartupStateMigration';
 
@@ -137,10 +138,17 @@ export async function runOpenClawDoctorRepair(params: {
   runtimeRoot: string; stateDir: string; configPath: string; backupDir: string;
   electronNodeRuntimePath: string; env: NodeJS.ProcessEnv; runner?: StartupMigrationRunner;
 }): Promise<{ code: number | null }> {
-  // Migrate the shared schema before importing config into it. Doctor may then
-  // remove retired JSON fields only after their canonical values are preserved.
-  await atRepairStage(OpenClawRepairStage.Preparation, () => withBindingRecovery(params,
-    () => runStartupCompatibilityRepair(params, OpenClawStartupCompatibilityMode.PrepareStartup)));
+  await atRepairStage(OpenClawRepairStage.Preparation, async () => {
+    // Retired keys can block the validating writer in prepare-startup itself.
+    // Only explicit repair may clear them, after a verified full snapshot.
+    await runOpenClawRepairPreflight({
+      ...params, env: repairEnvironment(params.env, params.stateDir, params.configPath), runner: params.runner ?? runRepair,
+    });
+    // Migrate schema/discovery before Doctor. The final plugin phase recovers
+    // install records from the untouched snapshot if this writer strips them.
+    await withBindingRecovery(params,
+      () => runStartupCompatibilityRepair(params, OpenClawStartupCompatibilityMode.PrepareStartup));
+  });
   return atRepairStage(OpenClawRepairStage.Doctor, async () => {
     const result = await (params.runner ?? runRepair)(params.electronNodeRuntimePath, [
       path.join(params.runtimeRoot, 'openclaw.mjs'), ...OPENCLAW_DOCTOR_REPAIR_ARGS,

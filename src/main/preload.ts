@@ -433,6 +433,8 @@ contextBridge.exposeInMainWorld('electron', {
       credentials: {
         getAvailability: (): Promise<BrowserCredentialAvailabilityResponse> =>
           ipcRenderer.invoke(BrowserCredentialIpc.GetAvailability),
+        requestAccess: (): Promise<BrowserCredentialAvailabilityResponse> =>
+          ipcRenderer.invoke(BrowserCredentialIpc.RequestAccess),
         list: (): Promise<BrowserCredentialListResponse> =>
           ipcRenderer.invoke(BrowserCredentialIpc.List),
         save: (request: BrowserCredentialSaveRequest): Promise<BrowserCredentialMutationResponse> =>

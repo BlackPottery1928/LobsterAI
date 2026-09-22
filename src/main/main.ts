@@ -310,6 +310,7 @@ import {
 } from './libs/appQuitConfirmation';
 import { hideAppWindowsForQuit } from './libs/appQuitWindows';
 import { AppUpdateCoordinator, INSTALLATION_UUID_KEY } from './libs/appUpdateCoordinator';
+import { AppUpdateGrayClient, type AppUpdateGraySession } from './libs/appUpdateGrayClient';
 import { AuthCallbackRouter } from './libs/authCallbackRouter';
 import {
   appendCallbackReturnTo,
@@ -513,12 +514,14 @@ import {
   migrateLegacyOpenClawPluginInstalls,
   OpenClawPluginInstallMigrationStatus,
 } from './libs/openclawPluginInstallMigration';
+import { readOpenClawRepairQuarantinedStoreCount } from './libs/openclawRepairPreflight';
 import { collectReferencedEnvVarNames, pickReferencedSecretEnvVars } from './libs/openclawSecretEnv';
 import {
   getOpenClawTokenProxyPort,
   startOpenClawTokenProxy,
   stopOpenClawTokenProxy,
 } from './libs/openclawTokenProxy';
+import { runLegacyWeixinAllowFromMigration } from './libs/openclawWeixinPairingMigration';
 import { migrateMainAgentWorkspace } from './libs/openclawWorkspaceMigration';
 import { ensurePythonRuntimeReady } from './libs/pythonRuntime';
 import { isAnalyticsEndpointUrl, sanitizeUrlForLog, serializeForLog } from './libs/sanitizeForLog';
@@ -2142,6 +2145,7 @@ let coworkRuntimeForwarderBound = false;
 let memoryMigrationDone = false;
 let preventSleepBlockerId: number | null = null;
 let appUpdateCoordinator: AppUpdateCoordinator | null = null;
+let resolveAppUpdateGraySession: () => AppUpdateGraySession | null = () => null;
 let mainLogReporter: MainLogReporter | null = null;
 let libraryIndexService: LibraryIndexService | null = null;
 let unsubscribeLibrarySessionChanges: (() => void) | null = null;
@@ -2197,6 +2201,8 @@ const getBrowserCredentialService = (): BrowserCredentialService => {
     browserCredentialService = new BrowserCredentialService(
       getStore().getDatabase(),
       safeStorage,
+      process.platform,
+      getStore(),
     );
   }
   return browserCredentialService;
@@ -2262,7 +2268,13 @@ const formatAutoLaunchStatusForLog = (status: AutoLaunchStatus): string => {
 
 const getAppUpdateCoordinator = (): AppUpdateCoordinator => {
   if (!appUpdateCoordinator) {
-    appUpdateCoordinator = new AppUpdateCoordinator(getStore());
+    appUpdateCoordinator = new AppUpdateCoordinator(getStore(), new AppUpdateGrayClient({
+      getSession: () => resolveAppUpdateGraySession(),
+      getServerBaseUrl: getServerApiBaseUrl,
+      fetch: (url, options) => session.defaultSession.fetch(url, options),
+      platform: process.platform,
+      arch: process.arch,
+    }));
   }
   return appUpdateCoordinator;
 };
@@ -2942,6 +2954,13 @@ const _syncOpenClawConfigImpl = async (
     getMcpRuntime().clearResolvedServersCache();
   }
 
+  // Legacy Weixin pairing allowlists make the pinned runtime refuse readiness
+  // at startup; fold them into the channel config before it is rendered.
+  runLegacyWeixinAllowFromMigration({
+    stateDir: manager.getStateDir(),
+    getStore: () => getIMGatewayManager().getIMStore(),
+  });
+
   const imConfigFingerprint = imConfigRestartTracker.captureConfig();
   const syncResult = configSync.sync(options.reason);
   console.log(
@@ -3320,6 +3339,7 @@ type OpenClawGatewayRepairResult = {
   status?: OpenClawEngineStatus;
   originalPath: string;
   backupPath?: string;
+  quarantinedSessionStoreCount?: number;
   error?: string;
   errorCode?: OpenClawGatewayRepairErrorCode;
   recoverable?: boolean;
@@ -3433,6 +3453,8 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
           runtimeRoot: manager.getRuntimeRoot(), electronNodeRuntimePath,
           backupDir: backupPath, env: {
             ...process.env, ...manager.getSecretEnvVars(), ...getOpenClawConfigSync().collectSecretEnvVars(),
+            // Doctor resolves the same auth reference while the gateway is stopped.
+            OPENCLAW_GATEWAY_TOKEN: manager.ensureGatewayToken(),
             PATH: [nodeShimDir, process.env.PATH || process.env.Path].filter(Boolean).join(path.delimiter),
             LOBSTERAI_NPM_BIN_DIR: npmBinDir,
           },
@@ -3477,6 +3499,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         originalPath,
         backupPath,
         error: success ? undefined : status.message || 'Failed to restart OpenClaw gateway after repair.',
+        quarantinedSessionStoreCount: readOpenClawRepairQuarantinedStoreCount(backupPath),
         failedStage: success ? undefined : repairStage,
       };
     } catch (error) {
@@ -3492,6 +3515,7 @@ const repairOpenClawGatewayState = (): Promise<OpenClawGatewayRepairResult> => {
         failedStage,
         failurePath: error instanceof OpenClawRepairFailure ? error.failurePath : undefined,
         errorCode: failedStage === OpenClawRepairStage.Snapshot ? OpenClawGatewayRepairErrorCode.SnapshotFailed : undefined,
+        quarantinedSessionStoreCount: readOpenClawRepairQuarantinedStoreCount(backupPath),
       };
     } finally {
       openClawManualRepairActive = false;
@@ -5565,6 +5589,13 @@ if (!gotTheLock) {
     if (!getAuthTokens()) return null;
     const scope = getCurrentMediaAccountScope();
     return `${scope?.ownerAccountKey ?? 'unresolved'}:${authAccountGeneration}`;
+  };
+
+  resolveAppUpdateGraySession = () => {
+    const tokens = getAuthTokens();
+    if (!tokens || !getCurrentMediaAccountScope()) return null;
+    const sessionKey = getAuthSessionKey();
+    return sessionKey ? { sessionKey, accessToken: tokens.accessToken, headers: getEnterpriseAccountHeaders() } : null;
   };
 
   const authSessionManager = new AuthSessionManager({

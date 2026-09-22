@@ -448,6 +448,55 @@ describe('deliverOpenClawConfigToGateway', () => {
   });
 });
 
+describe('config application confirmation', () => {
+  test('a deferred restart is satisfied by the applied current target without another write', async () => {
+    const request = vi.fn(async <T,>(): Promise<T> => ({
+      valid: true, parsed: JSON.parse(FILE_CONTENT),
+      configRevisionHash: 'current', appliedConfigHash: 'current',
+    }) as T);
+    const result = await deliverOpenClawConfigToGateway(baseInput({
+      reason: `${DEFERRED_SYNC_REASON_PREFIX}${CONFIG_DELIVERY_FALLBACK_REASON_PREFIX}skills-changed`,
+      ensureRpcClient: async () => ({ request }),
+      scheduleDeferredRestart: undefined,
+    }));
+    expect(result.mode).toBe(OpenClawConfigDeliveryMode.Applied);
+    expect(result.restartScheduled).toBe(false);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]).toEqual([OpenClawConfigRpcMethod.Get, {}, { timeoutMs: 10_000 }]);
+  });
+
+  test.each([true, false])('SET timeout checks the target and applied version before fallback (current=%s)', async current => {
+    vi.useFakeTimers();
+    let setSent = false;
+    const calls: string[] = [];
+    const client: OpenClawConfigRpcClient = {
+      request: async <T,>(method: string): Promise<T> => {
+        calls.push(method);
+        if (method === OpenClawConfigRpcMethod.Set) {
+          setSent = true;
+          throw new Error('config.set timeout');
+        }
+        return {
+          hash: 'revision', valid: true,
+          parsed: current && setSent ? JSON.parse(FILE_CONTENT) : {},
+          configRevisionHash: 'same-token', appliedConfigHash: 'same-token',
+        } as T;
+      },
+    };
+    const scheduleDeferredRestart = vi.fn();
+    const pending = deliverOpenClawConfigToGateway(baseInput({
+      ensureRpcClient: async () => client, scheduleDeferredRestart,
+    }));
+    await vi.runAllTimersAsync();
+    const result = await pending;
+    expect(result.mode).toBe(current ? OpenClawConfigDeliveryMode.Applied : OpenClawConfigDeliveryMode.Fallback);
+    expect(result.restartScheduled).toBe(!current);
+    expect(scheduleDeferredRestart).toHaveBeenCalledTimes(current ? 0 : 1);
+    expect(calls.filter(method => method === OpenClawConfigRpcMethod.Set)).toHaveLength(1);
+    expect(calls.filter(method => method === OpenClawConfigRpcMethod.Get)).toHaveLength(current ? 2 : 4);
+  });
+});
+
 describe('deferred gateway restart reasons', () => {
   const fallback = `${CONFIG_DELIVERY_FALLBACK_REASON_PREFIX}agent-updated`;
   const deferredFallback = `${DEFERRED_SYNC_REASON_PREFIX}${fallback}`;

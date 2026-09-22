@@ -24,6 +24,7 @@ import {
   SkillWatchDiagnostics,
   SkillWatchScope,
 } from './skillChangeDiagnostics';
+import { readSkillWatchSnapshot, type SkillWatchSnapshot } from './skillWatchSnapshot';
 
 /**
  * Resolve the user's login shell PATH on macOS/Linux.
@@ -1406,6 +1407,7 @@ export class SkillManager {
   private notifyTimer: NodeJS.Timeout | null = null;
   private changeListeners: Array<(batch: SkillChangeBatch) => void> = [];
   private readonly watchDiagnostics = new SkillWatchDiagnostics();
+  private watchSnapshot: SkillWatchSnapshot | null = null;
   private pendingInstalls = new Map<string, {
     tempDir: string;
     cleanupPath: string | null;
@@ -2431,16 +2433,22 @@ export class SkillManager {
       }
     }
 
-    // Root-level watch: only react to directory additions/removals (new/deleted skills).
+    let snapshot: SkillWatchSnapshot;
+    try {
+      snapshot = readSkillWatchSnapshot(roots, [SKILL_FILE_NAME, SKILLS_CONFIG_FILE]);
+    } catch (error) {
+      console.warn('[skills] Failed to read skill watch snapshot:', error);
+      return;
+    }
+
+    // Root events are candidates; the snapshot below checks actual definition changes.
     const rootWatchHandler = (event: string, filename: string | null) => {
       if (!filename) { this.scheduleNotify(SkillWatchScope.Root, event); return; }
       // Ignore hidden files/dirs and known non-skill files
       if (filename.startsWith('.')) return;
-      // Accept directory changes (new skill added/removed) and config file
-      if (filename === SKILLS_CONFIG_FILE) { this.scheduleNotify(SkillWatchScope.Root, event); return; }
-      // For other filenames, check if it looks like a skill directory entry
-      // (no extension = likely a directory name)
-      if (!path.extname(filename)) { this.scheduleNotify(SkillWatchScope.Root, event); }
+      // A directory can contain dots, and removed entries cannot be stat'ed.
+      // The content snapshot filters unrelated files without guessing from extensions.
+      this.scheduleNotify(SkillWatchScope.Root, event);
     };
 
     // Skill-directory-level watch: only react to skill definition file changes.
@@ -2460,21 +2468,22 @@ export class SkillManager {
         console.warn('[skills] Failed to watch skills root:', root, error);
       }
 
-      const skillDirs = listSkillDirs(root);
-      skillDirs.forEach(dir => {
-        try {
-          this.watchers.push(fs.watch(dir, skillDirWatchHandler));
-        } catch (error) {
-          console.warn('[skills] Failed to watch skill directory:', dir, error);
-        }
-      });
     });
+    snapshot.directories.forEach(dir => {
+      try {
+        this.watchers.push(fs.watch(dir, skillDirWatchHandler));
+      } catch (error) {
+        console.warn('[skills] Failed to watch skill directory:', dir, error);
+      }
+    });
+    this.watchSnapshot = snapshot;
   }
 
   stopWatching(): void {
     this.watchDiagnostics.clear();
     this.watchers.forEach(watcher => watcher.close());
     this.watchers = [];
+    this.watchSnapshot = null;
     if (this.notifyTimer) {
       clearTimeout(this.notifyTimer);
       this.notifyTimer = null;
@@ -2494,8 +2503,17 @@ export class SkillManager {
     this.notifyTimer = setTimeout(() => {
       this.notifyTimer = null;
       const batch = this.watchDiagnostics.take();
-      this.startWatching();
-      this.notifySkillsChanged(batch);
+      try {
+        const snapshot = readSkillWatchSnapshot(this.getSkillRoots(), [SKILL_FILE_NAME, SKILLS_CONFIG_FILE]);
+        if (snapshot.readError) throw snapshot.readError;
+        const previous = this.watchSnapshot;
+        this.watchSnapshot = snapshot;
+        if (snapshot.watchFingerprint !== previous?.watchFingerprint) this.startWatching();
+        if (snapshot.contentFingerprint !== previous?.contentFingerprint) this.notifySkillsChanged(batch);
+      } catch (error) {
+        // Retain the last readable snapshot; a transient read failure is not a deletion.
+        console.warn('[skills] Failed to compare skill definitions:', error);
+      }
     }, WATCH_DEBOUNCE_MS);
   }
 

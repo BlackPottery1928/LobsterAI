@@ -217,6 +217,251 @@ describe('OpenClawConfigSync runtime config output', () => {
     } as never);
   };
 
+  test('enables channel scheduling without promoting IM senders to global owners', async () => {
+    fs.writeFileSync(configPath, JSON.stringify({
+      commands: { ownerAllowFrom: ['gateway-client', '*'] },
+      cron: { enabled: true },
+    }));
+    const sync = await createSync();
+    expect(sync.sync('upgrade-channel-scheduling')).toMatchObject({ ok: true, changed: true });
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(config.commands.ownerAllowFrom).toEqual(['gateway-client']);
+    expect(config.cron).toMatchObject({ enabled: true, allowChannelScheduling: true });
+    expect(sync.sync('repeat-channel-scheduling')).toMatchObject({ ok: true, changed: false });
+  });
+
+  describe('managed model policy', () => {
+    beforeEach(() => {
+      mockRuntimeState.enabledProviders = [{
+        providerName: ProviderName.OpenAI,
+        baseURL: 'https://api.openai.com/v1',
+        apiKey: 'fixture-key',
+        apiType: 'openai',
+        codingPlanEnabled: false,
+        models: [
+          { id: 'gpt-test', name: 'GPT Test', customParams: { temperature: 0.4 } },
+          { id: 'gpt-second', name: 'GPT Second' },
+        ],
+      }];
+    });
+
+    // Match the policy and marker materialized by OpenClaw v2026.8.1 config writes.
+    const writeGatewayModelPolicy = (policy?: Record<string, unknown>) => {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      config.agents.defaults.modelPolicy = policy ?? { allow: Object.keys(config.agents.defaults.models) };
+      config.meta = { lastTouchedVersion: '2026.8.1', migrations: { modelPolicyAllowlist: true } };
+      fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      return config;
+    };
+
+    test('stays unchanged after gateway policy normalization on repeated syncs', async () => {
+      const sync = await createSync();
+      expect(sync.sync('initial-model-policy')).toMatchObject({ ok: true, changed: true });
+      for (let iteration = 0; iteration < 2; iteration += 1) {
+        writeGatewayModelPolicy();
+        const before = fs.readFileSync(configPath, 'utf8');
+        const resync = iteration === 0 ? sync : await createSync();
+        expect(resync.sync('skills-changed')).toMatchObject({ ok: true, changed: false });
+        expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+      }
+    });
+
+    test('updates a migrated managed allowlist when models and the default model change', async () => {
+      const sync = await createSync();
+      sync.sync('initial-model-policy');
+      writeGatewayModelPolicy();
+      const provider = mockRuntimeState.enabledProviders[0];
+      provider.models.push({ id: 'gpt-next', name: 'GPT Next', customParams: { temperature: 0.5 } });
+
+      expect(sync.sync('model-added')).toMatchObject({ ok: true, changed: true });
+      const added = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(added.agents.defaults.modelPolicy).toEqual({
+        allow: ['openai/gpt-test', 'openai/gpt-second', 'openai/gpt-next'],
+      });
+      expect(sync.sync('unchanged-models')).toMatchObject({ ok: true, changed: false });
+
+      provider.models = provider.models.filter(model => model.id !== 'gpt-test');
+      mockRuntimeState.rawApiConfig.config!.model = 'gpt-next';
+      expect(sync.sync('default-model-replaced')).toMatchObject({ ok: true, changed: true });
+      const removed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(removed.agents.defaults.model.primary).toBe('openai/gpt-next');
+      expect(removed.agents.defaults.modelPolicy).toEqual({ allow: ['openai/gpt-second', 'openai/gpt-next'] });
+      expect(removed.meta.migrations.modelPolicyAllowlist).toBe(true);
+      expect(sync.sync('unchanged-models')).toMatchObject({ ok: true, changed: false });
+    });
+
+    test('does not rewrite model metadata reordered by a gateway config write', async () => {
+      const sync = await createSync();
+      sync.sync('initial-model-policy');
+      const config = writeGatewayModelPolicy();
+      config.agents.defaults.models = Object.fromEntries(
+        Object.entries(config.agents.defaults.models).reverse(),
+      );
+      fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      const before = fs.readFileSync(configPath, 'utf8');
+
+      expect(sync.sync('skills-changed')).toMatchObject({ ok: true, changed: false });
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+    });
+
+    test('keeps a spaced legacy model ID readable and converges after repairing an already generated policy', async () => {
+      const provider = mockRuntimeState.enabledProviders[0];
+      provider.models.push({ id: 'DeepSeek V4 Pro', name: 'DeepSeek V4 Pro' });
+      const sync = await createSync();
+      expect(sync.sync('legacy-model-upgrade')).toMatchObject({ ok: true, changed: true });
+      const legacy = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(legacy.agents.defaults.models['openai/DeepSeek V4 Pro']).toEqual({});
+      expect(legacy.agents.defaults.modelPolicy).toBeUndefined();
+      expect(legacy.meta?.migrations?.modelPolicyAllowlist).toBeUndefined();
+      expect(sync.sync('skills-changed')).toMatchObject({ ok: true, changed: false });
+
+      // Reproduce the invalid full allowlist emitted by PR #2742.
+      writeGatewayModelPolicy();
+      const restarted = await createSync();
+      expect(restarted.sync('recover-invalid-policy')).toMatchObject({ ok: true, changed: true });
+      const repaired = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(repaired.agents.defaults.models).toEqual(legacy.agents.defaults.models);
+      expect(repaired.agents.defaults.modelPolicy).toBeUndefined();
+      expect(repaired.meta?.migrations?.modelPolicyAllowlist).toBeUndefined();
+      expect(restarted.sync('skills-changed')).toMatchObject({ ok: true, changed: false });
+
+      provider.models.at(-1)!.id = 'deepseek-v4-pro';
+      expect(restarted.sync('model-id-corrected')).toMatchObject({ ok: true, changed: true });
+      const corrected = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(corrected.agents.defaults.modelPolicy.allow).toContain('openai/deepseek-v4-pro');
+      expect(corrected.meta.migrations.modelPolicyAllowlist).toBe(true);
+      expect(restarted.sync('skills-changed')).toMatchObject({ ok: true, changed: false });
+    });
+
+    test('repairs an invalid generated policy even before provider credentials become available', async () => {
+      mockRuntimeState.enabledProviders[0].models.push({ id: 'DeepSeek V4 Pro', name: 'DeepSeek V4 Pro' });
+      const sync = await createSync();
+      sync.sync('initial-model-policy');
+      const corrupted = writeGatewayModelPolicy();
+      const apiConfig = mockRuntimeState.rawApiConfig.config;
+      mockRuntimeState.rawApiConfig.config = null;
+
+      expect(sync.sync('credentials-unavailable')).toMatchObject({ ok: true, changed: true });
+      const repaired = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(repaired.models).toBeUndefined();
+      expect(repaired.agents.defaults.models).toEqual(corrupted.agents.defaults.models);
+      expect(repaired.agents.defaults.modelPolicy).toBeUndefined();
+      expect(repaired.meta?.migrations?.modelPolicyAllowlist).toBeUndefined();
+      expect(sync.sync('still-unavailable')).toMatchObject({ ok: true, changed: false });
+
+      mockRuntimeState.rawApiConfig.config = apiConfig;
+      expect(sync.sync('credentials-restored')).toMatchObject({ ok: true, changed: true });
+      expect(sync.sync('skills-changed')).toMatchObject({ ok: true, changed: false });
+      expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).agents.defaults.modelPolicy).toBeUndefined();
+    });
+
+    test('still delivers changes to array values in model parameters', async () => {
+      const model = mockRuntimeState.enabledProviders[0].models[0];
+      model.customParams = { stop: ['first', 'second'] };
+      const sync = await createSync();
+      sync.sync('initial-model-policy');
+      model.customParams = { stop: ['second', 'first'] };
+
+      expect(sync.sync('array-order-changed')).toMatchObject({ ok: true, changed: true });
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(config.agents.defaults.models['openai/gpt-test'].params.extra_body.stop).toEqual(['second', 'first']);
+      expect(sync.sync('unchanged-models')).toMatchObject({ ok: true, changed: false });
+    });
+
+    test.each([
+      { allow: ['openai/gpt-test'] },
+      { allow: [] },
+      { allow: ['openai/*'] },
+      {},
+    ])('preserves an authored policy %j when the managed model catalog changes', async (policy) => {
+      const sync = await createSync();
+      sync.sync('initial-model-policy');
+      writeGatewayModelPolicy(policy);
+      mockRuntimeState.enabledProviders[0].models.push({ id: 'gpt-next', name: 'GPT Next' });
+
+      expect(sync.sync('model-added')).toMatchObject({ ok: true, changed: true });
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(config.agents.defaults.modelPolicy).toEqual(policy);
+      expect(sync.sync('unchanged-models')).toMatchObject({ ok: true, changed: false });
+    });
+
+    test('keeps a migrated metadata-only model map unrestricted', async () => {
+      const sync = await createSync();
+      sync.sync('initial-model-policy');
+      const config = writeGatewayModelPolicy();
+      delete config.agents.defaults.modelPolicy;
+      fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+
+      expect(sync.sync('skills-changed')).toMatchObject({ ok: true, changed: false });
+      expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).agents.defaults.modelPolicy).toBeUndefined();
+    });
+
+    test('preserves policy and migration metadata during logout and model recovery', async () => {
+      const sync = await createSync();
+      sync.sync('initial-model-policy');
+      const configured = writeGatewayModelPolicy();
+      const apiConfig = mockRuntimeState.rawApiConfig.config;
+      mockRuntimeState.rawApiConfig.config = null;
+
+      expect(sync.sync('logout')).toMatchObject({ ok: true, changed: true });
+      const minimal = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(minimal.models).toBeUndefined();
+      expect(minimal.agents.defaults.modelPolicy).toEqual(configured.agents.defaults.modelPolicy);
+      expect(minimal.meta.migrations).toEqual({ modelPolicyAllowlist: true });
+      expect(sync.sync('still-logged-out')).toMatchObject({ ok: true, changed: false });
+
+      mockRuntimeState.rawApiConfig.config = apiConfig;
+      expect(sync.sync('model-recovered')).toMatchObject({ ok: true, changed: true });
+      const recovered = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(recovered.agents.defaults.modelPolicy).toEqual(configured.agents.defaults.modelPolicy);
+      expect(recovered.meta.migrations).toEqual({ modelPolicyAllowlist: true });
+      expect(sync.sync('unchanged-models')).toMatchObject({ ok: true, changed: false });
+    });
+
+    test('repairs a missing migration marker but ignores write-version metadata', async () => {
+      const sync = await createSync();
+      sync.sync('initial-model-policy');
+      const config = writeGatewayModelPolicy();
+      delete config.meta.migrations;
+      fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+
+      expect(sync.sync('missing-migration-marker')).toMatchObject({ ok: true, changed: true });
+      const repaired = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(repaired.agents.defaults.modelPolicy).toEqual(config.agents.defaults.modelPolicy);
+      expect(repaired.meta.migrations).toEqual({ modelPolicyAllowlist: true });
+      repaired.meta.lastTouchedVersion = '2026.8.1';
+      fs.writeFileSync(configPath, `${JSON.stringify(repaired, null, 2)}\n`);
+      const before = fs.readFileSync(configPath, 'utf8');
+      expect(sync.sync('only-write-version-changed')).toMatchObject({ ok: true, changed: false });
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+    });
+
+    test('does not restrict models when no legacy model defaults are generated', async () => {
+      mockRuntimeState.enabledProviders[0].models[0].customParams = undefined;
+      const sync = await createSync();
+      sync.sync('no-model-defaults');
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(config.agents.defaults.models).toBeUndefined();
+      expect(config.agents.defaults.modelPolicy).toBeUndefined();
+      expect(config.meta.migrations).toEqual({ modelPolicyAllowlist: true });
+      expect(sync.sync('unchanged-models')).toMatchObject({ ok: true, changed: false });
+    });
+
+    test('removes an automatic allowlist when its legacy model map is no longer generated', async () => {
+      const sync = await createSync();
+      sync.sync('initial-model-policy');
+      writeGatewayModelPolicy();
+      mockRuntimeState.enabledProviders[0].models[0].customParams = undefined;
+
+      expect(sync.sync('custom-params-removed')).toMatchObject({ ok: true, changed: true });
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      expect(config.agents.defaults.models).toBeUndefined();
+      expect(config.agents.defaults.modelPolicy).toBeUndefined();
+      expect(config.meta.migrations).toEqual({ modelPolicyAllowlist: true });
+      expect(sync.sync('unchanged-models')).toMatchObject({ ok: true, changed: false });
+    });
+  });
+
   test('preserves IM, routing, and gateway auth while models are unavailable and after recovery', async () => {
     const sync = await createSync({
       getAgents: () => ['main', 'worker'].map(id => ({
@@ -265,6 +510,7 @@ describe('OpenClawConfigSync runtime config output', () => {
     const sync = await createSync();
     expect(sync.sync('first-start')).toMatchObject({ ok: true, changed: true });
     const { meta: _meta, ...config } = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(_meta?.migrations?.modelPolicyAllowlist).toBeUndefined();
     expect(config).toEqual({
       gateway: { mode: 'local' },
       skills: { workshop: { autonomous: { mode: OpenClawSkillReviewMode.Off } } },

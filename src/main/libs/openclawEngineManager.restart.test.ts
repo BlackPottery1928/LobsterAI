@@ -9,6 +9,7 @@ import type { OpenClawDreamingRecoverySummary } from '../../shared/openclawEngin
 import { OpenClawStartupCompatibilityMode } from '../../shared/openclawEngine/startupCompatibility';
 import { OpenClawStartupMigrationStatus } from '../../shared/openclawEngine/startupMigration';
 import { OPENCLAW_STARTUP_MIGRATION_REFUSAL } from './openclawDreamingStartupFailure';
+import { OpenClawGatewaySignal } from './openclawGatewayProcess';
 
 vi.mock('electron', () => ({
   app: { getAppPath: () => process.cwd(), isPackaged: false },
@@ -93,6 +94,7 @@ function makeSupervisor() {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.spyOn(process, 'kill').mockReturnValue(true);
   vi.spyOn(console, 'debug').mockImplementation(() => {});
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -484,12 +486,36 @@ describe('OpenClaw gateway restart supervision', () => {
     const start = vi.spyOn(manager, 'startGateway');
     const pending = manager.restartGateway('mcp-change');
     const rejected = expect(pending).rejects.toThrow('did not exit after SIGKILL');
-    await vi.advanceTimersByTimeAsync(8_000);
+    await vi.advanceTimersByTimeAsync(process.platform === 'win32' ? 36_000 : 8_000);
     await rejected;
 
     expect(internals.gatewayProcess).toBe(child);
     expect(start).not.toHaveBeenCalled();
     expect(phases).toEqual([OpenClawEnginePhase.Starting, OpenClawEnginePhase.Error]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test.skipIf(process.platform !== 'win32')('restarts after native exit confirmation and ignores the old delayed close', async () => {
+    const { manager, internals, child, phases } = makeSupervisor();
+    const replacement = makeChild();
+    const start = vi.spyOn(manager, 'startGateway').mockImplementation(async () => {
+      internals.gatewayProcess = replacement;
+      internals.setStatus({ phase: OpenClawEnginePhase.Running, version: '2026.8.1', canRetry: false });
+      return manager.getStatus();
+    });
+    const pending = manager.restartGateway('config-delivery-fallback');
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(start).not.toHaveBeenCalled();
+    vi.mocked(process.kill).mockImplementation(() => {
+      throw Object.assign(new Error('No such process'), { code: 'ESRCH' });
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(pending).resolves.toMatchObject({ phase: OpenClawEnginePhase.Running });
+    child.emit('exit', null, OpenClawGatewaySignal.Kill);
+    child.emit('close', null, OpenClawGatewaySignal.Kill);
+    expect(internals.gatewayProcess).toBe(replacement);
+    expect(start).toHaveBeenCalledOnce();
+    expect(phases).toEqual([OpenClawEnginePhase.Starting, OpenClawEnginePhase.Running]);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -527,6 +553,43 @@ describe('OpenClaw gateway restart supervision', () => {
     closeChild(child, 1);
 
     expect(phases).toEqual([OpenClawEnginePhase.Starting, OpenClawEnginePhase.Error]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // Output of the v2026.8.1 gateway for keys it has no startup migration for.
+  const unrecognizedKeyExit = [
+    '[stderr] 2026-09-18T23:16:36.503+08:00 Gateway failed to start: Invalid config at /state/openclaw.json:',
+    '[stderr] openclaw.json:3 — session.maintenance: Unrecognized key: "rotateBytes"',
+    '[stderr] openclaw.json:5 — cron: Unrecognized key: "store"',
+    '[stderr] Run "openclaw doctor --fix" to repair, then retry.',
+  ];
+
+  test('names rejected keys and waits for explicit repair without restarting', () => {
+    const { manager, internals, child, phases } = makeSupervisor();
+    internals.gatewayRecentOutput.set(child, unrecognizedKeyExit);
+    child.exitCode = 78;
+    closeChild(child, 78);
+
+    expect(phases).toEqual([OpenClawEnginePhase.Error]);
+    expect(manager.getStatus().message).toBe([
+      'OpenClaw gateway startup stopped because openclaw.json is invalid. Repair the config or use Quick Repair before restarting.',
+      'session.maintenance: Unrecognized key: "rotateBytes"',
+      'cron: Unrecognized key: "store"',
+    ].join('\n'));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test('reports invalid plugin paths without an automatic repair restart', () => {
+    const { manager, internals, child, phases } = makeSupervisor();
+    internals.gatewayRecentOutput.set(child, [
+      '[stderr] Gateway failed to start: Invalid config at /state/openclaw.json:',
+      '[stderr] plugins.load.paths: plugin: plugin path not found: /old/resources/cfmind/third-party-extensions',
+    ]);
+    child.exitCode = 78;
+    closeChild(child, 78);
+
+    expect(phases).toEqual([OpenClawEnginePhase.Error]);
+    expect(manager.getStatus().message).toContain('plugins.load.paths: plugin: plugin path not found');
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -703,5 +766,53 @@ describe('OpenClaw gateway restart supervision', () => {
       OpenClawEnginePhase.Error,
     ]);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('terminal startup migration refusal block', () => {
+  const refusal = [
+    OPENCLAW_STARTUP_MIGRATION_REFUSAL,
+    '- Legacy channel allowFrom channel/account is unresolved; left in place at credentials/openclaw-weixin-a74391227cd8-im-bot-allowFrom.json',
+    'Run "openclaw doctor --fix" against the same state/config, then restart the gateway.',
+  ];
+
+  test('blocks implicit restarts until a manual retry and keeps the unresolved source visible', async () => {
+    const { manager, internals, child } = makeSupervisor();
+    internals.gatewayRecentOutput.set(child, refusal);
+    closeChild(child, 1);
+    const start = vi.spyOn(internals, 'doStartGateway').mockImplementation(async () => {
+      internals.setStatus({ phase: OpenClawEnginePhase.Running, version: '2026.8.1', canRetry: false });
+      return manager.getStatus();
+    });
+
+    const blocked = manager.getStatus();
+    expect(blocked.errorCode).toBe(OpenClawEngineErrorCode.StartupMigrationRefused);
+    expect(blocked.message).toContain('openclaw-weixin-a74391227cd8-im-bot-allowFrom.json');
+    expect(manager.isGatewayStartupBlocked()).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(await manager.startGateway('auto-restart-after-crash')).toEqual(blocked);
+    expect(await manager.startGateway('channel-sync-ensure-ready')).toEqual(blocked);
+    expect(start).not.toHaveBeenCalled();
+    expect(await manager.restartGateway('ipc-manual', { retryBlocked: true })).toMatchObject({ phase: OpenClawEnginePhase.Running });
+    expect(manager.isGatewayStartupBlocked()).toBe(false);
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  test('a Memory Core JSON refusal still takes the dreaming recovery path instead of blocking', () => {
+    const { manager, internals, child } = makeSupervisor();
+    internals.gatewayRecentOutput.set(child, refusal);
+    child.stderr!.emit('data', `${OPENCLAW_STARTUP_MIGRATION_REFUSAL}\n- Skipped Memory Core daily ingestion import for workspace because the legacy source could not be imported: SyntaxError: invalid JSON\n`);
+    closeChild(child, 1);
+    expect(manager.getStatus().errorCode).toBe(OpenClawEngineErrorCode.MemoryDreamingMigrationFailed);
+    expect(manager.isGatewayStartupBlocked()).toBe(false);
+  });
+
+  test('ignores the refusal text once the process had reported ready', () => {
+    const { manager, internals, child } = makeSupervisor();
+    internals.gatewayReadyProcesses.add(child);
+    internals.gatewayRecentOutput.set(child, refusal);
+    closeChild(child, 1);
+    expect(manager.getStatus().errorCode).not.toBe(OpenClawEngineErrorCode.StartupMigrationRefused);
+    expect(manager.isGatewayStartupBlocked()).toBe(false);
   });
 });
