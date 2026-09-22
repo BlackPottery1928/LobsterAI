@@ -10,6 +10,7 @@ import {
 
 const RETAINED_PATCHES = [
   'openclaw-aborted-tool-loop-breaker.patch',
+  'openclaw-active-exec-sessions-runtime-context.patch',
   'openclaw-auth-migration-config-commit.patch',
   'openclaw-browser-blocked-hostnames.patch',
   'openclaw-browser-cdp-dispatch-rejection.patch',
@@ -53,6 +54,7 @@ const RETAINED_PATCHES = [
   'openclaw-view-image-task-cwd.patch',
   'openclaw-web-login-channel-routing.patch',
   'openclaw-windows-file-path-redaction.patch',
+  'openclaw-windows-private-directory-native.patch',
   'openclaw-windows-process-identity.patch',
   'openclaw-workspace-attestation-quarantine.patch',
   'openclaw-workspace-setup-recovery.patch',
@@ -89,6 +91,17 @@ describe('OpenClaw v2026.8.1 upgrade decisions', () => {
 
   test.each(RETIRED_PATCHES)('retires %s', (patchFile) => {
     expectCurrentOpenClawPatchMissing(patchFile);
+  });
+
+  test('keeps background process snapshots below the system prompt cache boundary', () => {
+    expectPatchContains('openclaw-active-exec-sessions-runtime-context.patch', [
+      '+export function buildActiveProcessSessionRuntimeFacts',
+      '-      ? buildActiveProcessSessionReferenceLines(runtimeInfo?.activeProcessSessions)',
+      '+  const activeProcessRuntimeFacts =',
+      '+        activeProcessRuntimeFacts,',
+      '+        capabilityToolNames: toolSearchRunPlan.capabilityToolNames,',
+      'carries background process snapshots as hidden runtime context, not system prompt',
+    ]);
   });
 
   test('keeps LobsterAI-specific reliability and Goal compatibility surfaces', () => {
