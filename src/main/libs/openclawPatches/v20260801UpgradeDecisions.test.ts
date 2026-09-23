@@ -22,10 +22,12 @@ const RETAINED_PATCHES = [
   'openclaw-cron-preparation-failure-state.patch',
   'openclaw-cron-skip-missed-jobs.patch',
   'openclaw-device-identity-preservation.patch',
+  'openclaw-exec-command-description.patch',
   'openclaw-gateway-fast-path-rejection-handler.patch',
   'openclaw-im-bound-agent-run-cwd.patch',
   'openclaw-inferred-plugin-install-allowlist.patch',
   'openclaw-lancedb-optional-transformers.patch',
+  'openclaw-live-edit-diff-partial-args.patch',
   'openclaw-lobsterai-model-compat-api.patch',
   'openclaw-lobsterai-provider-cooldown.patch',
   'openclaw-lobsterai-startup-recovery.patch',
@@ -63,6 +65,7 @@ const RETAINED_PATCHES = [
   'zz-openclaw-lock-owner-recovery.patch',
   'zz-openclaw-marketplace-clone-retry.patch',
   'zz-openclaw-task-cwd-system-prompt.patch',
+  'zzz-openclaw-plugin-degraded-startup.patch',
 ] as const;
 
 const RETIRED_PATCHES = [

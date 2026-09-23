@@ -62,6 +62,7 @@ import {
 } from '../shared/cowork/constants';
 import type { CoworkSearchMessageCursor } from '../shared/cowork/search';
 import { DataMigrationIpc } from '../shared/dataMigration/constants';
+import { type DecisionModelConfigUpdate, DecisionModelIpcChannel } from '../shared/decisionModel/constants';
 import { DialogIpc } from '../shared/dialog/constants';
 import { DshIpcChannel } from '../shared/dshEngine/constants';
 import {
@@ -346,6 +347,12 @@ contextBridge.exposeInMainWorld('electron', {
     setEnabled: (enabled: boolean) => ipcRenderer.invoke(DshIpcChannel.SetEnabled, enabled),
     openWorkbench: () => ipcRenderer.invoke(DshIpcChannel.OpenWorkbench),
     stop: () => ipcRenderer.invoke(DshIpcChannel.Stop),
+  },
+  decisionModel: {
+    getConfig: () => ipcRenderer.invoke(DecisionModelIpcChannel.GetConfig),
+    saveConfig: (update: DecisionModelConfigUpdate) => ipcRenderer.invoke(DecisionModelIpcChannel.SaveConfig, update),
+    testConnection: (draft: DecisionModelConfigUpdate) =>
+      ipcRenderer.invoke(DecisionModelIpcChannel.TestConnection, draft),
   },
   openclaw: {
     engine: {

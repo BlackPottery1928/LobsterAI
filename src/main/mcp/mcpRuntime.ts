@@ -13,6 +13,7 @@ import {
   type AskUserResponse,
   type BrowserToolRequest,
   type BrowserToolResponse,
+  type DecisionToolHandler,
   McpBridgeServer,
   type MediaGenerationRequest,
   type MediaGenerationResponse,
@@ -53,6 +54,7 @@ export class McpRuntime {
   private browserToolHandler:
     | ((request: BrowserToolRequest) => Promise<BrowserToolResponse>)
     | null = null;
+  private decisionToolHandler: DecisionToolHandler | null = null;
 
   constructor(private readonly deps: McpRuntimeDeps) {}
 
@@ -99,6 +101,10 @@ export class McpRuntime {
     this.bridgeServer?.onBrowserTool(handler);
   }
 
+  setDecisionToolHandler(handler: DecisionToolHandler): void {
+    this.decisionToolHandler = handler;
+  }
+
   getAskUserCallbackUrl(): string | null {
     return this.bridgeServer?.askUserCallbackUrl ?? null;
   }
@@ -109,6 +115,10 @@ export class McpRuntime {
 
   getBrowserCallbackUrl(): string | null {
     return this.bridgeServer?.browserCallbackUrl ?? null;
+  }
+
+  getDecisionCallbackUrl(): string | null {
+    return this.bridgeServer?.decisionCallbackUrl ?? null;
   }
 
   getBridgeSecret(): string {
@@ -195,6 +205,16 @@ export class McpRuntime {
         };
       }
       return await this.mediaGenerationHandler(request);
+    });
+
+    this.bridgeServer.onDecisionTool(async (request, signal) => {
+      if (!this.decisionToolHandler) {
+        return {
+          content: [{ type: 'text', text: 'The decision model service is not ready yet.' }],
+          isError: true,
+        };
+      }
+      return await this.decisionToolHandler(request, signal);
     });
 
     if (this.browserToolHandler) {

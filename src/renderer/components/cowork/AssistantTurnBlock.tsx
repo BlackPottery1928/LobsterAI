@@ -39,7 +39,9 @@ import MarkdownContent from '../MarkdownContent';
 import PurchaseOfferCountdown from '../PurchaseOfferCountdown';
 import { useLowCreditOfferExposure } from '../useLowCreditOfferExposure';
 import ActivityGroupBlock from './ActivityGroupBlock';
+import { ActivityStepLine } from './ActivityStepLine';
 import AssistantMessageItem from './AssistantMessageItem';
+import { ActivityEntryVariant } from './constants';
 import { reportConversationBlockAction } from './conversationAnalytics';
 import MediaPollingIndicator from './MediaPollingIndicator';
 import { MessageCopyButton } from './MessageActionButton';
@@ -57,9 +59,12 @@ import {
   formatElapsedDuration,
   formatTurnDuration,
   getActivityIndicatorStatusText,
+  getActivityLiveStatusText,
+  getConsolidatedItemKey,
   getContextCompactionMessageLabel,
   getMediaCompletionDisplayText,
   getRetainedMediaPollCount,
+  getStreamingTextSignature,
   getThinkingPhaseLabels,
   getToolResultDisplay,
   getToolResultLineCount,
@@ -71,13 +76,16 @@ import {
   getVideoPathArtifacts,
   getVisibleAssistantItems,
   hasText,
+  isAbandonedToolPlaceholder,
   isActivityConsolidatedItem,
+  isActivityItemLive,
   isContextCompactionMessage,
   isDuplicateGeneratedVideoAssistantMessage,
   type ToolGroupItem,
 } from './messageDisplayUtils';
 import ThinkingBlock from './ThinkingBlock';
 import ToolCallGroup from './ToolCallGroup';
+import { useStreamStall } from './useStreamStall';
 
 const encodeLocalPathForUrl = (filePath: string): string => {
   return filePath
@@ -161,8 +169,11 @@ const ContextCompactionDivider: React.FC<{ label: string; active?: boolean }> = 
 // ── ActivityIndicator ────────────────────────────────────────────────────────
 // Persistent busy-state line at the insertion point of the last turn
 // (Codex / ChatGPT style): breathing dot + shimmering status text + elapsed
-// time, visible for the whole run. The label starts as "thinking" and
-// switches to "working" once the turn has shown any content.
+// time, visible for the whole run. The label follows what is happening:
+// the running step's phrase ("Running a command") while a step is live,
+// rotating thinking words while waiting for the model's first output, and
+// "working" in the silent gaps after that — a thought that has stopped
+// growing must not keep saying "thinking", or the run reads as frozen.
 
 // One tick: the first value the user sees is "1s", counting up naturally.
 const ACTIVITY_TIMER_APPEAR_DELAY_MS = 1000;
@@ -171,18 +182,26 @@ const ACTIVITY_LONG_WAIT_HINT_DELAY_MS = 30_000;
 // Rotate the phase word while the model is still silent, so the row visibly keeps moving.
 const ACTIVITY_PHASE_INTERVAL_MS = 2200;
 
+// Updates reach the renderer every ~200ms while text streams; a streaming
+// thought or reply that has not grown for this long is no longer being written.
+const STREAM_STALL_MS = 3000;
+
 export const ActivityIndicator: React.FC<{
   fingerprint: string;
-  hasContent: boolean;
   startTimestamp: number | null;
+  /** Session-level override (e.g. context maintenance); wins over everything else. */
   statusTextOverride?: string | null;
-  /** Tool steps of the turn that already finished; rendered as a small "N steps done" cue. */
-  completedSteps?: number;
-}> = ({ fingerprint, hasContent, startTimestamp, statusTextOverride, completedSteps = 0 }) => {
+  /** What the running step is doing right now; null while the model is silent. */
+  liveStatusText?: string | null;
+  /** Whether the turn has shown anything yet; silent gaps after that read as "working". */
+  hasContent?: boolean;
+}> = ({ fingerprint, startTimestamp, statusTextOverride, liveStatusText = null, hasContent = false }) => {
   const [isLongWaiting, setIsLongWaiting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [phaseIndex, setPhaseIndex] = useState(0);
-  const thinking = !statusTextOverride && !hasContent && !isLongWaiting;
+  // Waiting for the model's first output: nothing overrides the label, no
+  // step is running, and the turn has shown nothing yet.
+  const thinking = !statusTextOverride && !liveStatusText && !isLongWaiting && !hasContent;
 
   useEffect(() => {
     if (!thinking) {
@@ -218,8 +237,13 @@ export const ActivityIndicator: React.FC<{
   // counter rather than one restarted from zero.
   const elapsedMs = startTimestamp != null ? Math.max(0, now - startTimestamp) : null;
   const phases = getThinkingPhaseLabels();
+  // A running step always names itself; the long-wait hint only applies to a
+  // silent model, never to a command that is simply taking its time.
   const statusText = statusTextOverride
-    ?? (thinking ? phases[phaseIndex % phases.length] : getActivityIndicatorStatusText(false, isLongWaiting, hasContent));
+    ?? liveStatusText
+    ?? (thinking
+      ? phases[phaseIndex % phases.length]
+      : getActivityIndicatorStatusText(false, isLongWaiting, hasContent));
 
   return (
     <div className="flex items-center gap-2 py-1 animate-fade-in">
@@ -237,15 +261,6 @@ export const ActivityIndicator: React.FC<{
           aria-hidden="true"
         >
           {formatElapsedDuration(elapsedMs)}
-        </span>
-      )}
-      {completedSteps > 0 && (
-        <span
-          className="text-xs text-muted flex-shrink-0 animate-fade-in"
-          data-cowork-activity-steps={completedSteps}
-          aria-hidden="true"
-        >
-          {i18nService.t('coworkActivityStepsDone').replace('{count}', String(completedSteps))}
         </span>
       )}
     </div>
@@ -537,12 +552,6 @@ const MediaImageInline: React.FC<{ artifacts: Artifact[] }> = ({ artifacts }) =>
 
 // ── AssistantTurnBlock ───────────────────────────────────────────────────────
 
-const getActivityGroupKey = (item: ConsolidatedItem): string => {
-  if (item.type === 'media_polling_group') return `media-${item.group.taskId}`;
-  if (item.type === 'tool_group') return item.group.toolUse.id;
-  return item.message.id;
-};
-
 const AssistantTurnBlock: React.FC<{
   turn: ConversationTurn;
   artifacts?: Artifact[];
@@ -599,10 +608,11 @@ const AssistantTurnBlock: React.FC<{
   const [processExpanded, setProcessExpanded] = useState(false);
   const visibleAssistantItems = useMemo(
     () => getVisibleAssistantItems(turn.assistantItems).filter(item => {
+      if (!isStreamingTurn && isAbandonedToolPlaceholder(item)) return false;
       if (!hideCreditQuotaBanner || item.type !== 'system') return true;
       return !isCreditQuotaExhaustedKey(getSystemMessageErrorKey(item.message, item.message.content));
     }),
-    [turn.assistantItems, hideCreditQuotaBanner],
+    [turn.assistantItems, hideCreditQuotaBanner, isStreamingTurn],
   );
   const consolidatedItems = useMemo(
     () => consolidateMediaPolling(visibleAssistantItems),
@@ -766,7 +776,11 @@ const AssistantTurnBlock: React.FC<{
     );
   };
 
-  // Tool groups with an override (e.g. subagent cards) stay visible on their own.
+  // Consecutive work items between pieces of text form one activity run
+  // (WorkBuddy style): a finished run folds into a single summary line,
+  // while the running turn's tail run lists every step on its own line.
+  // Tool groups with an override (e.g. subagent cards) stay visible on
+  // their own.
   const renderChunks = chunkConsolidatedItemsForDisplay(
     consolidatedItems,
     (item) => isActivityConsolidatedItem(item)
@@ -786,12 +800,13 @@ const AssistantTurnBlock: React.FC<{
   const renderConsolidatedItem = (
     item: ConsolidatedItem,
     index: number,
-    displayVariant: 'timeline' | 'row' = 'timeline',
-    rowInitiallyExpanded = false,
+    displayVariant: 'timeline' | ActivityEntryVariant = 'timeline',
+    isLive?: boolean,
   ): React.ReactNode => {
-    const isRowVariant = displayVariant === 'row';
+    // A step line inside an activity run has no timeline connector to draw.
+    const isGroupEntry = displayVariant !== 'timeline';
     if (item.type === 'media_polling_group') {
-      const isLastInSequence = isRowVariant || !timelineToolIndices.has(index + 1);
+      const isLastInSequence = isGroupEntry || !timelineToolIndices.has(index + 1);
       const retainedPollCount = getRetainedMediaPollCount(
         { taskId: item.group.taskId, upstreamTaskId: item.group.upstreamTaskId },
         retainedMediaPollCounts,
@@ -806,9 +821,7 @@ const AssistantTurnBlock: React.FC<{
           isLastInSequence={isLastInSequence}
         />
       );
-      return isRowVariant
-        ? <div key={`media-poll-${item.group.taskId}`} className="px-4 py-1.5">{indicator}</div>
-        : indicator;
+      return indicator;
     }
 
     if (item.type === 'assistant') {
@@ -818,8 +831,8 @@ const AssistantTurnBlock: React.FC<{
             key={item.message.id}
             message={item.message}
             mapDisplayText={mapDisplayText}
-            variant={isRowVariant ? 'row' : 'default'}
-            initiallyExpanded={rowInitiallyExpanded}
+            variant={isGroupEntry ? displayVariant : 'default'}
+            isLive={isLive}
           />
         );
       }
@@ -873,7 +886,7 @@ const AssistantTurnBlock: React.FC<{
           </div>
         );
       }
-      const isLastInSequence = isRowVariant || !timelineToolIndices.has(index + 1);
+      const isLastInSequence = isGroupEntry || !timelineToolIndices.has(index + 1);
       return (
         <ToolCallGroup
           key={`tool-${item.group.toolUse.id}`}
@@ -882,7 +895,7 @@ const AssistantTurnBlock: React.FC<{
           mapDisplayText={mapDisplayText}
           retainedMediaPollCounts={retainedMediaPollCounts}
           variant={displayVariant}
-          initiallyExpanded={rowInitiallyExpanded}
+          isLive={isLive}
         />
       );
     }
@@ -900,11 +913,22 @@ const AssistantTurnBlock: React.FC<{
     }
 
     return (
-      <div key={item.message.id} className={isRowVariant ? 'px-4 py-1.5' : undefined}>
+      <div key={item.message.id}>
         {renderOrphanToolResult(item.message)}
       </div>
     );
   };
+
+  // The turn's last work item while it runs; the status line and the tail
+  // step describe what it is doing right now.
+  const liveTailItem = isStreamingTurn && consolidatedItems.length > 0
+    ? consolidatedItems[consolidatedItems.length - 1]
+    : null;
+  // The runtime closes a thought (or reply segment) only when the next tool
+  // starts, and a tool call's arguments do not stream here, so a tail text
+  // that stopped growing means the model has moved on. It then stops reading
+  // as "thinking": the status line says "working" and the step settles.
+  const isTailTextStalled = useStreamStall(getStreamingTextSignature(liveTailItem), STREAM_STALL_MS);
 
   const renderChunk = (chunk: (typeof renderChunks)[number], chunkIndex: number): React.ReactNode => {
     if (chunk.kind === 'item') {
@@ -912,11 +936,16 @@ const AssistantTurnBlock: React.FC<{
     }
     return (
       <ActivityGroupBlock
-        key={`activity-${getActivityGroupKey(chunk.entries[0].item)}`}
+        key={`activity-${getConsolidatedItemKey(chunk.entries[0].item)}`}
         entries={chunk.entries}
-        isStreamingTail={isStreamingTurn && chunkIndex === renderChunks.length - 1}
-        renderEntry={(entry, options) =>
-          renderConsolidatedItem(entry.item, entry.index, 'row', options?.initiallyExpanded)}
+        isLiveRun={isStreamingTurn && chunkIndex === renderChunks.length - 1}
+        isTailStalled={isTailTextStalled}
+        renderEntry={(entry, isLive) => renderConsolidatedItem(
+          entry.item,
+          entry.index,
+          ActivityEntryVariant.Row,
+          isLive,
+        )}
       />
     );
   };
@@ -950,12 +979,17 @@ const AssistantTurnBlock: React.FC<{
   const processBaseLabel = processDurationMs != null && processDurationMs >= 1000
     ? i18nService.t('coworkTurnProcessDuration').replace('{duration}', formatTurnDuration(processDurationMs))
     : i18nService.t('coworkTurnProcess');
-  // Failed steps fold with the rest of the process; the duration line reports
-  // how many there were so the fold never hides a failure silently.
+  // The folded line is just the duration. Step and failure counts only feed
+  // analytics: a turn that reached an answer worked around any failed step
+  // on its own, and the expanded rows still mark each one.
+  const processStepCount = countTurnCompletedSteps(turn);
   const failedStepCount = countTurnFailedSteps(turn);
-  const processLabel = failedStepCount > 0
-    ? `${processBaseLabel} · ${i18nService.t('coworkTurnProcessFailedSteps').replace('{count}', String(failedStepCount))}`
-    : processBaseLabel;
+  const processLabel = processBaseLabel;
+  // What the running step is doing right now, for the status line: the last
+  // work item while it is still live; null in the silent gaps between steps.
+  const liveStatusText = liveTailItem && isActivityItemLive(liveTailItem) && !isTailTextStalled
+    ? getActivityLiveStatusText(liveTailItem)
+    : null;
 
   const handleProcessToggle = () => {
     const nextExpanded = !isProcessExpanded;
@@ -964,6 +998,8 @@ const AssistantTurnBlock: React.FC<{
       blockType: 'turn_process',
       params: {
         processChunkCount: processChunks.length,
+        stepCount: processStepCount,
+        failedStepCount,
         durationMs: processDurationMs ?? undefined,
       },
     });
@@ -981,23 +1017,21 @@ const AssistantTurnBlock: React.FC<{
           <div className="flex-1 min-w-0 py-3 space-y-3">
             {shouldFoldProcess ? (
               <>
-                <div className="py-1">
-                  <button
-                    type="button"
-                    onClick={handleProcessToggle}
-                    className="group flex max-w-full items-center gap-1.5 text-left"
-                    aria-expanded={isProcessExpanded}
-                  >
-                    <span className="min-w-0 truncate text-sm text-secondary transition-colors group-hover:text-foreground">
-                      {processLabel}
-                    </span>
+                {/* Unlike step lines, the duration line keeps its arrow: it is
+                    the only way back into a finished turn's whole process. */}
+                <ActivityStepLine
+                  label={processLabel}
+                  isExpanded={isProcessExpanded}
+                  onToggle={handleProcessToggle}
+                  trailing={(
                     <ChevronRightIcon
-                      className={`h-3.5 w-3.5 flex-shrink-0 text-muted transition-transform duration-200 group-hover:text-secondary ${
+                      className={`h-[0.9em] w-[0.9em] flex-shrink-0 transition-transform duration-200 ${
                         isProcessExpanded ? 'rotate-90' : ''
                       }`}
+                      aria-hidden="true"
                     />
-                  </button>
-                </div>
+                  )}
+                />
                 {isProcessExpanded && processChunks.map((chunk, index) => renderChunk(chunk, index))}
                 {answerChunks.map((chunk, index) => renderChunk(chunk, answerStartIndex + index))}
               </>
@@ -1007,10 +1041,10 @@ const AssistantTurnBlock: React.FC<{
             {showActivityIndicator && (
               <ActivityIndicator
                 fingerprint={getTurnActivityFingerprint(turn)}
-                hasContent={visibleAssistantItems.length > 0}
                 startTimestamp={getTurnStartTimestamp(turn)}
                 statusTextOverride={activityStatusOverride}
-                completedSteps={countTurnCompletedSteps(turn)}
+                liveStatusText={liveStatusText}
+                hasContent={visibleAssistantItems.length > 0}
               />
             )}
             {artifacts && artifacts.length > 0 && (

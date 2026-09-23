@@ -668,6 +668,19 @@ const OpenClawFailureFinalText = {
 // runner); re-verify them when bumping the runtime version.
 const OPENCLAW_TOOL_LOOP_BLOCKED_RESULT_PATTERN = /^CRITICAL: [\s\S]*Session execution blocked/;
 const OPENCLAW_INCOMPLETE_TURN_TEXT = "Agent couldn't generate a response";
+/** Tool stream phase OpenClaw emits while the model is still writing a file tool call's arguments. */
+const OPENCLAW_TOOL_INPUT_DELTA_PHASE = 'input_delta';
+
+const readLiveEditDiff = (value: unknown): { added: number; removed: number } | null => {
+  if (!isRecord(value)) return null;
+  const readCount = (raw: unknown): number | null => (
+    typeof raw === 'number' && Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : null
+  );
+  const added = readCount(value.added);
+  const removed = readCount(value.removed);
+  if (added === null || removed === null) return null;
+  return { added, removed };
+};
 
 export function isOpenClawToolLoopBlockedResultText(text: string): boolean {
   return OPENCLAW_TOOL_LOOP_BLOCKED_RESULT_PATTERN.test(text.trim());
@@ -735,6 +748,8 @@ type ActiveTurn = {
   toolUseMessageIdByToolCallId: Map<string, string>;
   toolResultMessageIdByToolCallId: Map<string, string>;
   toolResultTextByToolCallId: Map<string, string>;
+  /** Tool calls shown from `input_delta` events whose `start` event has not arrived yet. */
+  generatingToolCallIds?: Set<string>;
   /**
    * Reason text of a critical tool-loop veto seen in this turn. The runtime
    * ends such runs with its generic incomplete-turn copy, so this context is
@@ -8771,6 +8786,50 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     this.resolveTurn(sessionId);
   }
 
+  /**
+   * OpenClaw streams `+N/-M` line counts while the model is still writing the
+   * arguments of a file tool call (`phase: input_delta`). Showing the step at
+   * that moment turns the longest silent stretch of a run — a large file being
+   * generated — into a visible, moving counter. The placeholder carries no
+   * input yet; the matching `start` event fills it in.
+   */
+  private handleToolInputDelta(
+    sessionId: string,
+    turn: ActiveTurn,
+    toolCallId: string,
+    toolName: string,
+    data: Record<string, unknown>,
+    isCurrentRun: boolean,
+  ): void {
+    if (!isCurrentRun || turn.planMode) return;
+    const liveEditDiff = readLiveEditDiff(data.diff);
+    if (!liveEditDiff) return;
+    const content = `Using tool: ${toolName}`;
+    const metadata = {
+      toolName,
+      toolInput: {},
+      toolUseId: toolCallId,
+      isGenerating: true,
+      liveEditDiff,
+    };
+    const existingMessageId = turn.toolUseMessageIdByToolCallId.get(toolCallId);
+    if (existingMessageId) {
+      // Only a placeholder created here may be refreshed; a step that already
+      // started carries real input that a late delta must not erase.
+      if (!turn.generatingToolCallIds?.has(toolCallId)) return;
+      this.store.updateMessage(sessionId, existingMessageId, { metadata });
+      this.emit('messageUpdate', sessionId, existingMessageId, content, metadata);
+      return;
+    }
+    this.splitAssistantSegmentBeforeTool(sessionId, turn, toolCallId);
+    turn.agentAssistantTextLength = 0;
+    const toolUseMessage = this.store.addMessage(sessionId, { type: 'tool_use', content, metadata });
+    turn.toolUseMessageIdByToolCallId.set(toolCallId, toolUseMessage.id);
+    (turn.generatingToolCallIds ??= new Set()).add(toolCallId);
+    this.emit('message', sessionId, toolUseMessage);
+    this.turnHistorySync.scheduleThinking(sessionId, toolCallId);
+  }
+
   private handleAgentToolEvent(sessionId: string, turn: ActiveTurn, data: unknown, eventRunId?: string): void {
     if (!isRecord(data)) return;
 
@@ -8796,12 +8855,16 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     }
 
     if (!toolCallId) return;
-    if (phase !== 'start' && phase !== 'update' && phase !== 'result') return;
 
     const toolNameRaw = typeof data.name === 'string' ? data.name.trim() : '';
     const toolName = toolNameRaw || 'Tool';
     const latestRunId = [...turn.knownRunIds].at(-1) ?? turn.runId;
     const isCurrentRun = !eventRunId || eventRunId === latestRunId;
+    if (phase === OPENCLAW_TOOL_INPUT_DELTA_PHASE) {
+      this.handleToolInputDelta(sessionId, turn, toolCallId, toolName, data, isCurrentRun);
+      return;
+    }
+    if (phase !== 'start' && phase !== 'update' && phase !== 'result') return;
     if (phase === 'start' && isCurrentRun) {
       turn.yieldedRunId = undefined;
     }
@@ -8913,6 +8976,20 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       // Track sessions_spawn tool calls for subagent visualization
       if (toolNameRaw.toLowerCase() === 'sessions_spawn') {
         this.subagentTracker.onToolStart(toolCallId, toToolInputRecord(data.args), sessionId);
+      }
+    } else if (phase === 'start' && turn.generatingToolCallIds?.delete(toolCallId)) {
+      // The step was already on screen while the model streamed its arguments;
+      // the real input now replaces the placeholder and the live counter retires.
+      const toolUseMessageId = turn.toolUseMessageIdByToolCallId.get(toolCallId);
+      if (toolUseMessageId) {
+        const startedMetadata = {
+          toolName,
+          toolInput: toToolInputRecord(data.args),
+          toolUseId: toolCallId,
+          isGenerating: false,
+        };
+        this.store.updateMessage(sessionId, toolUseMessageId, { metadata: startedMetadata });
+        this.emit('messageUpdate', sessionId, toolUseMessageId, `Using tool: ${toolName}`, startedMetadata);
       }
     }
 
