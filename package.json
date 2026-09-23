@@ -117,14 +117,14 @@
         "size": 35535483
       },
       "mac-x64": {
-        "url": "https://ydschool-video.nosdn.127.net/1787307267457dsh-runtime-0.1.1-rc.1-mac-x64.tar.gz",
-        "sha256": "89869b9e323bb14e2c31c533e93d7220b79631778651ba674e2fd53999e18874",
-        "size": 29270091
+        "url": "https://ydschool-video.nosdn.127.net/1790148651817dsh-runtime-0.1.5-rc.3-mac-x64.tar.gz",
+        "sha256": "e355ae19a636f0bb0d4a794ad181abea01e59e027ecba176b7a62173907367a5",
+        "size": 32779272
       },
       "win-x64": {
-        "url": "https://ydschool-video.nosdn.127.net/1787307929467dsh-runtime-0.1.1-rc.1-win-x64.tar.gz",
-        "sha256": "492d9f7b4827def4cfee7be4ee8ee53e4c5aadcd4d90d63359b363408b297d6c",
-        "size": 28402933
+        "url": "https://ydschool-video.nosdn.127.net/1790148273956dsh-runtime-0.1.5-rc.3-win-x64.tar.gz",
+        "sha256": "e63442647c8ba8052b34434690ff5cb9afe0d6c6b3a37f84fda43b5ed6b9e824",
+        "size": 31996964
       }
     }
   },
