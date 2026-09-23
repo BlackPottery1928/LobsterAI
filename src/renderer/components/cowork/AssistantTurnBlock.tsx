@@ -40,6 +40,7 @@ import PurchaseOfferCountdown from '../PurchaseOfferCountdown';
 import { useLowCreditOfferExposure } from '../useLowCreditOfferExposure';
 import ActivityGroupBlock from './ActivityGroupBlock';
 import AssistantMessageItem from './AssistantMessageItem';
+import { ActivityEntryVariant } from './constants';
 import { reportConversationBlockAction } from './conversationAnalytics';
 import MediaPollingIndicator from './MediaPollingIndicator';
 import { MessageCopyButton } from './MessageActionButton';
@@ -61,6 +62,7 @@ import {
   getContextCompactionMessageLabel,
   getMediaCompletionDisplayText,
   getRetainedMediaPollCount,
+  getStreamingTextSignature,
   getThinkingPhaseLabels,
   getToolResultDisplay,
   getToolResultLineCount,
@@ -72,6 +74,7 @@ import {
   getVideoPathArtifacts,
   getVisibleAssistantItems,
   hasText,
+  isAbandonedToolPlaceholder,
   isActivityConsolidatedItem,
   isActivityItemLive,
   isContextCompactionMessage,
@@ -81,6 +84,7 @@ import {
 } from './messageDisplayUtils';
 import ThinkingBlock from './ThinkingBlock';
 import ToolCallGroup from './ToolCallGroup';
+import { useStreamStall } from './useStreamStall';
 
 const encodeLocalPathForUrl = (filePath: string): string => {
   return filePath
@@ -166,7 +170,9 @@ const ContextCompactionDivider: React.FC<{ label: string; active?: boolean }> = 
 // (Codex / ChatGPT style): breathing dot + shimmering status text + elapsed
 // time, visible for the whole run. The label follows what is happening:
 // the running step's phrase ("Running a command") while a step is live,
-// rotating thinking words while the model is silent.
+// rotating thinking words while waiting for the model's first output, and
+// "working" in the silent gaps after that — a thought that has stopped
+// growing must not keep saying "thinking", or the run reads as frozen.
 
 // One tick: the first value the user sees is "1s", counting up naturally.
 const ACTIVITY_TIMER_APPEAR_DELAY_MS = 1000;
@@ -175,6 +181,10 @@ const ACTIVITY_LONG_WAIT_HINT_DELAY_MS = 30_000;
 // Rotate the phase word while the model is still silent, so the row visibly keeps moving.
 const ACTIVITY_PHASE_INTERVAL_MS = 2200;
 
+// Updates reach the renderer every ~200ms while text streams; a streaming
+// thought or reply that has not grown for this long is no longer being written.
+const STREAM_STALL_MS = 3000;
+
 export const ActivityIndicator: React.FC<{
   fingerprint: string;
   startTimestamp: number | null;
@@ -182,14 +192,15 @@ export const ActivityIndicator: React.FC<{
   statusTextOverride?: string | null;
   /** What the running step is doing right now; null while the model is silent. */
   liveStatusText?: string | null;
-  /** Tool steps of the turn that already finished; rendered as a small "N steps done" cue. */
-  completedSteps?: number;
-}> = ({ fingerprint, startTimestamp, statusTextOverride, liveStatusText = null, completedSteps = 0 }) => {
+  /** Whether the turn has shown anything yet; silent gaps after that read as "working". */
+  hasContent?: boolean;
+}> = ({ fingerprint, startTimestamp, statusTextOverride, liveStatusText = null, hasContent = false }) => {
   const [isLongWaiting, setIsLongWaiting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [phaseIndex, setPhaseIndex] = useState(0);
-  // The model is silent: nothing overrides the label and no step is running.
-  const thinking = !statusTextOverride && !liveStatusText && !isLongWaiting;
+  // Waiting for the model's first output: nothing overrides the label, no
+  // step is running, and the turn has shown nothing yet.
+  const thinking = !statusTextOverride && !liveStatusText && !isLongWaiting && !hasContent;
 
   useEffect(() => {
     if (!thinking) {
@@ -229,7 +240,9 @@ export const ActivityIndicator: React.FC<{
   // silent model, never to a command that is simply taking its time.
   const statusText = statusTextOverride
     ?? liveStatusText
-    ?? (isLongWaiting ? getActivityIndicatorStatusText(false, true) : phases[phaseIndex % phases.length]);
+    ?? (thinking
+      ? phases[phaseIndex % phases.length]
+      : getActivityIndicatorStatusText(false, isLongWaiting, hasContent));
 
   return (
     <div className="flex items-center gap-2 py-1 animate-fade-in">
@@ -247,15 +260,6 @@ export const ActivityIndicator: React.FC<{
           aria-hidden="true"
         >
           {formatElapsedDuration(elapsedMs)}
-        </span>
-      )}
-      {completedSteps > 0 && (
-        <span
-          className="text-xs text-muted flex-shrink-0 animate-fade-in"
-          data-cowork-activity-steps={completedSteps}
-          aria-hidden="true"
-        >
-          {i18nService.t('coworkActivityStepsDone').replace('{count}', String(completedSteps))}
         </span>
       )}
     </div>
@@ -609,10 +613,11 @@ const AssistantTurnBlock: React.FC<{
   const [processExpanded, setProcessExpanded] = useState(false);
   const visibleAssistantItems = useMemo(
     () => getVisibleAssistantItems(turn.assistantItems).filter(item => {
+      if (!isStreamingTurn && isAbandonedToolPlaceholder(item)) return false;
       if (!hideCreditQuotaBanner || item.type !== 'system') return true;
       return !isCreditQuotaExhaustedKey(getSystemMessageErrorKey(item.message, item.message.content));
     }),
-    [turn.assistantItems, hideCreditQuotaBanner],
+    [turn.assistantItems, hideCreditQuotaBanner, isStreamingTurn],
   );
   const consolidatedItems = useMemo(
     () => consolidateMediaPolling(visibleAssistantItems),
@@ -801,12 +806,14 @@ const AssistantTurnBlock: React.FC<{
   const renderConsolidatedItem = (
     item: ConsolidatedItem,
     index: number,
-    displayVariant: 'timeline' | 'row' = 'timeline',
-    rowInitiallyExpanded = false,
+    displayVariant: 'timeline' | ActivityEntryVariant = 'timeline',
   ): React.ReactNode => {
-    const isRowVariant = displayVariant === 'row';
+    // Inside an activity group (as a row, or as a lone step's detail) there
+    // is no timeline connector to draw.
+    const isGroupEntry = displayVariant !== 'timeline';
+    const isRowVariant = displayVariant === ActivityEntryVariant.Row;
     if (item.type === 'media_polling_group') {
-      const isLastInSequence = isRowVariant || !timelineToolIndices.has(index + 1);
+      const isLastInSequence = isGroupEntry || !timelineToolIndices.has(index + 1);
       const retainedPollCount = getRetainedMediaPollCount(
         { taskId: item.group.taskId, upstreamTaskId: item.group.upstreamTaskId },
         retainedMediaPollCounts,
@@ -833,8 +840,7 @@ const AssistantTurnBlock: React.FC<{
             key={item.message.id}
             message={item.message}
             mapDisplayText={mapDisplayText}
-            variant={isRowVariant ? 'row' : 'default'}
-            initiallyExpanded={rowInitiallyExpanded}
+            variant={isGroupEntry ? displayVariant : 'default'}
           />
         );
       }
@@ -888,7 +894,7 @@ const AssistantTurnBlock: React.FC<{
           </div>
         );
       }
-      const isLastInSequence = isRowVariant || !timelineToolIndices.has(index + 1);
+      const isLastInSequence = isGroupEntry || !timelineToolIndices.has(index + 1);
       return (
         <ToolCallGroup
           key={`tool-${item.group.toolUse.id}`}
@@ -897,7 +903,6 @@ const AssistantTurnBlock: React.FC<{
           mapDisplayText={mapDisplayText}
           retainedMediaPollCounts={retainedMediaPollCounts}
           variant={displayVariant}
-          initiallyExpanded={rowInitiallyExpanded}
         />
       );
     }
@@ -921,6 +926,17 @@ const AssistantTurnBlock: React.FC<{
     );
   };
 
+  // The turn's last work item while it runs; the status line and the tail
+  // step describe what it is doing right now.
+  const liveTailItem = isStreamingTurn && consolidatedItems.length > 0
+    ? consolidatedItems[consolidatedItems.length - 1]
+    : null;
+  // The runtime closes a thought (or reply segment) only when the next tool
+  // starts, and a tool call's arguments do not stream here, so a tail text
+  // that stopped growing means the model has moved on. It then stops reading
+  // as "thinking": the status line says "working" and the step settles.
+  const isTailTextStalled = useStreamStall(getStreamingTextSignature(liveTailItem), STREAM_STALL_MS);
+
   const renderChunk = (chunk: (typeof renderChunks)[number], chunkIndex: number): React.ReactNode => {
     if (chunk.kind === 'item') {
       return renderConsolidatedItem(chunk.item, chunk.index);
@@ -929,9 +945,8 @@ const AssistantTurnBlock: React.FC<{
       <ActivityGroupBlock
         key={`activity-${getActivityGroupKey(chunk.entries[0].item)}`}
         entries={chunk.entries}
-        isStreamingTail={isStreamingTurn && chunkIndex === renderChunks.length - 1}
-        renderEntry={(entry, options) =>
-          renderConsolidatedItem(entry.item, entry.index, 'row', options?.initiallyExpanded)}
+        isStreamingTail={isStreamingTurn && chunkIndex === renderChunks.length - 1 && !isTailTextStalled}
+        renderEntry={(entry, variant) => renderConsolidatedItem(entry.item, entry.index, variant)}
       />
     );
   };
@@ -973,10 +988,7 @@ const AssistantTurnBlock: React.FC<{
   const processLabel = processBaseLabel;
   // What the running step is doing right now, for the status line: the last
   // work item while it is still live; null in the silent gaps between steps.
-  const liveTailItem = isStreamingTurn && consolidatedItems.length > 0
-    ? consolidatedItems[consolidatedItems.length - 1]
-    : null;
-  const liveStatusText = liveTailItem && isActivityItemLive(liveTailItem)
+  const liveStatusText = liveTailItem && isActivityItemLive(liveTailItem) && !isTailTextStalled
     ? getActivityLiveStatusText(liveTailItem)
     : null;
 
@@ -1035,7 +1047,7 @@ const AssistantTurnBlock: React.FC<{
                 startTimestamp={getTurnStartTimestamp(turn)}
                 statusTextOverride={activityStatusOverride}
                 liveStatusText={liveStatusText}
-                completedSteps={countTurnCompletedSteps(turn)}
+                hasContent={visibleAssistantItems.length > 0}
               />
             )}
             {artifacts && artifacts.length > 0 && (

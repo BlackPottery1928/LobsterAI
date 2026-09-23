@@ -21,6 +21,8 @@ import {
   getActivityLiveStatusText,
   getActivityStepDisplay,
   getLiveEditDiff,
+  getShellCommandDescription,
+  getStreamingTextSignature,
   getThinkingPhaseLabels,
   getToolInputSummary,
   getToolResultCollapsedDisplay,
@@ -30,6 +32,7 @@ import {
   getTurnEndTimestamp,
   getTurnMessageIds,
   getTurnStartTimestamp,
+  isAbandonedToolPlaceholder,
   isActivityConsolidatedItem,
   isActivityItemLive,
   isToolGroupSettled,
@@ -485,10 +488,14 @@ test('activity header label summarizes commands, reads, and edits in natural lan
     activityThinkingItem('think-2'),
   ])).toBe('思考过程');
 
-  // Single-step groups show the concrete action as a past-tense phrase.
+  // Single-step groups show the concrete action as a past-tense phrase; a
+  // shell step shows the model's plain-language summary, never the command.
+  expect(getActivityGroupHeaderLabel([
+    activityToolItem('tool-1', 'exec', undefined, { command: 'npm test -- cowork', description: '运行单元测试' }),
+  ])).toBe('运行单元测试');
   expect(getActivityGroupHeaderLabel([
     activityToolItem('tool-1', 'Bash', undefined, { command: 'npm test -- cowork' }),
-  ])).toBe('运行了 npm test -- cowork');
+  ])).toBe('运行了命令');
   expect(getActivityGroupHeaderLabel([
     activityToolItem('tool-1', 'read_file', undefined, { file_path: '/repo/src/App.tsx' }),
   ])).toBe('读取了 App.tsx');
@@ -531,6 +538,28 @@ test('activity step display shortens file paths to basenames', () => {
     { command: 'npm test -- cowork' },
   ));
   expect(bashStep).toEqual({ name: 'Bash', summary: 'npm test -- cowork' });
+
+  // A described shell step reads as its summary alone, without the tool name.
+  const describedStep = getActivityStepDisplay(activityToolItem(
+    'tool-3',
+    'exec',
+    undefined,
+    { command: 'node -v', description: '检查 Node.js 版本' },
+  ));
+  expect(describedStep).toEqual({ name: '检查 Node.js 版本', summary: null });
+});
+
+test('shell command description is trimmed, single-line, and only read for shell tools', () => {
+  expect(getShellCommandDescription('exec', { command: 'ls', description: '  列出\n 工作目录   文件 ' }))
+    .toBe('列出 工作目录 文件');
+  expect(getShellCommandDescription('bash', { command: 'ls', description: 'x'.repeat(200) }))
+    .toHaveLength(80);
+  expect(getShellCommandDescription('exec', { command: 'ls', description: '   ' })).toBeNull();
+  expect(getShellCommandDescription('exec', { command: 'ls', description: 42 })).toBeNull();
+  expect(getShellCommandDescription('exec', { command: 'ls' })).toBeNull();
+  expect(getShellCommandDescription('exec', undefined)).toBeNull();
+  // Other tools may carry a `description` argument with another meaning.
+  expect(getShellCommandDescription('task', { description: 'Explore the repo' })).toBeNull();
 });
 
 test('activity current action text is a verb phrase for the latest step', () => {
@@ -541,12 +570,20 @@ test('activity current action text is a verb phrase for the latest step', () => 
     undefined,
     { file_path: '/tmp/notes.md' },
   ))).toBe('正在读取 notes.md');
+  // Shell steps show the model's summary while running, or a generic phrase,
+  // never the raw command.
+  expect(getActivityCurrentActionText(activityToolItem(
+    'tool-2',
+    'exec',
+    undefined,
+    { command: 'npm run build', description: '构建项目' },
+  ))).toBe('构建项目');
   expect(getActivityCurrentActionText(activityToolItem(
     'tool-2',
     'Bash',
     undefined,
     { command: 'npm run build' },
-  ))).toBe('正在运行 npm run build');
+  ))).toBe('正在运行命令');
   expect(getActivityCurrentActionText(activityToolItem(
     'tool-3',
     'Edit',
@@ -747,4 +784,39 @@ test('a work item is live until its result is final', () => {
     message: { id: 'a', type: 'assistant', content: 'partial', timestamp: 0, metadata: { isStreaming: true } },
   })).toBe(true);
   expect(isActivityItemLive(activityTextItem('done'))).toBe(false);
+});
+
+test('streaming text signature changes as a thought grows and is absent once it closes', () => {
+  const thought = (content: string, isStreaming: boolean): ConsolidatedItem => ({
+    type: 'assistant',
+    message: { id: 'think-1', type: 'assistant', content, timestamp: 0, metadata: { isThinking: true, isStreaming } },
+  });
+  const early = getStreamingTextSignature(thought('Let me', true));
+  const later = getStreamingTextSignature(thought('Let me check', true));
+  expect(early).not.toBeNull();
+  expect(later).not.toBe(early);
+  expect(getStreamingTextSignature(thought('Let me check', true))).toBe(later);
+  expect(getStreamingTextSignature(thought('Let me check', false))).toBeNull();
+  expect(getStreamingTextSignature(runningToolItem('exec', { command: 'ls' }))).toBeNull();
+  expect(getStreamingTextSignature(null)).toBeNull();
+});
+
+test('a file step whose tool never started is an abandoned placeholder', () => {
+  const placeholder = {
+    type: 'tool_group' as const,
+    group: {
+      type: 'tool_group' as const,
+      toolUse: {
+        id: 'use-4', type: 'tool_use' as const, content: '', timestamp: 1,
+        metadata: { toolName: 'write', toolInput: {}, toolUseId: 'call-4', isGenerating: true, liveEditDiff: { added: 40, removed: 0 } },
+      },
+      toolResult: null,
+    },
+  };
+  expect(isAbandonedToolPlaceholder(placeholder)).toBe(true);
+
+  const started = runningToolItem('write', { path: '/tmp/a.html', content: '<html>' });
+  expect(isAbandonedToolPlaceholder(started as Extract<ConsolidatedItem, { type: 'tool_group' }>)).toBe(false);
+  const finished = runningToolItem('write', { path: '/tmp/a.html', content: '<html>' }, { content: 'ok', isFinal: true });
+  expect(isAbandonedToolPlaceholder(finished as Extract<ConsolidatedItem, { type: 'tool_group' }>)).toBe(false);
 });
