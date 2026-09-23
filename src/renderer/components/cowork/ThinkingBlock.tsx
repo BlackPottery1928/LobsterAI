@@ -1,26 +1,71 @@
 import { ChevronRightIcon, LightBulbIcon } from '@heroicons/react/24/outline';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { i18nService } from '../../services/i18n';
 import type { CoworkMessage } from '../../types/cowork';
+import { ActivityEntryVariant } from './constants';
 import {
   bucketLength,
   getMessageLineCount,
   reportConversationBlockAction,
 } from './conversationAnalytics';
 
+// Within this distance of the bottom, streaming reasoning keeps following
+// new text; scrolling further up pauses the follow until the user returns.
+const REASONING_FOLLOW_THRESHOLD_PX = 24;
+
+/**
+ * Scrollable reasoning text. While the model is still thinking it stays
+ * pinned to the newest line, so opening a live thought lands on what is
+ * being written right now instead of its beginning.
+ */
+const ReasoningContent: React.FC<{
+  content: string;
+  followTail: boolean;
+  className: string;
+}> = ({ content, followTail, className }) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pinnedToBottomRef = useRef(true);
+
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !followTail || !pinnedToBottomRef.current) return;
+    element.scrollTop = element.scrollHeight;
+  }, [content, followTail]);
+
+  const handleScroll = () => {
+    const element = scrollRef.current;
+    if (!element) return;
+    pinnedToBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight
+      <= REASONING_FOLLOW_THRESHOLD_PX;
+  };
+
+  return (
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      className={className}
+      data-reasoning-follow-tail={followTail ? 'true' : undefined}
+    >
+      {content}
+    </div>
+  );
+};
+
 const ThinkingBlock: React.FC<{
   message: CoworkMessage;
   mapDisplayText?: (value: string) => string;
-  /** 'default' renders the standalone card; 'row' renders a compact list row for activity groups. */
-  variant?: 'default' | 'row';
-  /** Start expanded (row variant): single-step groups reveal their detail in one click. */
-  initiallyExpanded?: boolean;
-}> = ({ message, mapDisplayText, variant = 'default', initiallyExpanded = false }) => {
+  /**
+   * 'default' renders the standalone card; 'row' a compact expandable row
+   * among other steps; 'detail' just the reasoning text, for an activity
+   * group whose only step is this thought.
+   */
+  variant?: 'default' | ActivityEntryVariant;
+}> = ({ message, mapDisplayText, variant = 'default' }) => {
   const isCurrentlyStreaming = Boolean(message.metadata?.isStreaming);
-  const isRowVariant = variant === 'row';
+  const isRowVariant = variant === ActivityEntryVariant.Row;
   const [isExpanded, setIsExpanded] = useState(
-    isRowVariant ? initiallyExpanded : isCurrentlyStreaming,
+    isRowVariant ? false : isCurrentlyStreaming,
   );
   const displayContent = mapDisplayText ? mapDisplayText(message.content) : message.content;
   const handleToggleExpanded = () => {
@@ -39,13 +84,23 @@ const ThinkingBlock: React.FC<{
   };
 
   useEffect(() => {
-    if (isRowVariant) return;
+    if (variant !== 'default') return;
     if (isCurrentlyStreaming) {
       setIsExpanded(true);
     } else {
       setIsExpanded(false);
     }
-  }, [isCurrentlyStreaming, isRowVariant]);
+  }, [isCurrentlyStreaming, variant]);
+
+  if (variant === ActivityEntryVariant.Detail) {
+    return (
+      <ReasoningContent
+        content={displayContent}
+        followTail={isCurrentlyStreaming}
+        className="activity-row-detail max-h-[300px] overflow-y-auto rounded-lg border border-border px-4 py-3 leading-relaxed text-muted whitespace-pre-wrap break-words"
+      />
+    );
+  }
 
   if (isRowVariant) {
     return (
@@ -69,11 +124,11 @@ const ThinkingBlock: React.FC<{
           />
         </button>
         {isExpanded && (
-          <div className="activity-row-detail px-4 pb-3 max-h-[300px] overflow-y-auto">
-            <div className="leading-relaxed text-muted whitespace-pre-wrap">
-              {displayContent}
-            </div>
-          </div>
+          <ReasoningContent
+            content={displayContent}
+            followTail={isCurrentlyStreaming}
+            className="activity-row-detail px-4 pb-3 max-h-[300px] overflow-y-auto leading-relaxed text-muted whitespace-pre-wrap"
+          />
         )}
       </div>
     );

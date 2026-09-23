@@ -1,6 +1,7 @@
 import { ChevronRightIcon } from '@heroicons/react/24/outline';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
+import { ActivityEntryVariant } from './constants';
 import { bucketCount, reportConversationBlockAction } from './conversationAnalytics';
 import {
   type ActivityChunkEntry,
@@ -38,17 +39,16 @@ const getActivityGroupDiffStats = (items: ConsolidatedItem[]): DiffStats | null 
  * step and a muted line beneath it shows what that step is doing right now
  * (reasoning tail, latest command output, live +N/-M while a file is being
  * generated); once done it becomes a natural-language summary ("Ran 3
- * commands, read 2 files"). Expanding reveals a card with one row per step, and each
- * row can be expanded again for full detail. Tool errors stay on their own
- * step row (Codex app behavior); they do not color or expand this header.
+ * commands, read 2 files"). Expanding a multi-step group reveals a card with
+ * one row per step, each expandable again for full detail; a single-step
+ * group opens straight onto that step's content (the reasoning text, the
+ * command and its output). Tool errors stay on their own step row (Codex app
+ * behavior); they do not color or expand this header.
  */
 const ActivityGroupBlock: React.FC<{
   entries: ActivityChunkEntry[];
   isStreamingTail?: boolean;
-  renderEntry: (
-    entry: ActivityChunkEntry,
-    options?: { initiallyExpanded?: boolean },
-  ) => React.ReactNode;
+  renderEntry: (entry: ActivityChunkEntry, variant: ActivityEntryVariant) => React.ReactNode;
 }> = ({ entries, isStreamingTail = false, renderEntry }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -57,11 +57,27 @@ const ActivityGroupBlock: React.FC<{
   const diffStats = useMemo(() => getActivityGroupDiffStats(items), [items]);
 
   const lastItem = items[items.length - 1];
-  const showLiveAction = isStreamingTail && isActivityItemLive(lastItem);
+  const isLastItemLive = isActivityItemLive(lastItem);
+  const showLiveAction = isStreamingTail && isLastItemLive;
   const headerLabel = showLiveAction
     ? getActivityCurrentActionText(lastItem)
     : getActivityGroupHeaderLabel(items);
-  const liveDetail = showLiveAction ? getActivityLiveDetail(lastItem) : null;
+  // The preview line only stands in for content that is folded away.
+  const liveDetail = showLiveAction && !isExpanded ? getActivityLiveDetail(lastItem) : null;
+
+  // A lone thought folds itself away once the model stops thinking, so an
+  // opened reasoning stream does not linger above the work that follows.
+  const isThinkingLive = entries.length === 1
+    && lastItem.type === 'assistant'
+    && lastItem.message.metadata?.isThinking === true
+    && isLastItemLive;
+  const wasThinkingLiveRef = useRef(isThinkingLive);
+  useEffect(() => {
+    if (wasThinkingLiveRef.current && !isThinkingLive) {
+      setIsExpanded(false);
+    }
+    wasThinkingLiveRef.current = isThinkingLive;
+  }, [isThinkingLive]);
 
   const handleToggle = () => {
     const nextExpanded = !isExpanded;
@@ -119,11 +135,15 @@ const ActivityGroupBlock: React.FC<{
           {liveDetail.text}
         </div>
       )}
-      {isExpanded && (
-        <div className="mt-2 w-full overflow-hidden rounded-lg border border-border divide-y divide-border">
-          {entries.map((entry) => renderEntry(entry, { initiallyExpanded: entries.length === 1 }))}
+      {isExpanded && (entries.length === 1 ? (
+        <div className="mt-2 w-full" data-activity-group-detail="single">
+          {renderEntry(entries[0], ActivityEntryVariant.Detail)}
         </div>
-      )}
+      ) : (
+        <div className="mt-2 w-full overflow-hidden rounded-lg border border-border divide-y divide-border">
+          {entries.map((entry) => renderEntry(entry, ActivityEntryVariant.Row))}
+        </div>
+      ))}
     </div>
   );
 };

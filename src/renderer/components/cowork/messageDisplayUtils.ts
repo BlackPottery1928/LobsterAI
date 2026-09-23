@@ -1430,13 +1430,39 @@ export const getActivityGroupHeaderLabel = (items: ConsolidatedItem[]): string =
   return joined.charAt(0).toUpperCase() + joined.slice(1);
 };
 
+const SHELL_COMMAND_DESCRIPTION_MAX_CHARS = 80;
+
+/**
+ * Plain-language summary the model attached to a shell call (the exec
+ * tool's `description` argument, e.g. "检查 Node.js 版本"). Step labels show
+ * it instead of the raw command, which reads as noise to office users; the
+ * command itself stays one click away in the step detail.
+ */
+export const getShellCommandDescription = (
+  rawToolName: string | undefined,
+  toolInput: Record<string, unknown> | undefined,
+): string | null => {
+  if (!isBashLikeToolName(rawToolName) || !toolInput) return null;
+  const description = toTrimmedString(toolInput.description);
+  return description
+    ? truncatePreview(description.replace(/\s+/g, ' '), SHELL_COMMAND_DESCRIPTION_MAX_CHARS)
+    : null;
+};
+
 export type ActivityStepDisplay = { name: string; summary: string | null };
 
-/** Compact one-line row label for a tool step; file tools show just the basename. */
+/**
+ * Compact one-line row label for a tool step; file tools show just the
+ * basename, and a described shell call reads as its summary alone.
+ */
 export const getToolStepDisplay = (
   rawToolName: string | undefined,
   toolInput: Record<string, unknown> | undefined,
 ): ActivityStepDisplay => {
+  const commandDescription = getShellCommandDescription(rawToolName, toolInput);
+  if (commandDescription) {
+    return { name: commandDescription, summary: null };
+  }
   const name = getToolDisplayName(rawToolName);
   let summary = getToolInputSummary(rawToolName, toolInput);
   if (summary) {
@@ -1468,7 +1494,8 @@ export const getActivityStepDisplay = (item: ConsolidatedItem): ActivityStepDisp
 
 /**
  * Live header text while the current step is still running: a verb phrase
- * mirroring the Claude Code app ("Editing Settings.tsx", "正在运行 npm test").
+ * mirroring the Claude Code app ("Editing Settings.tsx", "正在读取 notes.md");
+ * shell steps show the model's plain-language summary of the command.
  */
 export const getActivityCurrentActionText = (item: ConsolidatedItem): string => {
   if (item.type === 'assistant') {
@@ -1496,15 +1523,18 @@ export const getActivityCurrentActionText = (item: ConsolidatedItem): string => 
     if (item.group.toolUse.metadata?.isGenerating) {
       return i18nService.t('coworkActivityLiveGenerating');
     }
-    const { summary } = getToolStepDisplay(toolName, item.group.toolUse.metadata?.toolInput);
+    const toolInput = item.group.toolUse.metadata?.toolInput;
+    // A shell step never names its raw command here; that lives in the detail.
+    if (isBashLikeToolName(toolName)) {
+      return getShellCommandDescription(toolName, toolInput)
+        ?? i18nService.t('coworkActivityLiveCommandGeneric');
+    }
+    const { summary } = getToolStepDisplay(toolName, toolInput);
     const verb = (templateKey: string, genericKey: string): string => (
       summary
         ? i18nService.t(templateKey).replace('{target}', summary)
         : i18nService.t(genericKey)
     );
-    if (isBashLikeToolName(toolName)) {
-      return verb('coworkActivityLiveCommand', 'coworkActivityLiveCommandGeneric');
-    }
     if (READ_TOOL_NAMES.has(normalized)) {
       return verb('coworkActivityLiveRead', 'coworkActivityLiveReadGeneric');
     }
@@ -1583,6 +1613,27 @@ export const isActivityItemLive = (item: ConsolidatedItem): boolean => {
   }
   return item.type === 'assistant' && Boolean(item.message.metadata?.isStreaming);
 };
+
+/**
+ * Identity and length of a still-streaming thought or reply, or null for
+ * anything else. It changes whenever that text grows, so a stall timer keyed
+ * on it measures how long the model has gone without writing more of it.
+ */
+export const getStreamingTextSignature = (item: ConsolidatedItem | null): string | null => {
+  if (!item || item.type !== 'assistant' || !item.message.metadata?.isStreaming) return null;
+  return `${item.message.id}:${item.message.content.length}`;
+};
+
+/**
+ * A file step shown while its arguments were still streaming whose tool never
+ * started: the run stopped mid-generation, so nothing was written. Once the
+ * turn is no longer running it has nothing left to show.
+ */
+export const isAbandonedToolPlaceholder = (item: AssistantTurnItem): boolean => (
+  item.type === 'tool_group'
+  && item.group.toolUse.metadata?.isGenerating === true
+  && !item.group.toolResult
+);
 
 const FILE_SEARCH_TOOL_NAMES = new Set(['glob', 'grep', 'find', 'ls', 'search', 'searchfiles', 'filesearch', 'listdir']);
 const WEB_SEARCH_TOOL_NAMES = new Set(['websearch', 'searchweb']);
@@ -1671,7 +1722,7 @@ export const splitActivityGroupsPerStep = (chunks: ConsolidatedRenderChunk[]): C
 
 /**
  * Past-tense phrase for one finished step on its own line ("读取了 App.tsx",
- * "Ran npm test"): the settled counterpart of getActivityCurrentActionText.
+ * "Read App.tsx"): the settled counterpart of getActivityCurrentActionText.
  */
 export const getActivityStepDoneLabel = (item: ConsolidatedItem): string => {
   if (item.type === 'assistant') {
@@ -1692,13 +1743,17 @@ export const getActivityStepDoneLabel = (item: ConsolidatedItem): string => {
   if (normalized === 'lobsteraiimagegenerate') return i18nService.t('coworkActivityDoneImage');
   if (normalized === 'sessionsspawn') return i18nService.t('coworkActivityDoneSpawnSubagent');
   if (normalized === 'sessionsyield') return i18nService.t('coworkToolWaitingSubagents');
-  const { summary } = getToolStepDisplay(toolName, item.group.toolUse.metadata?.toolInput);
+  const toolInput = item.group.toolUse.metadata?.toolInput;
+  if (isBashLikeToolName(toolName)) {
+    return getShellCommandDescription(toolName, toolInput)
+      ?? i18nService.t('coworkActivityDoneCommandGeneric');
+  }
+  const { summary } = getToolStepDisplay(toolName, toolInput);
   const verb = (templateKey: string, genericKey: string): string => (
     summary
       ? i18nService.t(templateKey).replace('{target}', summary)
       : i18nService.t(genericKey)
   );
-  if (isBashLikeToolName(toolName)) return verb('coworkActivityDoneCommand', 'coworkActivityDoneCommandGeneric');
   if (READ_TOOL_NAMES.has(normalized)) return verb('coworkActivityDoneRead', 'coworkActivityDoneReadGeneric');
   if (WRITE_TOOL_NAMES.has(normalized)) return verb('coworkActivityDoneWrite', 'coworkActivityDoneWriteGeneric');
   if (EDIT_ONLY_TOOL_NAMES.has(normalized)) return verb('coworkActivityDoneEdit', 'coworkActivityDoneEditGeneric');

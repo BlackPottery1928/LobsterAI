@@ -6,6 +6,7 @@ import { useSelector } from 'react-redux';
 import mediaGeneratingAnimation from '../../assets/lottie/media-generating.json';
 import { i18nService } from '../../services/i18n';
 import { selectIsStreaming } from '../../store/selectors/coworkSelectors';
+import { ActivityEntryVariant } from './constants';
 import {
   bucketLength,
   getMessageLineCount,
@@ -108,10 +109,12 @@ const ToolCallGroup: React.FC<{
   mapDisplayText?: (value: string) => string;
   retainedMediaPollCounts?: Map<string, number>;
   footer?: React.ReactNode;
-  /** 'timeline' renders the classic dot row; 'row' renders a compact list row for activity groups. */
-  variant?: 'timeline' | 'row';
-  /** Start expanded (row variant): single-step groups reveal their detail in one click. */
-  initiallyExpanded?: boolean;
+  /**
+   * 'timeline' renders the classic dot row; 'row' a compact expandable row
+   * among other steps; 'detail' just the step's content (the command and
+   * its output, a diff, ...) for an activity group holding only this step.
+   */
+  variant?: 'timeline' | ActivityEntryVariant;
 }> = ({
   group,
   isLastInSequence = true,
@@ -119,10 +122,9 @@ const ToolCallGroup: React.FC<{
   retainedMediaPollCounts,
   footer,
   variant = 'timeline',
-  initiallyExpanded = false,
 }) => {
   const { toolUse, toolResult } = group;
-  const shouldExpandByDefault = isMediaStatusPoll(group) || (variant === 'row' && initiallyExpanded);
+  const shouldExpandByDefault = isMediaStatusPoll(group) || variant === ActivityEntryVariant.Detail;
   const isSessionStreaming = useSelector(selectIsStreaming);
   const rawToolName = typeof toolUse.metadata?.toolName === 'string' ? toolUse.metadata.toolName : 'Tool';
   const toolName = getToolDisplayName(rawToolName);
@@ -372,7 +374,22 @@ const ToolCallGroup: React.FC<{
     </>
   );
 
-  if (variant === 'row') {
+  if (variant === ActivityEntryVariant.Detail) {
+    // Terminal output and diffs carry their own frame; anything else gets one
+    // so it does not float loose under the group header.
+    const hasOwnFrame = isBashTool || isEditWithDiff;
+    return (
+      <div className="activity-row-detail space-y-2">
+        {footer}
+        {renderMediaRunningIndicators('')}
+        <div className={hasOwnFrame ? undefined : 'rounded-lg border border-border px-4 py-3'}>
+          {renderDetailBody()}
+        </div>
+      </div>
+    );
+  }
+
+  if (variant === ActivityEntryVariant.Row) {
     const rowStep = getToolStepDisplay(rawToolName, toolInput as Record<string, unknown> | undefined);
     const rowSummary = rowStep.summary ? mapText(rowStep.summary) : null;
     return (
@@ -388,8 +405,8 @@ const ToolCallGroup: React.FC<{
           {isToolError && (
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
           )}
-          <span className={`text-xs text-foreground/90 flex-shrink-0 ${isRunning ? 'shimmer-text' : ''}`}>
-            {toolName}
+          <span className={`text-xs text-foreground/90 ${rowSummary ? 'flex-shrink-0' : 'min-w-0 truncate'} ${isRunning ? 'shimmer-text' : ''}`}>
+            {mapText(rowStep.name)}
           </span>
           {rowSummary && (
             <span className="min-w-0 truncate text-xs text-secondary">

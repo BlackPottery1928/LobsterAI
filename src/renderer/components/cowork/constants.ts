@@ -37,6 +37,16 @@ export const CoworkShortcutDirection = {
 export type CoworkShortcutDirection =
   typeof CoworkShortcutDirection[keyof typeof CoworkShortcutDirection];
 
+/** How one step renders inside an expanded activity group. */
+export const ActivityEntryVariant = {
+  /** A compact row among the group's steps, expandable on its own. */
+  Row: 'row',
+  /** The step's content alone, for a group holding just that step. */
+  Detail: 'detail',
+} as const;
+
+export type ActivityEntryVariant = typeof ActivityEntryVariant[keyof typeof ActivityEntryVariant];
+
 export interface CoworkOpenShareOptionsEventDetail {
   sessionId: string;
 }
