@@ -270,6 +270,7 @@ import { registerAgentHandlers } from './ipcHandlers/agents';
 import { registerAsrIpcHandlers } from './ipcHandlers/asr';
 import { registerBrowserCredentialHandlers } from './ipcHandlers/browserCredentials/handlers';
 import { registerCoworkSubagentHandlers } from './ipcHandlers/coworkSubagent';
+import { isDecisionModelFeatureActive, registerDecisionModelHandlers } from './ipcHandlers/decisionModel/handlers';
 import { ensureDshEngineReady, registerDshHandlers } from './ipcHandlers/dsh/handlers';
 import { registerEnterpriseAccountHandlers } from './ipcHandlers/enterpriseAccount';
 import { registerKitHandlers } from './ipcHandlers/kits';
@@ -2625,6 +2626,8 @@ const getOpenClawConfigSync = (): OpenClawConfigSync => {
       },
       getAskUserCallbackUrl: () => getMcpRuntime().getAskUserCallbackUrl(),
       getMediaCallbackUrl: () => getMcpRuntime().getMediaCallbackUrl(),
+      getDecisionCallbackUrl: () => getMcpRuntime().getDecisionCallbackUrl(),
+      isDecisionModelActive: () => isDecisionModelFeatureActive(getStore()),
       getBrowserCallbackUrl: () => getMcpRuntime().getBrowserCallbackUrl(),
       getLobsterBrowserMcpCommand: () => {
         const mcpRuntime = getMcpRuntime();
@@ -9277,6 +9280,12 @@ if (!gotTheLock) {
   });
 
   registerMcpHandlers({ getMcpRuntime, syncOpenClawConfig });
+
+  registerDecisionModelHandlers({
+    getStore: () => getStore(),
+    setDecisionToolHandler: handler => getMcpRuntime().setDecisionToolHandler(handler),
+    syncOpenClawConfig,
+  });
 
   registerDshHandlers({
     getStore: () => getStore(),
