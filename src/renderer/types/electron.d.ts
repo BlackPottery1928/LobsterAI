@@ -224,6 +224,8 @@ interface CoworkSession {
   messages: CoworkMessage[];
   messagesOffset: number;
   totalMessages: number;
+  /** Start of the turn the first loaded message belongs to, when it began before messagesOffset. */
+  leadingTurnStartTimestamp?: number | null;
   parentSessionId?: string | null;
   forkedFromMessageId?: string | null;
   forkedAt?: number | null;
@@ -1111,6 +1113,8 @@ interface IElectronAPI {
       messages?: CoworkMessage[];
       offset?: number;
       total?: number;
+      /** Start of the turn the page's first message belongs to (see CoworkSession). */
+      leadingTurnStartTimestamp?: number | null;
       error?: string;
     }>;
     getSessionSearchMessages: (options: {

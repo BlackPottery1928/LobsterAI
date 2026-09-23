@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
+import { CheckIcon } from '@heroicons/react/24/outline';
 import Lottie from 'lottie-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSelector } from 'react-redux';
@@ -6,7 +6,8 @@ import { useSelector } from 'react-redux';
 import mediaGeneratingAnimation from '../../assets/lottie/media-generating.json';
 import { i18nService } from '../../services/i18n';
 import { selectIsStreaming } from '../../store/selectors/coworkSelectors';
-import { ActivityEntryVariant } from './constants';
+import { ActivityLiveDetailLine, ActivityStepLine } from './ActivityStepLine';
+import { ActivityEntryVariant, ActivityStepKind } from './constants';
 import {
   bucketLength,
   getMessageLineCount,
@@ -14,9 +15,13 @@ import {
 } from './conversationAnalytics';
 import DiffView, { extractDiffFromToolInput } from './DiffView';
 import {
+  type ConsolidatedItem,
   formatElapsedDuration,
   formatToolInput,
+  getActivityCurrentActionText,
   getActivityLiveDetail,
+  getActivityStepDoneLabel,
+  getActivityStepKind,
   getLargeToolResultSummary,
   getRetainedMediaPollCount,
   getToolDisplayName,
@@ -24,7 +29,6 @@ import {
   getToolResultCollapsedDisplay,
   getToolResultDisplay,
   getToolResultLineCountSummary,
-  getToolStepDisplay,
   hasText,
   isBashLikeToolName,
   isCronToolName,
@@ -110,11 +114,13 @@ const ToolCallGroup: React.FC<{
   retainedMediaPollCounts?: Map<string, number>;
   footer?: React.ReactNode;
   /**
-   * 'timeline' renders the classic dot row; 'row' a compact expandable row
-   * among other steps; 'detail' just the step's content (the command and
-   * its output, a diff, ...) for an activity group holding only this step.
+   * 'timeline' renders the classic dot row; 'row' the step's own line among
+   * a run's steps, opening onto its content (the command and its output, a
+   * diff, ...).
    */
   variant?: 'timeline' | ActivityEntryVariant;
+  /** Whether the row reads as the step running right now; defaults to the step still running. */
+  isLive?: boolean;
 }> = ({
   group,
   isLastInSequence = true,
@@ -122,9 +128,10 @@ const ToolCallGroup: React.FC<{
   retainedMediaPollCounts,
   footer,
   variant = 'timeline',
+  isLive,
 }) => {
   const { toolUse, toolResult } = group;
-  const shouldExpandByDefault = isMediaStatusPoll(group) || variant === ActivityEntryVariant.Detail;
+  const shouldExpandByDefault = isMediaStatusPoll(group);
   const isSessionStreaming = useSelector(selectIsStreaming);
   const rawToolName = typeof toolUse.metadata?.toolName === 'string' ? toolUse.metadata.toolName : 'Tool';
   const toolName = getToolDisplayName(rawToolName);
@@ -374,64 +381,51 @@ const ToolCallGroup: React.FC<{
     </>
   );
 
-  if (variant === ActivityEntryVariant.Detail) {
+  if (variant === ActivityEntryVariant.Row) {
+    const stepItem: ConsolidatedItem = { type: 'tool_group', group };
+    const isRowLive = isLive ?? isRunning;
+    const stepKind = getActivityStepKind(stepItem);
+    const rowLiveDetail = isRowLive && !isExpanded ? getActivityLiveDetail(stepItem) : null;
+    // A file being written already shows its growing +N/-M count; a timer
+    // beside it says nothing more. Commands keep theirs.
+    const showRunningElapsed = isRunning && stepKind !== ActivityStepKind.Edit;
     // Terminal output and diffs carry their own frame; anything else gets one
-    // so it does not float loose under the group header.
+    // so it does not float loose under the step line.
     const hasOwnFrame = isBashTool || isEditWithDiff;
     return (
-      <div className="activity-row-detail space-y-2">
-        {footer}
-        {renderMediaRunningIndicators('')}
-        <div className={hasOwnFrame ? undefined : 'rounded-lg border border-border px-4 py-3'}>
-          {renderDetailBody()}
-        </div>
-      </div>
-    );
-  }
-
-  if (variant === ActivityEntryVariant.Row) {
-    const rowStep = getToolStepDisplay(rawToolName, toolInput as Record<string, unknown> | undefined);
-    const rowSummary = rowStep.summary ? mapText(rowStep.summary) : null;
-    return (
       <div>
-        <button
-          onClick={handleToggle}
-          className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-surface-raised/40 transition-colors"
-          aria-expanded={isExpanded}
-        >
-          {isRunning && (
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse flex-shrink-0" />
+        <ActivityStepLine
+          kind={stepKind}
+          label={mapText(isRowLive ? getActivityCurrentActionText(stepItem) : getActivityStepDoneLabel(stepItem))}
+          isLive={isRowLive}
+          hasError={isToolError}
+          isExpanded={isExpanded}
+          onToggle={handleToggle}
+          trailing={(
+            <>
+              {diffStats && <DiffStatsBadge stats={diffStats} className="text-sm" />}
+              {showRunningElapsed && (
+                <span className="flex-shrink-0 text-xs text-muted">
+                  <ToolRunningElapsed startTimestamp={toolUse.timestamp} />
+                </span>
+              )}
+            </>
           )}
-          {isToolError && (
-            <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
-          )}
-          <span className={`text-xs text-foreground/90 ${rowSummary ? 'flex-shrink-0' : 'min-w-0 truncate'} ${isRunning ? 'shimmer-text' : ''}`}>
-            {mapText(rowStep.name)}
-          </span>
-          {rowSummary && (
-            <span className="min-w-0 truncate text-xs text-secondary">
-              {rowSummary}
-            </span>
-          )}
-          {isRunning && (
-            <span className="text-xs text-muted flex-shrink-0">
-              <ToolRunningElapsed startTimestamp={toolUse.timestamp} />
-            </span>
-          )}
-          <ChevronRightIcon
-            className={`h-3 w-3 text-muted flex-shrink-0 transition-transform duration-200 ${
-              isExpanded ? 'rotate-90' : ''
-            }`}
+        />
+        {rowLiveDetail && (
+          <ActivityLiveDetailLine
+            detail={{ ...rowLiveDetail, text: mapText(rowLiveDetail.text) }}
+            kind={stepKind}
           />
-        </button>
+        )}
         {footer && (
-          <div className="px-4 pb-3">
+          <div className="mt-2">
             {footer}
           </div>
         )}
-        {renderMediaRunningIndicators('px-4 pb-2')}
+        {renderMediaRunningIndicators('mt-1')}
         {isExpanded && (
-          <div className="activity-row-detail px-4 pb-3">
+          <div className={`activity-row-detail mt-1.5 ${hasOwnFrame ? '' : 'rounded-lg border border-border px-4 py-3'}`}>
             {renderDetailBody()}
           </div>
         )}

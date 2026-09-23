@@ -39,6 +39,7 @@ import MarkdownContent from '../MarkdownContent';
 import PurchaseOfferCountdown from '../PurchaseOfferCountdown';
 import { useLowCreditOfferExposure } from '../useLowCreditOfferExposure';
 import ActivityGroupBlock from './ActivityGroupBlock';
+import { ActivityStepLine } from './ActivityStepLine';
 import AssistantMessageItem from './AssistantMessageItem';
 import { ActivityEntryVariant } from './constants';
 import { reportConversationBlockAction } from './conversationAnalytics';
@@ -59,6 +60,7 @@ import {
   formatTurnDuration,
   getActivityIndicatorStatusText,
   getActivityLiveStatusText,
+  getConsolidatedItemKey,
   getContextCompactionMessageLabel,
   getMediaCompletionDisplayText,
   getRetainedMediaPollCount,
@@ -79,7 +81,6 @@ import {
   isActivityItemLive,
   isContextCompactionMessage,
   isDuplicateGeneratedVideoAssistantMessage,
-  splitActivityGroupsPerStep,
   type ToolGroupItem,
 } from './messageDisplayUtils';
 import ThinkingBlock from './ThinkingBlock';
@@ -551,12 +552,6 @@ const MediaImageInline: React.FC<{ artifacts: Artifact[] }> = ({ artifacts }) =>
 
 // ── AssistantTurnBlock ───────────────────────────────────────────────────────
 
-const getActivityGroupKey = (item: ConsolidatedItem): string => {
-  if (item.type === 'media_polling_group') return `media-${item.group.taskId}`;
-  if (item.type === 'tool_group') return item.group.toolUse.id;
-  return item.message.id;
-};
-
 const AssistantTurnBlock: React.FC<{
   turn: ConversationTurn;
   artifacts?: Artifact[];
@@ -781,17 +776,16 @@ const AssistantTurnBlock: React.FC<{
     );
   };
 
-  // Tool groups with an override (e.g. subagent cards) stay visible on their own.
-  const groupedChunks = chunkConsolidatedItemsForDisplay(
+  // Consecutive work items between pieces of text form one activity run
+  // (WorkBuddy style): a finished run folds into a single summary line,
+  // while the running turn's tail run lists every step on its own line.
+  // Tool groups with an override (e.g. subagent cards) stay visible on
+  // their own.
+  const renderChunks = chunkConsolidatedItemsForDisplay(
     consolidatedItems,
     (item) => isActivityConsolidatedItem(item)
       && !(item.type === 'tool_group' && toolGroupOverrides.has(item.group.toolUse.id)),
   );
-  // While the turn runs, each step keeps its own compact line and new steps
-  // append below (WorkBuddy style) instead of re-labelling one collapsed
-  // line; consecutive steps only merge into a summary inside the folded
-  // process once the turn is done.
-  const renderChunks = isStreamingTurn ? splitActivityGroupsPerStep(groupedChunks) : groupedChunks;
 
   // Indices that render as standalone timeline rows; the timeline connector
   // only draws between two consecutive ones (collapsed groups broke the old
@@ -807,11 +801,10 @@ const AssistantTurnBlock: React.FC<{
     item: ConsolidatedItem,
     index: number,
     displayVariant: 'timeline' | ActivityEntryVariant = 'timeline',
+    isLive?: boolean,
   ): React.ReactNode => {
-    // Inside an activity group (as a row, or as a lone step's detail) there
-    // is no timeline connector to draw.
+    // A step line inside an activity run has no timeline connector to draw.
     const isGroupEntry = displayVariant !== 'timeline';
-    const isRowVariant = displayVariant === ActivityEntryVariant.Row;
     if (item.type === 'media_polling_group') {
       const isLastInSequence = isGroupEntry || !timelineToolIndices.has(index + 1);
       const retainedPollCount = getRetainedMediaPollCount(
@@ -828,9 +821,7 @@ const AssistantTurnBlock: React.FC<{
           isLastInSequence={isLastInSequence}
         />
       );
-      return isRowVariant
-        ? <div key={`media-poll-${item.group.taskId}`} className="px-4 py-1.5">{indicator}</div>
-        : indicator;
+      return indicator;
     }
 
     if (item.type === 'assistant') {
@@ -841,6 +832,7 @@ const AssistantTurnBlock: React.FC<{
             message={item.message}
             mapDisplayText={mapDisplayText}
             variant={isGroupEntry ? displayVariant : 'default'}
+            isLive={isLive}
           />
         );
       }
@@ -903,6 +895,7 @@ const AssistantTurnBlock: React.FC<{
           mapDisplayText={mapDisplayText}
           retainedMediaPollCounts={retainedMediaPollCounts}
           variant={displayVariant}
+          isLive={isLive}
         />
       );
     }
@@ -920,7 +913,7 @@ const AssistantTurnBlock: React.FC<{
     }
 
     return (
-      <div key={item.message.id} className={isRowVariant ? 'px-4 py-1.5' : undefined}>
+      <div key={item.message.id}>
         {renderOrphanToolResult(item.message)}
       </div>
     );
@@ -943,10 +936,16 @@ const AssistantTurnBlock: React.FC<{
     }
     return (
       <ActivityGroupBlock
-        key={`activity-${getActivityGroupKey(chunk.entries[0].item)}`}
+        key={`activity-${getConsolidatedItemKey(chunk.entries[0].item)}`}
         entries={chunk.entries}
-        isStreamingTail={isStreamingTurn && chunkIndex === renderChunks.length - 1 && !isTailTextStalled}
-        renderEntry={(entry, variant) => renderConsolidatedItem(entry.item, entry.index, variant)}
+        isLiveRun={isStreamingTurn && chunkIndex === renderChunks.length - 1}
+        isTailStalled={isTailTextStalled}
+        renderEntry={(entry, isLive) => renderConsolidatedItem(
+          entry.item,
+          entry.index,
+          ActivityEntryVariant.Row,
+          isLive,
+        )}
       />
     );
   };
@@ -1018,23 +1017,21 @@ const AssistantTurnBlock: React.FC<{
           <div className="flex-1 min-w-0 py-3 space-y-3">
             {shouldFoldProcess ? (
               <>
-                <div className="py-1">
-                  <button
-                    type="button"
-                    onClick={handleProcessToggle}
-                    className="group flex max-w-full items-center gap-1.5 text-left"
-                    aria-expanded={isProcessExpanded}
-                  >
-                    <span className="min-w-0 truncate text-sm text-secondary transition-colors group-hover:text-foreground">
-                      {processLabel}
-                    </span>
+                {/* Unlike step lines, the duration line keeps its arrow: it is
+                    the only way back into a finished turn's whole process. */}
+                <ActivityStepLine
+                  label={processLabel}
+                  isExpanded={isProcessExpanded}
+                  onToggle={handleProcessToggle}
+                  trailing={(
                     <ChevronRightIcon
-                      className={`h-3.5 w-3.5 flex-shrink-0 text-muted transition-transform duration-200 group-hover:text-secondary ${
+                      className={`h-[0.9em] w-[0.9em] flex-shrink-0 transition-transform duration-200 ${
                         isProcessExpanded ? 'rotate-90' : ''
                       }`}
+                      aria-hidden="true"
                     />
-                  </button>
-                </div>
+                  )}
+                />
                 {isProcessExpanded && processChunks.map((chunk, index) => renderChunk(chunk, index))}
                 {answerChunks.map((chunk, index) => renderChunk(chunk, answerStartIndex + index))}
               </>

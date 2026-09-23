@@ -544,6 +544,11 @@ export interface CoworkSession {
   messagesOffset: number;
   /** Total number of messages stored for this session. */
   totalMessages: number;
+  /**
+   * Start of the turn the first loaded message belongs to, when that turn
+   * began before `messagesOffset`. Filled in for the renderer only.
+   */
+  leadingTurnStartTimestamp?: number | null;
   parentSessionId?: string | null;
   forkedFromMessageId?: string | null;
   forkedAt?: number | null;
@@ -1871,6 +1876,41 @@ export class CoworkStore {
       timestamp: row.created_at,
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
     }));
+  }
+
+  /**
+   * Start of the turn that the message at `position` (paging order) belongs
+   * to: the earliest timestamp from the latest user message at or before that
+   * position up to the position itself. A paged window can begin mid-turn, and
+   * the renderer needs this to time that turn without loading its first messages.
+   */
+  getTurnStartTimestampAt(sessionId: string, position: number): number | null {
+    if (!Number.isInteger(position) || position < 0) return null;
+    const rows = this.db
+      .prepare<[string, number], { type: string; created_at: number }>(
+        `
+        SELECT type, created_at
+        FROM (
+          SELECT type, created_at, sequence, ROWID as rowid_
+          FROM cowork_messages
+          WHERE session_id = ?
+          ORDER BY COALESCE(sequence, created_at) ASC, created_at ASC, ROWID ASC
+          LIMIT ?
+        )
+        ORDER BY COALESCE(sequence, created_at) DESC, created_at DESC, rowid_ DESC
+      `,
+      )
+      .iterate(sessionId, position + 1);
+
+    let start: number | null = null;
+    for (const row of rows) {
+      const timestamp = normalizeMessageTimestamp(Number(row.created_at));
+      if (timestamp != null) {
+        start = start == null ? timestamp : Math.min(start, timestamp);
+      }
+      if (row.type === 'user') break;
+    }
+    return start;
   }
 
   /**
