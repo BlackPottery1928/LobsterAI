@@ -66,7 +66,7 @@ LobsterAI 停止重启是在响应网关的明确拒绝；只取消宿主的重�
 
 从当前分支编译客户端及打过完整版本补丁的 OpenClaw。使用独立 appData 和会话工作目录；测试插件、历史标记和日志均在隔离目录。通过 Electron remote debugging / CDP 操作真实客户端，使用 DOM 和 IPC 检查状态、发送消息、重启网关及查看持久化结果。不使用 computer-use，不注入全局键鼠事件。
 
-记录改动前后相同故障的对照、健康模型新会话和续聊、进程重启后会话保留、问题插件恢复，以及无效核心配置的反向用例。日志与截图在提交前去除访问令牌、真实账号标识及私人会话内容。
+故障对照采用用户提供的升级失败截图/日志和本机同类原始包的复现；本机另行验证健康基线、新会话和续聊、进程重启后会话保留、问题插件恢复，以及无效核心配置的反向用例。没有声称重新构建并实测未打补丁的旧版客户端。日志与截图在提交前去除访问令牌、真实账号标识及私人会话内容。
 
 ## 5. 边界情况
 
@@ -82,7 +82,7 @@ LobsterAI 停止重启是在响应网关的明确拒绝；只取消宿主的重�
 
 ## 6. 验收标准与结果
 
-### 6.1 第一轮验收（2026-09-23 16:34，PR 先行）
+### 6.1 Electron 端侧验收（2026-09-23）
 
 | 检查 | 实际结果 |
 | --- | --- |
@@ -91,21 +91,41 @@ LobsterAI 停止重启是在响应网关的明确拒绝；只取消宿主的重�
 | 故障后的新会话 | 网关达到 ready，界面发起新会话，真实套餐模型返回 `DEGRADED-NEW-OK` |
 | 故障后的原会话 | 打开故障前的会话，续聊返回 `DEGRADED-CONTINUE-OK`；IPC 读取同时包含故障前后消息 |
 | 配置与数据 | `enabled: true`、allowlist、`e2ePreserve` 配置及工作区历史标记均保留 |
-| 最终运行时冷启动 | 正在验收，尚不计为通过 |
-| 缺失路径、其他安装异常及恢复 | 待完成端侧验收 |
-| 核心配置无效的反向用例 | 待完成端侧验收 |
+| 最终运行时冷启动 | 完整重建源码、Gateway bundle 和启动 helper 后，退出并重新启动 Electron；原会话返回 `RESTART-CONTINUE-OK`，health 报告网关正常、仅故障插件不可用 |
+| 安装记录没有路径 | `e2e-pathless` 的 active 安装记录不提供 `installPath`；真实 smoke check 报 `missing-install-path`，health 标记 `configured-unavailable`，新会话返回 `SECONDARY-FAILURES-OK` |
+| 插件模块加载抛异常 | `e2e-returning` 的入口抛出 `E2E_PLUGIN_MODULE_THROW`，真实 loader 日志确认异常；网关继续 ready，新会话返回 `MODULE-THROW-OK` |
+| 故障插件恢复 | 为以上两个模拟插件补齐路径及正常入口后冷启动，日志确认二者重新注册，health 的 loaded 包含二者、unavailable 仅剩原始 memory 插件，原会话返回 `RESTORED-PLUGINS-OK` |
+| 配置路径缺失 | 添加不存在的 `plugins.load.paths` 路径和未知插件配置，通过客户端 IPC 重启；日志明确告警并保留输入，原会话返回 `MISSING-PATH-OK`；路径、未知插件的 enabled/allow/config 标记仍在 |
+| 核心配置无效的反向用例 | 将 `gateway.port` 写为非法字符串，经真实重启返回 `success: false`，界面显示网关启动失败，错误明确定位到 `gateway.port`；非法字段没有被当作插件问题删除 |
+| 核心配置恢复 | 只恢复 gateway.port 后客户端已有重试流程恢复网关；打开最初的基线会话续聊，返回 `CORE-RECOVERY-OK`，memory 插件仍隔离，历史与配置保留 |
 
 原始包 SHA-256：`f4d5c764bd991bdd4827590416bace144c273d6f1b9ce9da52e9e6a5c1d0af46`。该包通过安装记录参与真实启动收敛与 payload smoke check，不 mock 网关、IPC、模型服务或会话存储。
 
-本机证据目录：`%TEMP%/lobster-plugin-degraded-e2e-20260923`。截图为 `01-baseline.png`、`02-memory-broken-new.png`、`03-memory-broken-continue.png`；隔离主日志与网关日志在该目录的 `appdata/LobsterAI/` 下。原始配置与登录凭据不提交。
+本机证据目录：`%TEMP%/lobster-plugin-degraded-e2e-20260923`。隔离主日志与网关日志在该目录的 `appdata/LobsterAI/` 下。原始配置、登录凭据及完整日志不提交；提交的截图只包含本次合成验收会话，JSON 仅包含选定的诊断与断言结果。
+
+17:02 最终经 preload IPC 重新读取四个会话：全部为 completed，九条验收回复均已持久化，模型元数据均为 `deepseek-flash-YoudaoInner`。详细结果见 [脱敏验收记录](evidence/acceptance.json)。
+
+插件入口损坏时真实套餐模型仍完成回复：
+
+![原始 memory 插件异常后新会话成功](evidence/memory-broken-new.png)
+
+核心配置错误仍被拒绝，恢复后原会话继续成功：
+
+![核心配置错误的客户端拒绝界面](evidence/invalid-core.png)
+
+[插件恢复后的续聊截图](evidence/plugins-restored.png) · [核心配置恢复后的原会话截图](evidence/core-recovered.png)
+
+缺失配置路径用例在运行中的隔离客户端修改 OpenClaw 配置，再通过正常 `restartGateway` IPC 重启。它验证上游的读取、诊断与保护策略；LobsterAI 全量 config sync 仍会管理 `plugins.load.paths`，不能据此推断客户端冷启动会永久保留任意手工添加的路径。
 
 ### 6.2 构建与回归
 
 - LobsterAI `npm run compile:electron`、`npm run build` 已通过。
 - OpenClaw `OPENCLAW_RUN_NODE_SKIP_DTS_BUILD=1 pnpm build` 已通过；重新生成 Gateway bundle 与四个启动/修复 helper。验收复用已有运行时的未变更生产依赖；未制作安装包。
-- 全新 `v2026.8.1` checkout 上完整 57 个版本补丁应用两轮成功；第二轮输出与开发源树的 46 个修改文件逐一一致。
+- 全新 `v2026.8.1` checkout 上完整 57 个版本补丁已重复应用成功；最终补丁输出与开发源树的 47 个修改文件逐一一致。
 - 修改的上游文件通过 `oxlint`、`oxfmt --check` 和核心 `tsgo`。`tsgo:prod` 的扩展阶段仍有既有 `extensions/openai/openai-provider.ts:170` 的 `lobsterai-model-compat` 类型错误；本补丁不修改该接口。
 - 启动 checkpoint、迁移拒绝边界、插件修复 warning、Doctor 配置保护、纯配置 hook 回滚、Doctor 检查注册隔离及索引诊断持久化的定向测试已通过。Doctor lint 25 例已完整重跑通过；插件路径/索引定向测试 12 例通过，1 例 POSIX 权限测试在 Windows 跳过。两例 chmod-000 Doctor 测试同样在 Windows 跳过。
+- 配置校验相关 150 例通过、1 例跳过；LobsterAI 补丁登记测试 19 例及其改动文件 ESLint 通过。真实权限拒绝未在 Windows 端侧模拟，错误码分流由定向测试覆盖。
+- [PR #2754](https://github.com/netease-youdao/LobsterAI/pull/2754) 的 `44d2fa3c3` 提交已通过 [GitHub CI](https://github.com/netease-youdao/LobsterAI/actions/runs/35839220721)：全量测试 5550 例通过、163 例跳过，主进程构建、lint、安全及补丁校验通过。运行时补丁路径已纳入 main CI 条件，避免仅文档/脚本分类导致主进程测试跳过。
 
 ### 6.3 复验入口
 
@@ -119,6 +139,14 @@ node scripts/e2e-openclaw-plugin-degraded.cjs capture --port 19533 --output <证
 node scripts/e2e-openclaw-plugin-degraded.cjs stop --port 19534
 ```
 
-驱动通过 DOM 填写提示词和 CDP 发送 Enter，使用真实 preload IPC 读取最终回复并断言持久化结果；输出模型 ID、会话 ID、引擎状态和截图。停止命令触发应用自身的 SIGTERM 清理流程，避免退出确认对话框妨碍自动化。
+驱动通过 DOM 填写提示词和 CDP 发送 Enter，使用真实 preload IPC 读取最终回复并断言持久化结果及会话完成状态；输出会话 ID、引擎状态和截图。模型元数据可能晚于完成事件到达，因此即时结果中的 model 可为 null；最终持久化消息和真实 provider 日志用于核对套餐模型。停止命令触发应用自身的 SIGTERM 清理流程，避免退出确认对话框妨碍自动化。
 
-第一轮通过后按用户要求先提交 PR 启动 CI。上述待验收项完成前，不将 PR 标记为发版验收完成。
+复现注入方法（只对隔离 profile 操作，修改安装索引时先停止客户端）：
+
+1. 原始包：下载并解包 `@tencentdb-agent-memory/memory-tencentdb@0.2.2`，校对上述 SHA-256；保留原始 `index.ts`，不生成 `dist/index.js`。在 LobsterAI `user_plugins` 和 OpenClaw canonical installed index 登记启用的插件，在 `plugins.entries` 和 allowlist 中保留同一 ID。
+2. 无安装路径：canonical 安装记录使用 `{ source: 'npm', version: '0.0.1' }`，不提供 spec 或 installPath，避免自动下载掩盖缺失路径故障。
+3. 模块加载异常：创建含 `type: 'module'`、`openclaw.extensions: ['./index.js']` 的包；manifest 设置 `activation: { onStartup: true }` 和允许测试配置的 schema。入口在顶层抛错。恢复时保留插件 ID、enabled 和配置，仅将入口替换为可正常 register 的插件，并为无路径记录补齐 installPath。
+4. 缺失配置路径：追加一个不存在的路径及未知插件的 enabled/allow/config 标记；重启和真实续聊后读取配置核对。完成后只移除本次注入的路径及未知条目。
+5. 核心配置错误：保存原来的 gateway.port，改为非法字符串并经客户端重启；确认失败及界面错误后恢复该字段，再等待网关正常并续聊。原始 memory 故障保持存在，以覆盖恢复时仍有插件不可用的情况。
+
+完整安装包、跨平台权限和其他 provider 的推理不在本次端侧验收范围。发版仍应执行正常的安装包构建与分发检查。
