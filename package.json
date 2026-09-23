@@ -112,8 +112,8 @@
     "npm": "@deepseek-ai/dsh",
     "runtimes": {
       "mac-arm64": {
-        "url": "https://ydschool-video.nosdn.127.net/1790137554939dsh-runtime-0.1.5-rc.3-mac-arm64.tar.gz",
-        "sha256": "6dafd6734c53a93c9849a17e0dfec3f84a39c28e1d5b57812a05e4c1153cc3cf",
+        "url": "https://ydschool-video.nosdn.127.net/1790144938570dsh-runtime-0.1.5-rc.3-mac-arm64.tar.gz",
+        "sha256": "f05ac026bd02550da0fe1a8b9b824a760765a7b5c2d884031dd55fc1f889c75c",
         "size": 35535483
       },
       "mac-x64": {
