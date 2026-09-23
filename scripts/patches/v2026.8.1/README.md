@@ -57,12 +57,12 @@ record and reports this acquisition failure as a notice with retry guidance,
 instead of turning an unavailable source repository into a global readiness
 failure. Other install warnings are unchanged; no error-message matching is used.
 
-The existing payload smoke check still runs. A corrupt or missing payload with
-a verified install path remains quarantined for that boot; an active record
-without an install path remains fatal. Security scan, capability consent,
-unclassified repair failures, and unknown-owner verification failures retain
-their blocking behavior. Failed acquisition cannot publish its partial clone.
-The patch neither deletes user plugin records nor changes plugin enable flags.
+The existing payload smoke check still runs. The later
+`zzz-openclaw-plugin-degraded-startup.patch` supersedes this patch's narrow
+startup disposition: repair warnings and pathless records no longer block the
+whole Gateway. Install security and capability-consent checks still reject the
+unsafe installation; failed acquisition cannot publish its partial clone.
+Neither patch deletes user plugin records or changes plugin enable flags.
 
 Validate with the upstream `marketplace`, `update`,
 `missing-configured-plugin-install`, and `post-core-plugin-convergence` suites,
@@ -75,6 +75,36 @@ without removing their fields, and auth migration logs their paths without value
 
 Remove the patch when the pinned upstream carries the same typed acquisition
 failure routing and passes the retained payload and unknown-owner regressions.
+
+## Plugin availability and degraded startup
+
+`zzz-openclaw-plugin-degraded-startup.patch` backports the global availability
+policy from upstream [#150016](https://github.com/openclaw/openclaw/pull/150016)
+and configured-path preservation from
+[#150312](https://github.com/openclaw/openclaw/pull/150312), both included in
+v2026.9.5. It also adapts pure config-hook isolation from
+[#154543](https://github.com/openclaw/openclaw/pull/154543), which is not in 9.5.
+This is a semantic backport for 8.1's startup, discovery, validation, and Doctor
+interfaces. It retains loader quarantine and core integrity refusals.
+
+Repair failures remain warnings; active payload failures are quarantined even
+without an install path. Missing or uninspectable configured paths preserve
+authored config and report typed diagnostics through Doctor. Failed plugin
+Doctor registration suppresses stale owner callbacks for that invocation.
+Pure config hooks work on a clone, so a throw cannot publish partial changes.
+
+This does not port the entire deferred-migration ledger and state/config
+protocol changes in [#147711](https://github.com/openclaw/openclaw/pull/147711).
+State-writing migration errors, invalid core config, lease failure, and changed
+migration inputs remain fatal. Do not downgrade arbitrary migration exceptions.
+
+Rebuild both Gateway/CLI and the startup helpers. Run the tests embedded in the
+patch and the real Electron acceptance described in the
+[Chinese spec](../../../specs/bugfixes/openclaw-plugin-degraded-startup/2026-09-23-plugin-degraded-startup-design.md).
+The spec records upstream commit IDs, version membership, acceptance evidence,
+and removal criteria. After upgrading to 9.5, remove only the equivalent
+150016/150312 portions after regression; retain or reassess 154543 until the
+target contains that change. Review the marketplace acquisition patch separately.
 
 ## Manual lock-owner recovery
 

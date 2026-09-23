@@ -1238,6 +1238,39 @@ const v20260801StrongPatchValidators = {
   ],
 };
 
+v20260801StrongPatchValidators['zzz-openclaw-plugin-degraded-startup.patch'] = [
+  {
+    file: 'src/commands/doctor-config-preflight-startup.ts',
+    snippets: [
+      'setActiveDegradedPlugins(pluginConvergence.quarantinedPlugins)',
+      'params.startupMigrationWarnings.length > 0',
+      'throwStartupMigrationIdentityChanged()',
+    ],
+    forbiddenSnippets: ['pluginConvergence.blockingDiagnostic'],
+  },
+  {
+    file: 'src/commands/doctor-config-preflight-plugin-verification.ts',
+    snippets: ['failures: convergence.smokeFailures', 'failures: smoke.failures'],
+    forbiddenSnippets: ['blockingDiagnostic', '&& Boolean(failure.installPath)'],
+  },
+  {
+    file: 'src/plugins/discovery-availability.ts',
+    snippets: ['configDisposition: "preserve"', 'errorCode', 'createUnavailablePluginConfigPreserver'],
+  },
+  {
+    file: 'src/config/validation.ts',
+    snippets: ['availability.createUnavailablePluginConfigPreserver'],
+  },
+  {
+    file: 'src/plugins/doctor-compatibility-migration.ts',
+    snippets: ['cloneConfigWithResolutionFacts(params.config)', 'config: params.config, changes: [], warnings: [warning]'],
+  },
+  {
+    file: 'src/flows/plugin-health-availability.ts',
+    snippets: ['error instanceof HealthCheckRegistrationError', 'describePluginAvailabilityFailure'],
+  },
+];
+
 const strongPatchValidators = openclawVersion === 'v2026.8.1'
   ? v20260801StrongPatchValidators
   : legacyStrongPatchValidators;
