@@ -1100,6 +1100,39 @@ index 8231e40aa0c..8912d46e0e7 100644
    };
  }
  
+diff --git a/src/config/config.plugin-validation.test.ts b/src/config/config.plugin-validation.test.ts
+index 36f607c05db..820853a9ebe 100644
+--- a/src/config/config.plugin-validation.test.ts
++++ b/src/config/config.plugin-validation.test.ts
+@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+ import { clearLoadInstalledPluginIndexInstallRecordsCache } from "../plugins/installed-plugin-index-records.js";
+ import { writePersistedInstalledPluginIndex } from "../plugins/installed-plugin-index-store-write.js";
+ import type { PluginManifestRecord } from "../plugins/manifest-registry.js";
++import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
+ import { shouldSuppressMissingCodexPluginDiagnostics } from "./codex-plugin-diagnostics.js";
+ import { resolveConfigWidePluginManifestRegistry } from "./io.plugin-metadata.js";
+ import { validateConfigObjectWithPlugins as validateConfigObjectWithPluginsRaw } from "./validation.js";
+@@ -289,6 +290,7 @@ describe("config plugin validation", () => {
+   });
+ 
+   afterAll(async () => {
++    closeOpenClawStateDatabaseForTest();
+     await fs.rm(fixtureRoot, { recursive: true, force: true });
+   });
+ 
+@@ -347,12 +349,10 @@ describe("config plugin validation", () => {
+   });
+ 
+   it("reports missing plugin refs across entries and allowlist surfaces", () => {
+-    const missingPath = path.join(suiteHome, "missing-plugin-dir");
+     const res = validateInSuite({
+       agents: { list: [{ id: "openclaw" }] },
+       plugins: {
+         enabled: true,
+-        load: { paths: [missingPath] },
+         entries: { "missing-plugin": { enabled: true } },
+         allow: ["missing-allow"],
+         deny: ["missing-deny"],
 diff --git a/src/config/plugin-auto-enable.shared.ts b/src/config/plugin-auto-enable.shared.ts
 index fddf38e1b4e..ade18d1c476 100644
 --- a/src/config/plugin-auto-enable.shared.ts

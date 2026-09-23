@@ -142,7 +142,14 @@ async function run() {
           && !m.metadata?.isThinking && m.metadata?.isFinal === true
           && m.content.trim() === values.marker);
       }, 'real model response persisted through IPC');
-      result = { ...result, sessionId, response: message.content, model: message.metadata.model };
+      await waitFor(async () => {
+        const sessions = await cdp.evaluate('window.electron.cowork.listSessions()');
+        return sessions.sessions.find(s => s.id === sessionId)?.status === 'completed';
+      }, 'session completion');
+      const finalMessages = await cdp.evaluate(`window.electron.cowork.getSessionMessages({sessionId:${JSON.stringify(sessionId)},limit:100})`);
+      const finalMessage = finalMessages.messages.find(m => m.id === message.id);
+      assert(finalMessage, 'Completed response must remain persisted');
+      result = { ...result, sessionId, response: finalMessage.content, model: finalMessage.metadata?.model ?? null };
     }
     result.status = await getStatus();
     result.at = new Date().toISOString();
