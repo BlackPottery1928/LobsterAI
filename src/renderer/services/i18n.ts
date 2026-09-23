@@ -6,13 +6,13 @@ export type LanguageType = 'zh' | 'en';
 // 语言文本映射
 const translations: Record<LanguageType, Record<string, string>> = {
   zh: {
-    subscriptionTrialTitlePrefix: '新订阅用户',
+    subscriptionTrialTitlePrefix: '新用户专享',
     subscriptionTrialTitleSuffix: '解锁',
     subscriptionTrialCreditUnit: '积分！',
     subscriptionTrialSubtitle: '畅享 7 天标准版权益',
     subscriptionTrialAction: '立即解锁',
     subscriptionTrialRenewal: '到期后自动续订，可随时取消',
-    subscriptionTrialEligibilityRule: '参与资格：仅限从未订阅过的新用户可购买。',
+    subscriptionTrialEligibilityRule: '参与资格：注册后 7 天内、从未订阅过的用户可购买。所有人均可查看活动。',
     subscriptionTrialBenefitsRule: '活动内容：支付 0.01 元，获得 1,000 积分及 7 天标准版权益。',
     subscriptionTrialExpiryRule: '积分有效期：活动积分有效期为 7 天，到期后未使用的积分失效。',
     subscriptionTrialUpgradeRule: '升级限制：体验期内暂不支持套餐升级。',
@@ -3919,13 +3919,13 @@ const translations: Record<LanguageType, Record<string, string>> = {
     emailDeleting: '删除中...',
   },
   en: {
-    subscriptionTrialTitlePrefix: 'New subscribers pay',
+    subscriptionTrialTitlePrefix: 'New users pay',
     subscriptionTrialTitleSuffix: 'to unlock',
     subscriptionTrialCreditUnit: 'credits!',
     subscriptionTrialSubtitle: 'Enjoy 7 days of Standard benefits',
     subscriptionTrialAction: 'Unlock now',
     subscriptionTrialRenewal: 'Automatically renews. Cancel anytime.',
-    subscriptionTrialEligibilityRule: 'Eligibility: only new users who have never subscribed can purchase this offer.',
+    subscriptionTrialEligibilityRule: 'Eligibility: registered within the past 7 days and never subscribed. Everyone can view this offer.',
     subscriptionTrialBenefitsRule: 'Offer: pay ¥0.01 for 1,000 credits and 7 days of Standard benefits.',
     subscriptionTrialExpiryRule: 'Credit validity: trial credits are valid for 7 days. Unused credits expire when the period ends.',
     subscriptionTrialUpgradeRule: 'Upgrades: plan upgrades are unavailable during the trial.',
