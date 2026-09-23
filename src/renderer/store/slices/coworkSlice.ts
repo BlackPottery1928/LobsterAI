@@ -1004,6 +1004,7 @@ const coworkSlice = createSlice({
         messages: CoworkMessage[];
         messagesOffset: number;
         totalMessages: number;
+        leadingTurnStartTimestamp?: number | null;
         /** Keep a newer live total when this window request started before it changed. */
         preserveCurrentTotal?: boolean;
       }>,
@@ -1013,6 +1014,7 @@ const coworkSlice = createSlice({
         messages,
         messagesOffset,
         totalMessages,
+        leadingTurnStartTimestamp = null,
         preserveCurrentTotal = false,
       } = action.payload;
       if (state.currentSession?.id !== sessionId) return;
@@ -1036,6 +1038,7 @@ const coworkSlice = createSlice({
       state.currentSession.messages = messages;
       state.currentSession.messagesOffset = messagesOffset;
       state.currentSession.totalMessages = nextTotalMessages;
+      state.currentSession.leadingTurnStartTimestamp = leadingTurnStartTimestamp;
       removeLoadedDetachedTailMessages(state, sessionId, messages);
       for (const message of state.currentSession.messages) {
         applyPendingMediaStatusUpdates(state, sessionId, message);
@@ -1109,14 +1112,20 @@ const coworkSlice = createSlice({
     },
 
     /** Prepend older messages when user scrolls up to load more history. */
-    prependMessages(state, action: PayloadAction<{ sessionId: string; messages: CoworkMessage[]; newOffset: number }>) {
-      const { sessionId, messages, newOffset } = action.payload;
+    prependMessages(state, action: PayloadAction<{
+      sessionId: string;
+      messages: CoworkMessage[];
+      newOffset: number;
+      leadingTurnStartTimestamp?: number | null;
+    }>) {
+      const { sessionId, messages, newOffset, leadingTurnStartTimestamp = null } = action.payload;
       if (state.currentSession?.id !== sessionId) return;
       if (messages.length === 0) return;
       const existingIds = new Set(state.currentSession.messages.map(m => m.id));
       const toInsert = messages.filter(m => !existingIds.has(m.id));
       state.currentSession.messages = [...toInsert, ...state.currentSession.messages];
       state.currentSession.messagesOffset = newOffset;
+      state.currentSession.leadingTurnStartTimestamp = leadingTurnStartTimestamp;
       for (const message of toInsert) {
         applyPendingMediaStatusUpdates(state, sessionId, message);
       }

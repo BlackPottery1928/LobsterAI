@@ -1,6 +1,12 @@
 import { expect, test } from 'vitest';
 
+import {
+  ContextCompactionMode,
+  ContextCompactionStatus,
+  CoworkSystemMessageKind,
+} from '../../../common/coworkSystemMessages';
 import type { CoworkMessage } from '../../types/cowork';
+import { ActivityStepKind } from './constants';
 import { computeDiffStats } from './DiffView';
 import {
   buildConversationTurns,
@@ -15,11 +21,13 @@ import {
   formatTurnDuration,
   getActivityCurrentActionText,
   getActivityGroupHeaderLabel,
+  getActivityGroupStepKind,
   getActivityGroupSummary,
   getActivityIndicatorStatusText,
   getActivityLiveDetail,
   getActivityLiveStatusText,
   getActivityStepDisplay,
+  getActivityStepKind,
   getLiveEditDiff,
   getShellCommandDescription,
   getStreamingTextSignature,
@@ -36,7 +44,6 @@ import {
   isActivityConsolidatedItem,
   isActivityItemLive,
   isToolGroupSettled,
-  splitActivityGroupsPerStep,
   STRUCTURED_TEXT_FORMAT_MAX_CHARS,
   TOOL_RESULT_COLLAPSED_FULL_DISPLAY_MAX_CHARS,
   turnHasSelfIndicatingActivity,
@@ -243,6 +250,70 @@ test('turn start timestamp uses the earliest message and survives orphan turns',
   expect(getTurnStartTimestamp(orphanTurn)).toBe(5000);
 
   expect(getTurnStartTimestamp({ id: 'empty', userMessage: null, assistantItems: [] })).toBeNull();
+});
+
+test('a turn that began before the loaded message window keeps its real start', () => {
+  const windowMessages: CoworkMessage[] = [{
+    id: 'tool-1',
+    type: 'tool_use',
+    content: '',
+    timestamp: 5000,
+    metadata: { toolUseId: 'tool-use-1', toolName: 'exec' },
+  }, {
+    id: 'tool-result-1',
+    type: 'tool_result',
+    content: 'done',
+    timestamp: 6000,
+    metadata: { toolUseId: 'tool-use-1' },
+  }];
+
+  const [leadingTurn] = buildConversationTurns(buildDisplayItems(windowMessages), {
+    leadingTurnStartTimestamp: 1000,
+  });
+  expect(leadingTurn.userMessage).toBeNull();
+  expect(getTurnStartTimestamp(leadingTurn)).toBe(1000);
+  expect(getTurnEndTimestamp(leadingTurn)).toBe(6000);
+
+  // A window that starts at a user message has nothing to inherit.
+  const [userTurn] = buildConversationTurns(buildDisplayItems([{
+    id: 'user-2', type: 'user', content: 'next', timestamp: 7000,
+  }, ...windowMessages]), { leadingTurnStartTimestamp: 1000 });
+  expect(getTurnStartTimestamp(userTurn)).toBe(5000);
+});
+
+test('a context compaction split keeps timing the work it continues', () => {
+  const turns = buildConversationTurns(buildDisplayItems([{
+    id: 'user-1', type: 'user', content: 'long task', timestamp: 1000,
+  }, {
+    id: 'tool-1',
+    type: 'tool_use',
+    content: '',
+    timestamp: 2000,
+    metadata: { toolUseId: 'tool-use-1', toolName: 'exec' },
+  }, {
+    id: 'tool-result-1',
+    type: 'tool_result',
+    content: 'done',
+    timestamp: 2500,
+    metadata: { toolUseId: 'tool-use-1' },
+  }, {
+    id: 'compaction-1',
+    type: 'system',
+    content: 'Context compaction completed, continuing task',
+    timestamp: 3000,
+    metadata: {
+      kind: CoworkSystemMessageKind.ContextCompaction,
+      mode: ContextCompactionMode.Auto,
+      status: ContextCompactionStatus.Retrying,
+    },
+  }, {
+    id: 'assistant-1', type: 'assistant', content: 'finished', timestamp: 4000,
+  }]));
+
+  expect(turns).toHaveLength(2);
+  expect(turns[1].userMessage).toBeNull();
+  expect(getTurnStartTimestamp(turns[1])).toBe(1000);
+  expect(getTurnEndTimestamp(turns[1])).toBe(4000);
 });
 
 test('turn end timestamp is the latest message time and duration formats in locale units', () => {
@@ -486,7 +557,7 @@ test('activity header label summarizes commands, reads, and edits in natural lan
   expect(getActivityGroupHeaderLabel([
     activityThinkingItem('think-1'),
     activityThinkingItem('think-2'),
-  ])).toBe('思考过程');
+  ])).toBe('深度思考');
 
   // Single-step groups show the concrete action as a past-tense phrase; a
   // shell step shows the model's plain-language summary, never the command.
@@ -505,21 +576,56 @@ test('activity header label summarizes commands, reads, and edits in natural lan
   expect(getActivityGroupHeaderLabel([activityToolItem('tool-1', 'write')])).toBe('写入了文件');
 });
 
-test('a running turn lists one activity group per step and keeps text chunks', () => {
-  const grouped = chunkConsolidatedItemsForDisplay([
+test('a folded run with one real step names that step, not a count', () => {
+  expect(getActivityGroupHeaderLabel([
     activityThinkingItem('think-1'),
-    activityToolItem('tool-1'),
-    activityToolItem('tool-2'),
-    activityTextItem('text-1'),
-    activityToolItem('tool-3'),
-  ]);
-  expect(grouped.map(chunk => chunk.kind)).toEqual(['activity_group', 'item', 'activity_group']);
+    activityToolItem('tool-1', 'tavily__tavily_search', undefined, { query: 'GPT-6' }),
+  ])).toBe('使用了 tavily__tavily_search');
+  expect(getActivityGroupHeaderLabel([
+    activityThinkingItem('think-1'),
+    activityToolItem('tool-1', 'read', undefined, { file_path: '/skills/pptx/SKILL.md' }),
+    activityThinkingItem('think-2'),
+  ])).toBe('读取了 SKILL.md');
+});
 
-  const perStep = splitActivityGroupsPerStep(grouped);
-  expect(perStep.map(chunk => (chunk.kind === 'activity_group' ? chunk.entries.length : 'text')))
-    .toEqual([1, 1, 1, 'text', 1]);
-  expect(perStep.filter(chunk => chunk.kind === 'activity_group').flatMap(chunk => chunk.entries.map(entry => entry.index)))
-    .toEqual([0, 1, 2, 4]);
+test('step lines lead with an icon kind that follows the tool, and thinking has none', () => {
+  expect(getActivityStepKind(activityThinkingItem('think-1'))).toBe(ActivityStepKind.Thinking);
+  expect(getActivityStepKind(activityToolItem('tool-1', 'exec'))).toBe(ActivityStepKind.Command);
+  expect(getActivityStepKind(activityToolItem('tool-2', 'process'))).toBe(ActivityStepKind.Command);
+  expect(getActivityStepKind(activityToolItem('tool-3', 'read'))).toBe(ActivityStepKind.Read);
+  expect(getActivityStepKind(activityToolItem('tool-4', 'write'))).toBe(ActivityStepKind.Edit);
+  expect(getActivityStepKind(activityToolItem('tool-5', 'apply_patch'))).toBe(ActivityStepKind.Edit);
+  expect(getActivityStepKind(activityToolItem('tool-6', 'web_search'))).toBe(ActivityStepKind.Web);
+  expect(getActivityStepKind(activityToolItem('tool-7', 'browser'))).toBe(ActivityStepKind.Web);
+  expect(getActivityStepKind(activityToolItem('tool-8', 'memory_search'))).toBe(ActivityStepKind.Search);
+  expect(getActivityStepKind(activityToolItem('tool-9', 'lobsterai_image_generate'))).toBe(ActivityStepKind.Media);
+  expect(getActivityStepKind(activityToolItem('tool-10', 'sessions_spawn'))).toBe(ActivityStepKind.Agent);
+  expect(getActivityStepKind(activityToolItem('tool-11', 'TodoWrite'))).toBe(ActivityStepKind.Todo);
+  expect(getActivityStepKind(activityToolItem('tool-12', 'cron'))).toBe(ActivityStepKind.Schedule);
+  expect(getActivityStepKind(activityToolItem('tool-13', 'tavily__tavily_search'))).toBe(ActivityStepKind.Tool);
+});
+
+test('a folded run summary leads with the icon of the first category its label names', () => {
+  // The label reads "运行了 1 个命令、读取了 1 个文件", so the command icon leads.
+  expect(getActivityGroupStepKind([
+    activityThinkingItem('think-1'),
+    activityToolItem('tool-1', 'read'),
+    activityToolItem('tool-2', 'exec'),
+  ])).toBe(ActivityStepKind.Command);
+  expect(getActivityGroupStepKind([
+    activityToolItem('tool-1', 'web_search'),
+    activityToolItem('tool-2', 'edit'),
+  ])).toBe(ActivityStepKind.Edit);
+  // Only other tools: the first one's kind.
+  expect(getActivityGroupStepKind([
+    activityThinkingItem('think-1'),
+    activityToolItem('tool-1', 'web_fetch'),
+    activityToolItem('tool-2', 'cron'),
+  ])).toBe(ActivityStepKind.Web);
+  expect(getActivityGroupStepKind([
+    activityThinkingItem('think-1'),
+    activityThinkingItem('think-2'),
+  ])).toBe(ActivityStepKind.Thinking);
 });
 
 test('activity step display shortens file paths to basenames', () => {
@@ -589,7 +695,7 @@ test('activity current action text is a verb phrase for the latest step', () => 
     'Edit',
     undefined,
     { file_path: '/repo/src/i18n.ts', old_string: 'a', new_string: 'b' },
-  ))).toBe('正在编辑 i18n.ts');
+  ))).toBe('正在修改 i18n.ts');
   expect(getActivityCurrentActionText(activityToolItem('tool-4', 'web_fetch')))
     .toBe('正在使用 web_fetch');
   // Session orchestration tools get plain-language labels instead of raw names.
@@ -730,7 +836,7 @@ test('a tool call whose arguments are still streaming reads as generating with l
       toolResult: null,
     },
   };
-  expect(getActivityCurrentActionText(generating)).toBe('正在生成文件内容');
+  expect(getActivityCurrentActionText(generating)).toBe('正在写入文件');
   expect(getLiveEditDiff((generating as Extract<ConsolidatedItem, { type: 'tool_group' }>).group.toolUse)).toEqual({ added: 118, removed: 0 });
 
   const started = runningToolItem('write', { path: '/tmp/build.py', content: 'print(1)' });
@@ -739,7 +845,7 @@ test('a tool call whose arguments are still streaming reads as generating with l
 });
 
 test('status line phrase follows the running step', () => {
-  expect(getActivityLiveStatusText(runningToolItem('exec', { command: 'npm install' }))).toBe('正在执行命令');
+  expect(getActivityLiveStatusText(runningToolItem('exec', { command: 'npm install' }))).toBe('正在运行命令');
   expect(getActivityLiveStatusText(runningToolItem('read', { path: '/Users/me/project/README.md' }))).toBe('正在读取文件');
   expect(getActivityLiveStatusText(runningToolItem('read', { path: '/Users/me/.openclaw/skills/pptx/SKILL.md' }))).toBe('正在读取技能说明');
   expect(getActivityLiveStatusText(runningToolItem('write', { path: '/tmp/a.py', content: 'x' }))).toBe('正在写入文件');
@@ -759,20 +865,28 @@ test('status line phrase follows the running step', () => {
   })).toBe('正在思考');
 });
 
-test('status line says a file is being prepared while its arguments stream', () => {
-  const generating: ConsolidatedItem = {
+test('a file streaming its content reads the same on its step line and the status line', () => {
+  const generating = (toolName: string): ConsolidatedItem => ({
     type: 'tool_group',
     group: {
       type: 'tool_group',
       toolUse: {
-        id: 'use-3', type: 'tool_use', content: '', timestamp: 1,
-        metadata: { toolName: 'write', toolInput: {}, toolUseId: 'call-3', isGenerating: true, liveEditDiff: { added: 4, removed: 0 } },
+        id: `use-${toolName}`, type: 'tool_use', content: '', timestamp: 1,
+        metadata: { toolName, toolInput: {}, toolUseId: `call-${toolName}`, isGenerating: true, liveEditDiff: { added: 4, removed: 0 } },
       },
       toolResult: null,
     },
-  };
-  expect(getActivityLiveStatusText(generating)).toBe('正在准备写入文件');
-  expect(isActivityItemLive(generating)).toBe(true);
+  });
+  expect(getActivityLiveStatusText(generating('write'))).toBe('正在写入文件');
+  expect(getActivityCurrentActionText(generating('write'))).toBe('正在写入文件');
+  expect(getActivityLiveStatusText(generating('edit'))).toBe('正在修改文件');
+  expect(getActivityCurrentActionText(generating('edit'))).toBe('正在修改文件');
+  expect(isActivityItemLive(generating('write'))).toBe(true);
+});
+
+test('a running command without a description reads the same on its step line and the status line', () => {
+  const command = runningToolItem('exec', { command: 'npm install' });
+  expect(getActivityCurrentActionText(command)).toBe(getActivityLiveStatusText(command));
 });
 
 test('a work item is live until its result is final', () => {

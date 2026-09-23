@@ -5105,7 +5105,11 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     messages?.some(message => message.metadata?.kind === CoworkOnboardingMessageKind.NewUserWelcome) ?? false
   ), [messages]);
   const displayItems = useMemo(() => messages ? buildDisplayItems(messages) : [], [messages]);
-  const turns = useMemo(() => buildConversationTurns(displayItems), [displayItems]);
+  const leadingTurnStartTimestamp = currentSession?.leadingTurnStartTimestamp ?? null;
+  const turns = useMemo(
+    () => buildConversationTurns(displayItems, { leadingTurnStartTimestamp }),
+    [displayItems, leadingTurnStartTimestamp],
+  );
   const enterpriseQuotaSignal = useMemo(
     () => findCurrentEnterpriseQuotaSignal(currentSession, currentMessagesWithDetachedTail),
     [currentMessagesWithDetachedTail, currentSession],

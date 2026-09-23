@@ -14,9 +14,9 @@ test('a silent model shows the first thinking phase and no step cue', () => {
 
 test('a running step names itself without a finished-step counter', () => {
   const html = renderToStaticMarkup(React.createElement(ActivityIndicator, {
-    fingerprint: 'turn:3', startTimestamp: null, liveStatusText: '正在执行命令',
+    fingerprint: 'turn:3', startTimestamp: null, liveStatusText: '正在运行命令',
   }));
-  expect(html).toContain('正在执行命令');
+  expect(html).toContain('正在运行命令');
   expect(html).not.toContain('正在思考');
   expect(html).not.toContain('data-cowork-activity-steps');
   expect(html).not.toContain('步');
@@ -32,9 +32,9 @@ test('a silent gap after the turn has shown something reads as working, not thin
 
 test('a live step still names itself once the turn has content', () => {
   const html = renderToStaticMarkup(React.createElement(ActivityIndicator, {
-    fingerprint: 'turn:6', startTimestamp: null, hasContent: true, liveStatusText: '正在准备写入文件',
+    fingerprint: 'turn:6', startTimestamp: null, hasContent: true, liveStatusText: '正在写入文件',
   }));
-  expect(html).toContain('正在准备写入文件');
+  expect(html).toContain('正在写入文件');
   expect(html).not.toContain('正在处理');
 });
 

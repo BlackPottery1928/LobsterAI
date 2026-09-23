@@ -14,32 +14,38 @@ const thinkingMessage = (content: string, isStreaming: boolean): CoworkMessage =
   metadata: { isThinking: true, isStreaming },
 });
 
-test('a lone thought opens straight onto its reasoning text, without a nested header', () => {
-  const html = renderToStaticMarkup(React.createElement(ThinkingBlock, {
-    message: thinkingMessage('Let me check the Node version first.', false),
-    variant: ActivityEntryVariant.Detail,
-  }));
-  expect(html).toContain('Let me check the Node version first.');
-  expect(html).not.toContain('<button');
-  expect(html).not.toContain('思考过程');
-  expect(html).not.toContain('data-reasoning-follow-tail');
-});
-
-test('a thought that is still streaming follows its newest line', () => {
-  const html = renderToStaticMarkup(React.createElement(ThinkingBlock, {
-    message: thinkingMessage('Working through the options', true),
-    variant: ActivityEntryVariant.Detail,
-  }));
-  expect(html).toContain('data-reasoning-follow-tail="true"');
-});
-
-test('a thought among other steps stays a collapsed, expandable row', () => {
+test('a finished thought is a collapsed 深度思考 line with no icon or arrow', () => {
   const html = renderToStaticMarkup(React.createElement(ThinkingBlock, {
     message: thinkingMessage('Hidden until expanded', false),
     variant: ActivityEntryVariant.Row,
   }));
   expect(html).toContain('<button');
-  expect(html).toContain('思考过程');
+  expect(html).toContain('深度思考');
   expect(html).toContain('aria-expanded="false"');
+  expect(html).toContain('data-activity-label="settled"');
+  expect(html).not.toContain('<svg');
   expect(html).not.toContain('Hidden until expanded');
+  expect(html).not.toContain('data-activity-live-detail');
+});
+
+test('a thought that is still streaming keeps its name, shimmers, and previews its newest reasoning', () => {
+  const html = renderToStaticMarkup(React.createElement(ThinkingBlock, {
+    message: thinkingMessage('Working through the options', true),
+    variant: ActivityEntryVariant.Row,
+  }));
+  expect(html).toContain('深度思考');
+  expect(html).toContain('data-activity-label="live"');
+  expect(html).toContain('data-activity-live-detail="reasoning"');
+  expect(html).toContain('Working through the options');
+});
+
+test('a streaming thought the run no longer treats as live settles its line', () => {
+  const html = renderToStaticMarkup(React.createElement(ThinkingBlock, {
+    message: thinkingMessage('Quiet for a while', true),
+    variant: ActivityEntryVariant.Row,
+    isLive: false,
+  }));
+  expect(html).toContain('深度思考');
+  expect(html).toContain('data-activity-label="settled"');
+  expect(html).not.toContain('Quiet for a while');
 });

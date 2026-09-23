@@ -3,12 +3,14 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { i18nService } from '../../services/i18n';
 import type { CoworkMessage } from '../../types/cowork';
-import { ActivityEntryVariant } from './constants';
+import { ActivityLiveDetailLine, ActivityStepLine } from './ActivityStepLine';
+import { ActivityEntryVariant, ActivityStepKind } from './constants';
 import {
   bucketLength,
   getMessageLineCount,
   reportConversationBlockAction,
 } from './conversationAnalytics';
+import { getActivityLiveDetail } from './messageDisplayUtils';
 
 // Within this distance of the bottom, streaming reasoning keeps following
 // new text; scrolling further up pauses the follow until the user returns.
@@ -56,17 +58,19 @@ const ThinkingBlock: React.FC<{
   message: CoworkMessage;
   mapDisplayText?: (value: string) => string;
   /**
-   * 'default' renders the standalone card; 'row' a compact expandable row
-   * among other steps; 'detail' just the reasoning text, for an activity
-   * group whose only step is this thought.
+   * 'default' renders the standalone card; 'row' the thought's own line
+   * among a run's steps, opening onto the reasoning text.
    */
   variant?: 'default' | ActivityEntryVariant;
-}> = ({ message, mapDisplayText, variant = 'default' }) => {
+  /** Whether the row reads as the step running right now; defaults to the thought still streaming. */
+  isLive?: boolean;
+}> = ({ message, mapDisplayText, variant = 'default', isLive }) => {
   const isCurrentlyStreaming = Boolean(message.metadata?.isStreaming);
   const isRowVariant = variant === ActivityEntryVariant.Row;
   const [isExpanded, setIsExpanded] = useState(
     isRowVariant ? false : isCurrentlyStreaming,
   );
+  const wasStreamingRef = useRef(isCurrentlyStreaming);
   const displayContent = mapDisplayText ? mapDisplayText(message.content) : message.content;
   const handleToggleExpanded = () => {
     const nextExpanded = !isExpanded;
@@ -92,42 +96,37 @@ const ThinkingBlock: React.FC<{
     }
   }, [isCurrentlyStreaming, variant]);
 
-  if (variant === ActivityEntryVariant.Detail) {
-    return (
-      <ReasoningContent
-        content={displayContent}
-        followTail={isCurrentlyStreaming}
-        className="activity-row-detail max-h-[300px] overflow-y-auto rounded-lg border border-border px-4 py-3 leading-relaxed text-muted whitespace-pre-wrap break-words"
-      />
-    );
-  }
+  // A thought opened while it streams folds itself away once it closes, so
+  // the reasoning does not linger above the work that follows.
+  useEffect(() => {
+    if (isRowVariant && wasStreamingRef.current && !isCurrentlyStreaming) {
+      setIsExpanded(false);
+    }
+    wasStreamingRef.current = isCurrentlyStreaming;
+  }, [isCurrentlyStreaming, isRowVariant]);
 
   if (isRowVariant) {
+    const isRowLive = isLive ?? isCurrentlyStreaming;
+    const liveDetail = isRowLive && !isExpanded
+      ? getActivityLiveDetail({ type: 'assistant', message: { ...message, content: displayContent } })
+      : null;
     return (
       <div>
-        <button
-          onClick={handleToggleExpanded}
-          className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-surface-raised/40 transition-colors"
-          aria-expanded={isExpanded}
-        >
-          <LightBulbIcon className="h-3 w-3 text-secondary flex-shrink-0" />
-          <span className="text-xs text-secondary">
-            {i18nService.t('reasoning')}
-          </span>
-          {isCurrentlyStreaming && (
-            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse flex-shrink-0" />
-          )}
-          <ChevronRightIcon
-            className={`h-3 w-3 text-muted flex-shrink-0 transition-transform duration-200 ${
-              isExpanded ? 'rotate-90' : ''
-            }`}
-          />
-        </button>
+        {/* The line keeps its name while the thought streams and shimmers
+            instead; the status line below the turn says "正在思考". */}
+        <ActivityStepLine
+          kind={ActivityStepKind.Thinking}
+          label={i18nService.t('coworkActivityThoughtProcess')}
+          isLive={isRowLive}
+          isExpanded={isExpanded}
+          onToggle={handleToggleExpanded}
+        />
+        {liveDetail && <ActivityLiveDetailLine detail={liveDetail} kind={ActivityStepKind.Thinking} />}
         {isExpanded && (
           <ReasoningContent
             content={displayContent}
             followTail={isCurrentlyStreaming}
-            className="activity-row-detail px-4 pb-3 max-h-[300px] overflow-y-auto leading-relaxed text-muted whitespace-pre-wrap"
+            className="activity-row-detail mt-1.5 max-h-[300px] overflow-y-auto rounded-lg border border-border px-4 py-3 leading-relaxed text-muted whitespace-pre-wrap break-words"
           />
         )}
       </div>

@@ -13,6 +13,7 @@ import { hasToolResultMediaAssets, normalizeFilePathForDedup } from '../../servi
 import { i18nService } from '../../services/i18n';
 import type { Artifact } from '../../types/artifact';
 import type { CoworkMessage, CoworkMessageMetadata } from '../../types/cowork';
+import { ActivityStepKind } from './constants';
 import type { MediaPollingGroup } from './MediaPollingIndicator';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -46,6 +47,17 @@ export type ConversationTurn = {
   id: string;
   userMessage: CoworkMessage | null;
   assistantItems: AssistantTurnItem[];
+  /**
+   * Set on turns without their own user message: when the work they continue
+   * started — the previous turn after a context compaction split, or a turn
+   * that began before the loaded message window.
+   */
+  inheritedStartTimestamp?: number | null;
+};
+
+export type BuildConversationTurnsOptions = {
+  /** For a partial message window: start of the turn its first message belongs to. */
+  leadingTurnStartTimestamp?: number | null;
 };
 
 export const getTurnMessageIds = (turn: ConversationTurn): Set<string> => {
@@ -577,10 +589,11 @@ export const turnHasSelfIndicatingActivity = (turn: ConversationTurn): boolean =
       && Boolean(item.message.metadata?.isStreaming);
   });
 
-// Earliest message timestamp in the turn — the stable start time for the
-// activity indicator's elapsed counter. Falls back across the user message
-// and assistant items so orphan turns (e.g. after context compaction) keep
-// a stable start across remounts; null when the turn has no timestamps yet.
+// Earliest timestamp of the turn — the stable start time for the activity
+// indicator's elapsed counter and the duration line. Orphan turns (after a
+// context compaction split, or at the start of a partial message window)
+// inherit the start of the work they continue, so the counter neither resets
+// nor depends on how much history is loaded; null without any timestamps.
 export const getTurnStartTimestamp = (turn: ConversationTurn): number | null => {
   let earliest: number | null = null;
   const consider = (value: unknown) => {
@@ -588,6 +601,7 @@ export const getTurnStartTimestamp = (turn: ConversationTurn): number | null => 
       earliest = earliest == null ? value : Math.min(earliest, value);
     }
   };
+  consider(turn.inheritedStartTimestamp);
   consider(turn.userMessage?.timestamp);
   for (const item of turn.assistantItems) {
     if (item.type === 'tool_group') {
@@ -723,17 +737,24 @@ export const buildDisplayItems = (messages: CoworkMessage[]): DisplayItem[] => {
   return items;
 };
 
-export const buildConversationTurns = (items: DisplayItem[]): ConversationTurn[] => {
+export const buildConversationTurns = (
+  items: DisplayItem[],
+  options: BuildConversationTurnsOptions = {},
+): ConversationTurn[] => {
   const turns: ConversationTurn[] = [];
   let currentTurn: ConversationTurn | null = null;
   let orphanIndex = 0;
 
   const ensureTurn = (anchorMessageId?: string): ConversationTurn => {
     if (currentTurn) return currentTurn;
+    const previousTurn = turns[turns.length - 1];
     const orphanTurn: ConversationTurn = {
       id: anchorMessageId ? `orphan-${anchorMessageId}` : `orphan-${orphanIndex++}`,
       userMessage: null,
       assistantItems: [],
+      inheritedStartTimestamp: previousTurn
+        ? getTurnStartTimestamp(previousTurn)
+        : options.leadingTurnStartTimestamp ?? null,
     };
     turns.push(orphanTurn);
     currentTurn = orphanTurn;
@@ -1247,11 +1268,18 @@ export type ConsolidatedRenderChunk =
   | { kind: 'activity_group'; entries: ActivityChunkEntry[] };
 
 /**
- * Every run of consecutive work items collapses, even a run of one, so
- * assistant turns read as summary lines interleaved with text (Claude
- * Code app style) instead of mixing collapsed groups with raw tool rows.
+ * Every run of consecutive work items becomes one activity run, even a run
+ * of one, so assistant turns read as light step lines interleaved with text
+ * instead of mixing activity runs with raw tool rows.
  */
 export const ACTIVITY_GROUP_MIN_ITEMS = 1;
+
+/** Stable React key for a work item, shared by a run and its step lines. */
+export const getConsolidatedItemKey = (item: ConsolidatedItem): string => {
+  if (item.type === 'media_polling_group') return `media-${item.group.taskId}`;
+  if (item.type === 'tool_group') return item.group.toolUse.id;
+  return item.message.id;
+};
 
 /**
  * Work items that read as intermediate agent activity rather than answer
@@ -1400,11 +1428,14 @@ const countActivityCategories = (items: ConsolidatedItem[]): ActivityCategoryCou
 /**
  * Natural-language summary for a collapsed activity group, e.g.
  * "运行了 3 个命令、读取了 2 个文件" / "Ran 3 commands, read 2 files".
- * A single-step group shows the concrete action ("Read App.tsx") instead.
+ * A group with a single step shows that concrete action ("Read App.tsx")
+ * instead, even with thoughts folded around it; "调用了 1 次工具" would
+ * only hide which tool it was.
  */
 export const getActivityGroupHeaderLabel = (items: ConsolidatedItem[]): string => {
-  if (items.length === 1 && items[0].type !== 'assistant') {
-    return getActivityStepDoneLabel(items[0]);
+  const steps = items.filter((item) => item.type !== 'assistant');
+  if (steps.length === 1) {
+    return getActivityStepDoneLabel(steps[0]);
   }
   const counts = countActivityCategories(items);
   const segment = (count: number, oneKey: string, manyKey: string): string =>
@@ -1520,8 +1551,12 @@ export const getActivityCurrentActionText = (item: ConsolidatedItem): string => 
     if (normalized === 'sessionsspawn') {
       return i18nService.t('coworkActivityLiveSpawnSubagent');
     }
+    // While its arguments stream the file is not named yet; the step reads
+    // as the write or edit it is, matching the status line below the turn.
     if (item.group.toolUse.metadata?.isGenerating) {
-      return i18nService.t('coworkActivityLiveGenerating');
+      return i18nService.t(
+        WRITE_TOOL_NAMES.has(normalized) ? 'coworkActivityLiveWriteGeneric' : 'coworkActivityLiveEditGeneric',
+      );
     }
     const toolInput = item.group.toolUse.metadata?.toolInput;
     // A shell step never names its raw command here; that lives in the detail.
@@ -1681,7 +1716,7 @@ export const getActivityLiveStatusText = (item: ConsolidatedItem): string => {
   const toolInput = item.group.toolUse.metadata?.toolInput;
   if (item.group.toolUse.metadata?.isGenerating) {
     return i18nService.t(
-      WRITE_TOOL_NAMES.has(normalized) ? 'coworkActivityStatusPreparingWrite' : 'coworkActivityStatusPreparingEdit',
+      WRITE_TOOL_NAMES.has(normalized) ? 'coworkActivityStatusWriting' : 'coworkActivityStatusEditing',
     );
   }
   if (isBashLikeToolName(toolName)) return i18nService.t('coworkActivityStatusCommand');
@@ -1708,17 +1743,46 @@ export const getActivityLiveStatusText = (item: ConsolidatedItem): string => {
   return i18nService.t('coworkActivityStatusTool');
 };
 
+const MEDIA_GENERATE_TOOL_NAMES = new Set(['lobsteraivideogenerate', 'lobsteraiimagegenerate']);
+const SUBAGENT_TOOL_NAMES = new Set(['sessionsspawn', 'sessionsyield', ...SUBAGENT_IO_TOOL_NAMES]);
+
+/** Which icon a step line leads with; thinking lines carry none. */
+export const getActivityStepKind = (item: ConsolidatedItem): ActivityStepKind => {
+  if (item.type === 'assistant') return ActivityStepKind.Thinking;
+  if (item.type === 'media_polling_group') return ActivityStepKind.Media;
+  if (item.type !== 'tool_group') return ActivityStepKind.Tool;
+  const rawName = item.group.toolUse.metadata?.toolName;
+  const toolName = typeof rawName === 'string' ? rawName : undefined;
+  const normalized = toolName ? normalizeToolName(toolName) : '';
+  if (isBashLikeToolName(toolName) || normalized === 'process') return ActivityStepKind.Command;
+  if (READ_TOOL_NAMES.has(normalized)) return ActivityStepKind.Read;
+  if (EDIT_TOOL_NAMES.has(normalized) || normalized === 'applypatch') return ActivityStepKind.Edit;
+  if (FILE_SEARCH_TOOL_NAMES.has(normalized) || MEMORY_TOOL_NAMES.has(normalized)) return ActivityStepKind.Search;
+  if (
+    WEB_SEARCH_TOOL_NAMES.has(normalized)
+    || WEB_FETCH_TOOL_NAMES.has(normalized)
+    || BROWSER_TOOL_NAMES.has(normalized)
+  ) {
+    return ActivityStepKind.Web;
+  }
+  if (MEDIA_GENERATE_TOOL_NAMES.has(normalized) || IMAGE_VIEW_TOOL_NAMES.has(normalized)) return ActivityStepKind.Media;
+  if (SUBAGENT_TOOL_NAMES.has(normalized)) return ActivityStepKind.Agent;
+  if (isTodoWriteToolName(toolName)) return ActivityStepKind.Todo;
+  if (isCronToolName(toolName)) return ActivityStepKind.Schedule;
+  return ActivityStepKind.Tool;
+};
+
 /**
- * One activity group per work item: the running turn lists every step on
- * its own compact line and appends new ones below, so nothing on screen is
- * re-labelled while the model works. Text chunks pass through untouched.
+ * Icon for a folded run's summary line: the kind its label leads with
+ * (commands, then file reads, then edits, as getActivityGroupHeaderLabel
+ * orders them), else the first other tool step's kind.
  */
-export const splitActivityGroupsPerStep = (chunks: ConsolidatedRenderChunk[]): ConsolidatedRenderChunk[] =>
-  chunks.flatMap((chunk): ConsolidatedRenderChunk[] => (
-    chunk.kind === 'activity_group'
-      ? chunk.entries.map((entry) => ({ kind: 'activity_group', entries: [entry] }))
-      : [chunk]
-  ));
+export const getActivityGroupStepKind = (items: ConsolidatedItem[]): ActivityStepKind => {
+  const kinds = items.map(getActivityStepKind);
+  const leadKind = [ActivityStepKind.Command, ActivityStepKind.Read, ActivityStepKind.Edit]
+    .find((kind) => kinds.includes(kind));
+  return leadKind ?? kinds.find((kind) => kind !== ActivityStepKind.Thinking) ?? ActivityStepKind.Thinking;
+};
 
 /**
  * Past-tense phrase for one finished step on its own line ("读取了 App.tsx",
