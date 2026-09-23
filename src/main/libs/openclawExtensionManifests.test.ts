@@ -39,10 +39,15 @@ describe('OpenClaw extension manifests', () => {
     ]);
   });
 
+  test('declares the experimental decision model agent tool contract', () => {
+    expect(readContractTools('lobster-decision')).toEqual(['decision_evaluate']);
+  });
+
   test('declares TypeScript entries for local extensions that are precompiled for packaging', () => {
     expect(readPackageOpenClawExtensions('mcp-bridge')).toEqual(['./index.ts']);
     expect(readPackageOpenClawExtensions('ask-user-question')).toEqual(['./index.ts']);
     expect(readPackageOpenClawExtensions('lobster-media-generation')).toEqual(['./index.ts']);
+    expect(readPackageOpenClawExtensions('lobster-decision')).toEqual(['./index.ts']);
     expect(readPackageOpenClawExtensions('lobsterai-model-compat')).toEqual(['./index.ts']);
   });
 

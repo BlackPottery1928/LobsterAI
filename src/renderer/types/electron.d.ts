@@ -74,6 +74,11 @@ import type {
   DataMigrationLastRestoreResponse,
   DataMigrationRestoreScheduleResult,
 } from '../../shared/dataMigration/constants';
+import type {
+  DecisionModelConfigUpdate,
+  DecisionModelConfigView,
+  DecisionModelTestResult,
+} from '../../shared/decisionModel/constants';
 import type { EnterpriseQuotaRequestType } from '../../shared/enterpriseAccount/constants';
 import type {
   EnterpriseAccountContext,
@@ -876,6 +881,11 @@ interface IElectronAPI {
     setEnabled: (enabled: boolean) => Promise<{ enabled: boolean }>;
     openWorkbench: () => Promise<{ url: string }>;
     stop: () => Promise<{ phase: string; port: number | null; version: string | null; errorCode: string | null }>;
+  };
+  decisionModel: {
+    getConfig: () => Promise<DecisionModelConfigView>;
+    saveConfig: (update: DecisionModelConfigUpdate) => Promise<DecisionModelConfigView>;
+    testConnection: (draft: DecisionModelConfigUpdate) => Promise<DecisionModelTestResult>;
   };
   openclaw: {
     engine: {
