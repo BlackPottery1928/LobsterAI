@@ -654,6 +654,15 @@ const v20260801StrongPatchValidators = {
       snippets: ['fast-forwards missed recurring jobs instead of replaying them'],
     },
   ],
+  'openclaw-exec-command-description.patch': [
+    {
+      file: 'src/agents/bash-tools.schemas.ts',
+      snippets: [
+        "in the user's language; shown to the user instead of the command.",
+        'description: execSchema.properties.description,',
+      ],
+    },
+  ],
   'openclaw-im-bound-agent-run-cwd.patch': [
     {
       file: 'src/agents/agent-scope-config.ts',
@@ -682,6 +691,15 @@ const v20260801StrongPatchValidators = {
       forbiddenSnippets: [
         "'@huggingface/transformers@3.0.2':",
         'onnxruntime-node@1.19.2:',
+      ],
+    },
+  ],
+  'openclaw-live-edit-diff-partial-args.patch': [
+    {
+      file: 'src/agents/embedded-agent-live-edit-diff.ts',
+      snippets: [
+        ': typeof block?.partialArgs === "string"',
+        '? block.partialArgs',
       ],
     },
   ],
