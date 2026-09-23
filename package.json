@@ -108,13 +108,13 @@
     ]
   },
   "dsh": {
-    "version": "0.1.1-rc.1",
+    "version": "0.1.5-rc.3",
     "npm": "@deepseek-ai/dsh",
     "runtimes": {
       "mac-arm64": {
-        "url": "https://ydschool-video.nosdn.127.net/1787305922372dsh-runtime-0.1.1-rc.1-mac-arm64.tar.gz",
-        "sha256": "90e2b7dcb0d20a9ddc322ce4a681761676ca67194dbfdf6ccfac7409fca3a3aa",
-        "size": 32011089
+        "url": "https://ydschool-video.nosdn.127.net/1790137554939dsh-runtime-0.1.5-rc.3-mac-arm64.tar.gz",
+        "sha256": "6dafd6734c53a93c9849a17e0dfec3f84a39c28e1d5b57812a05e4c1153cc3cf",
+        "size": 35535483
       },
       "mac-x64": {
         "url": "https://ydschool-video.nosdn.127.net/1787307267457dsh-runtime-0.1.1-rc.1-mac-x64.tar.gz",
