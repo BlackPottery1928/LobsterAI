@@ -852,7 +852,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             onBatchSelectableItemsChange={handleBatchSelectableItemsChange}
           />
         </div>
-        {!isBatchMode && (
+        {!isBatchMode && false && (
           <SidebarExperienceSlot
             hidden={hideAdBanner || paymentGuideOwnsSlot}
             onVisibleChange={setIsSidebarBannerVisible}
