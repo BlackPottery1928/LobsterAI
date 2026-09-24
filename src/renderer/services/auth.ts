@@ -485,7 +485,7 @@ class AuthService {
       return loginWithIntranetCredentials(
         {
           applyAuthenticatedState: (user, quota, enterpriseContext) => {
-            this.applyAuthenticatedState(user, quota, enterpriseContext);
+            this.applyAuthenticatedState(user, quota, null, enterpriseContext);
           },
           log: writeAuthRendererLog,
         },
