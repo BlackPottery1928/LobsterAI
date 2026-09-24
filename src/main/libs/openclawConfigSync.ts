@@ -52,7 +52,6 @@ import type { DingTalkInstanceConfig, EmailMultiInstanceConfig, FeishuInstanceCo
 import { DiscordDmPolicy } from '../im/types';
 import { OpenClawSessionKeepAlive } from '../openclawSessionPolicy/constants';
 import { buildOpenClawSessionConfig } from '../openclawSessionPolicy/store';
-import { EXCLUDED_SKILL_ENTRY_OVERRIDES } from '../skills/local/skillExclusions';
 import {
   getAllServerModelMetadata,
   listProviderSourceEntries,
@@ -2523,8 +2522,6 @@ export class OpenClawConfigSync {
         entries: {
           ...this.buildSkillEntries(),
           ...MANAGED_SKILL_ENTRY_OVERRIDES,
-          // Skills that need public internet are disabled for this build; see ../skills/local/skillExclusions.ts.
-          ...EXCLUDED_SKILL_ENTRY_OVERRIDES,
         },
         load: {
           extraDirs: this.resolveSkillsExtraDirs(),

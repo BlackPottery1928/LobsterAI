@@ -881,10 +881,7 @@ describe('OpenClawConfigSync runtime config output', () => {
       getSkillsList: () => [
         { id: 'technology-news-search', name: 'technology-search', enabled: false },
         { id: 'remotion', name: 'remotion-best-practices', enabled: false },
-        // Any bundled skill that this fork keeps; the excluded ones are forced
-        // off by EXCLUDED_SKILL_ENTRY_OVERRIDES, so they cannot stand in for
-        // "an ordinary enabled skill" here.
-        { id: 'docx', name: 'docx', enabled: true },
+        { id: 'weather', name: 'weather', enabled: true },
       ],
     });
 
@@ -895,7 +892,7 @@ describe('OpenClawConfigSync runtime config output', () => {
     expect(config.skills.entries).toMatchObject({
       'technology-search': { enabled: false },
       'remotion-best-practices': { enabled: false },
-      docx: { enabled: true },
+      weather: { enabled: true },
     });
     expect(config.skills.entries).not.toHaveProperty('technology-news-search');
     expect(config.skills.entries).not.toHaveProperty('remotion');
