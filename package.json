@@ -77,6 +77,7 @@
     "predist:linux": "npm run openclaw:runtime:linux-x64",
     "dist:linux": "npm run build && npm run compile:electron && npm run build:skills && electron-builder --linux --config scripts/electron-builder-config.cjs",
     "clean:release": "rimraf release",
+    "generate:app-icons": "electron scripts/generate-app-icons.mjs",
     "generate:tray-icons": "node scripts/generate-tray-icons.js",
     "setup:mingit": "node scripts/setup-mingit.js",
     "setup:python-runtime": "node scripts/setup-python-runtime.js",
@@ -107,7 +108,7 @@
     "dsh:runtime:url": "node scripts/set-dsh-runtime-url.cjs",
     "dsh:runtime:verify-urls": "node scripts/verify-dsh-runtime-urls.cjs",
     "dsh:e2e": "node scripts/e2e-dsh-foundation.cjs",
-    "regenerate:icon": "bash scripts/regenerate-mac-icon.sh",
+    "regenerate:icon": "electron scripts/generate-app-icons.mjs --only=icns",
     "fix:mac-icon": "bash scripts/fix-mac-icon-display.sh"
   },
   "dependencies": {
