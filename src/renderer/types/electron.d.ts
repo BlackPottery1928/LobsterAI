@@ -74,6 +74,11 @@ import type {
   DataMigrationLastRestoreResponse,
   DataMigrationRestoreScheduleResult,
 } from '../../shared/dataMigration/constants';
+import type {
+  DecisionModelConfigUpdate,
+  DecisionModelConfigView,
+  DecisionModelTestResult,
+} from '../../shared/decisionModel/constants';
 import type { EnterpriseQuotaRequestType } from '../../shared/enterpriseAccount/constants';
 import type {
   EnterpriseAccountContext,
@@ -219,6 +224,8 @@ interface CoworkSession {
   messages: CoworkMessage[];
   messagesOffset: number;
   totalMessages: number;
+  /** Start of the turn the first loaded message belongs to, when it began before messagesOffset. */
+  leadingTurnStartTimestamp?: number | null;
   parentSessionId?: string | null;
   forkedFromMessageId?: string | null;
   forkedAt?: number | null;
@@ -877,6 +884,11 @@ interface IElectronAPI {
     openWorkbench: () => Promise<{ url: string }>;
     stop: () => Promise<{ phase: string; port: number | null; version: string | null; errorCode: string | null }>;
   };
+  decisionModel: {
+    getConfig: () => Promise<DecisionModelConfigView>;
+    saveConfig: (update: DecisionModelConfigUpdate) => Promise<DecisionModelConfigView>;
+    testConnection: (draft: DecisionModelConfigUpdate) => Promise<DecisionModelTestResult>;
+  };
   openclaw: {
     engine: {
       getStatus: () => Promise<{ success: boolean; status?: OpenClawEngineStatus; error?: string }>;
@@ -1101,6 +1113,8 @@ interface IElectronAPI {
       messages?: CoworkMessage[];
       offset?: number;
       total?: number;
+      /** Start of the turn the page's first message belongs to (see CoworkSession). */
+      leadingTurnStartTimestamp?: number | null;
       error?: string;
     }>;
     getSessionSearchMessages: (options: {

@@ -2249,7 +2249,7 @@ describe('OpenClawConfigSync runtime config output', () => {
       reasoning: true,
       input: ['text', 'image', 'video'],
       contextWindow: 1_048_576,
-      maxTokens: 8192,
+      maxTokens: 1_048_576,
       thinkingLevelMap: {
         off: null,
         minimal: 'max',
@@ -2272,7 +2272,7 @@ describe('OpenClawConfigSync runtime config output', () => {
       reasoning: true,
       input: ['text', 'image', 'video'],
       contextWindow: 1_048_576,
-      maxTokens: 8192,
+      maxTokens: 1_048_576,
     });
     expect(config.agents.defaults.models['custom_0/kimi-k3']).toEqual({
       params: {
@@ -2702,6 +2702,39 @@ describe('OpenClawConfigSync runtime config output', () => {
     });
     expect(config.tools.deny).not.toContain('image_generate');
     expect(config.tools.deny).not.toContain('video_generate');
+  });
+
+  test('keeps the experimental decision model plugin disabled until it is active', async () => {
+    const sync = await createSync({
+      isDecisionModelActive: () => false,
+      getDecisionCallbackUrl: () => 'http://127.0.0.1:5175/decision/tool',
+    });
+
+    const result = sync.sync('decision-model-inactive');
+    expect(result.ok).toBe(true);
+
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(config.plugins.entries['lobster-decision']).toEqual({ enabled: false });
+  });
+
+  test('enables the decision model plugin with a bridge callback and no API key', async () => {
+    const sync = await createSync({
+      isDecisionModelActive: () => true,
+      getDecisionCallbackUrl: () => 'http://127.0.0.1:5175/decision/tool',
+    });
+
+    const result = sync.sync('decision-model-active');
+    expect(result.ok).toBe(true);
+
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(config.plugins.entries['lobster-decision']).toEqual({
+      enabled: true,
+      config: {
+        callbackUrl: 'http://127.0.0.1:5175/decision/tool',
+        secret: '${LOBSTER_MCP_BRIDGE_SECRET}',
+        requestTimeoutMs: 45000,
+      },
+    });
   });
 
   test.each([

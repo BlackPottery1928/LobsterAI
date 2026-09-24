@@ -69,6 +69,12 @@ export interface OpenClawSessionPolicyConfig {
 }
 
 // Cowork message metadata
+/** Live +N/-M line counts streamed while a file tool call's arguments are generated. */
+export interface CoworkLiveEditDiff {
+  added: number;
+  removed: number;
+}
+
 export interface CoworkMessageMetadata {
   toolName?: string;
   toolInput?: Record<string, unknown>;
@@ -80,6 +86,9 @@ export interface CoworkMessageMetadata {
   isStreaming?: boolean;
   isFinal?: boolean;
   isThinking?: boolean;
+  /** True while the model is still streaming this tool call's arguments. */
+  isGenerating?: boolean;
+  liveEditDiff?: CoworkLiveEditDiff;
   skillIds?: string[];
   kitIds?: string[];
   kitReferences?: KitReference[];
@@ -167,6 +176,11 @@ export interface CoworkSession {
   messagesOffset: number;
   /** Total number of messages stored for this session. */
   totalMessages: number;
+  /**
+   * Start of the turn the first loaded message belongs to, when that turn
+   * began before `messagesOffset`; anchors its elapsed time.
+   */
+  leadingTurnStartTimestamp?: number | null;
   parentSessionId?: string | null;
   forkedFromMessageId?: string | null;
   forkedAt?: number | null;

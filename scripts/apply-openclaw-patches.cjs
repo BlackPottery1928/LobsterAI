@@ -654,6 +654,15 @@ const v20260801StrongPatchValidators = {
       snippets: ['fast-forwards missed recurring jobs instead of replaying them'],
     },
   ],
+  'openclaw-exec-command-description.patch': [
+    {
+      file: 'src/agents/bash-tools.schemas.ts',
+      snippets: [
+        "in the user's language; shown to the user instead of the command.",
+        'description: execSchema.properties.description,',
+      ],
+    },
+  ],
   'openclaw-im-bound-agent-run-cwd.patch': [
     {
       file: 'src/agents/agent-scope-config.ts',
@@ -682,6 +691,15 @@ const v20260801StrongPatchValidators = {
       forbiddenSnippets: [
         "'@huggingface/transformers@3.0.2':",
         'onnxruntime-node@1.19.2:',
+      ],
+    },
+  ],
+  'openclaw-live-edit-diff-partial-args.patch': [
+    {
+      file: 'src/agents/embedded-agent-live-edit-diff.ts',
+      snippets: [
+        ': typeof block?.partialArgs === "string"',
+        '? block.partialArgs',
       ],
     },
   ],
@@ -1219,6 +1237,39 @@ const v20260801StrongPatchValidators = {
     },
   ],
 };
+
+v20260801StrongPatchValidators['zzz-openclaw-plugin-degraded-startup.patch'] = [
+  {
+    file: 'src/commands/doctor-config-preflight-startup.ts',
+    snippets: [
+      'setActiveDegradedPlugins(pluginConvergence.quarantinedPlugins)',
+      'params.startupMigrationWarnings.length > 0',
+      'throwStartupMigrationIdentityChanged()',
+    ],
+    forbiddenSnippets: ['pluginConvergence.blockingDiagnostic'],
+  },
+  {
+    file: 'src/commands/doctor-config-preflight-plugin-verification.ts',
+    snippets: ['failures: convergence.smokeFailures', 'failures: smoke.failures'],
+    forbiddenSnippets: ['blockingDiagnostic', '&& Boolean(failure.installPath)'],
+  },
+  {
+    file: 'src/plugins/discovery-availability.ts',
+    snippets: ['configDisposition: "preserve"', 'errorCode', 'createUnavailablePluginConfigPreserver'],
+  },
+  {
+    file: 'src/config/validation.ts',
+    snippets: ['availability.createUnavailablePluginConfigPreserver'],
+  },
+  {
+    file: 'src/plugins/doctor-compatibility-migration.ts',
+    snippets: ['cloneConfigWithResolutionFacts(params.config)', 'config: params.config, changes: [], warnings: [warning]'],
+  },
+  {
+    file: 'src/flows/plugin-health-availability.ts',
+    snippets: ['error instanceof HealthCheckRegistrationError', 'describePluginAvailabilityFailure'],
+  },
+];
 
 const strongPatchValidators = openclawVersion === 'v2026.8.1'
   ? v20260801StrongPatchValidators

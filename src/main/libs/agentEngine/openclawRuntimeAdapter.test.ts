@@ -10716,3 +10716,88 @@ test('settle failure ends only its own yielded request', () => {
   failure(turn.runId);
   expect(error).toHaveBeenCalledTimes(1);
 });
+
+test('tool input_delta shows a generating step that the start event completes', () => {
+  const { session, store } = createReconcileStore([
+    { id: 'msg-1', type: 'user', content: 'write the script', timestamp: 1, metadata: {} },
+  ]);
+  const adapter = new OpenClawRuntimeAdapter(store, {});
+  const sessionKey = `agent:main:lobsterai:${session.id}`;
+  const turn = createActiveTurn(session.id, sessionKey, 'run-generating');
+  session.status = 'running';
+  adapter.activeTurns.set(session.id, turn);
+  adapter.sessionIdByRunId.set(turn.runId, session.id);
+  const updates: Array<{ messageId: string; metadata?: Record<string, unknown> }> = [];
+  adapter.on('messageUpdate', (_sessionId: string, messageId: string, _content: string, metadata?: Record<string, unknown>) => {
+    updates.push({ messageId, metadata });
+  });
+  const inputDelta = (diff: { added: number; removed: number }, seq: number) => adapter.handleAgentEvent({
+    runId: turn.runId,
+    sessionKey,
+    stream: 'tool',
+    data: { toolCallId: 'call-1', phase: 'input_delta', name: 'write', diff },
+  }, seq);
+
+  inputDelta({ added: 12, removed: 0 }, 1);
+  const generating = session.messages.find((message) => message.type === 'tool_use');
+  expect(generating?.metadata).toMatchObject({
+    toolName: 'write',
+    toolUseId: 'call-1',
+    isGenerating: true,
+    liveEditDiff: { added: 12, removed: 0 },
+  });
+
+  inputDelta({ added: 40, removed: 2 }, 2);
+  expect(session.messages.filter((message) => message.type === 'tool_use')).toHaveLength(1);
+  expect(generating?.metadata?.liveEditDiff).toEqual({ added: 40, removed: 2 });
+
+  adapter.handleAgentEvent({
+    runId: turn.runId,
+    sessionKey,
+    stream: 'tool',
+    data: { toolCallId: 'call-1', phase: 'start', name: 'write', args: { path: '/tmp/build.py', content: 'print(1)\n' } },
+  }, 3);
+  const toolUses = session.messages.filter((message) => message.type === 'tool_use');
+  expect(toolUses).toHaveLength(1);
+  expect(toolUses[0].metadata).toMatchObject({
+    toolInput: { path: '/tmp/build.py', content: 'print(1)\n' },
+    isGenerating: false,
+  });
+  expect(updates.at(-1)?.metadata?.isGenerating).toBe(false);
+  expect(turn.generatingToolCallIds?.has('call-1')).toBe(false);
+
+  // A late delta after start must not erase the real input.
+  inputDelta({ added: 41, removed: 2 }, 4);
+  expect(toolUses[0].metadata?.toolInput).toEqual({ path: '/tmp/build.py', content: 'print(1)\n' });
+});
+
+test('tool input_delta is ignored in plan mode and for stale runs', () => {
+  const { session, store } = createReconcileStore([
+    { id: 'msg-1', type: 'user', content: 'plan it', timestamp: 1, metadata: {} },
+  ]);
+  const adapter = new OpenClawRuntimeAdapter(store, {});
+  const sessionKey = `agent:main:lobsterai:${session.id}`;
+  const turn = { ...createActiveTurn(session.id, sessionKey, 'run-plan'), planMode: true };
+  session.status = 'running';
+  adapter.activeTurns.set(session.id, turn);
+  adapter.sessionIdByRunId.set(turn.runId, session.id);
+
+  adapter.handleAgentEvent({
+    runId: turn.runId,
+    sessionKey,
+    stream: 'tool',
+    data: { toolCallId: 'call-1', phase: 'input_delta', name: 'write', diff: { added: 3, removed: 0 } },
+  }, 1);
+  expect(session.messages.some((message) => message.type === 'tool_use')).toBe(false);
+
+  // A retry superseded the first run: deltas still tagged with the old run id are stale.
+  turn.planMode = false;
+  turn.knownRunIds.add('run-plan-retry');
+  adapter.handleAgentEvent({
+    runId: 'run-plan',
+    sessionKey,
+    stream: 'tool',
+    data: { toolCallId: 'call-2', phase: 'input_delta', name: 'write', diff: { added: 3, removed: 0 } },
+  }, 2);
+  expect(session.messages.some((message) => message.type === 'tool_use')).toBe(false);
+});

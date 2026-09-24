@@ -2119,7 +2119,7 @@ const App: React.FC = () => {
       <SubscriptionTrialCampaign
         privacyAgreed={privacyAgreed}
         taskCreatedSignal={trialTaskCreatedSignal}
-        enabled={privacyAgreed === true && !isEnterpriseAccount && !isOverlayActive && hasResolvedEngineStartupOverlayState && !isEngineStartupOverlayVisible}
+        enabled={privacyAgreed === true && !isOverlayActive && hasResolvedEngineStartupOverlayState && !isEngineStartupOverlayVisible}
       />
       <StartupCreditCampaign
         enabled={privacyAgreed === true && !isEnterpriseAccount}

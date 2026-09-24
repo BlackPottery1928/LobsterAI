@@ -10,6 +10,7 @@ import {
   normalizeBrowserWebAccessConfig,
 } from '../../shared/browserWebAccess/constants';
 import { DataMigrationRestoreStatus } from '../../shared/dataMigration/constants';
+import type { DecisionModelConfigUpdate } from '../../shared/decisionModel/constants';
 import {
   normalizeNotificationSettings,
   TaskCompletionNotificationMode,
@@ -63,6 +64,7 @@ import Modal from './common/Modal';
 import DreamingRecoveryNotice from './cowork/DreamingRecoveryNotice';
 import DreamingSettingsSection from './cowork/DreamingSettingsSection';
 import EmbeddingSettingsSection from './cowork/EmbeddingSettingsSection';
+import DecisionModelExperimentalSettings from './DecisionModelExperimentalSettings';
 import DshExperimentalSettings from './DshExperimentalSettings';
 import ErrorMessage from './ErrorMessage';
 import BrainIcon from './icons/BrainIcon';
@@ -1461,6 +1463,8 @@ const Settings: React.FC<SettingsProps> = ({
 
   // Plugin settings handle (deferred save)
   const pluginsSettingsRef = useRef<PluginsSettingsHandle>(null);
+  // Unsaved edits from the experimental decision model card (deferred save)
+  const decisionModelDraftRef = useRef<DecisionModelConfigUpdate | null>(null);
 
   // Add state for active provider
   const [activeProvider, setActiveProvider] = useState<ProviderType>(getDefaultActiveProvider());
@@ -3591,6 +3595,13 @@ const Settings: React.FC<SettingsProps> = ({
         }
       }
 
+      // Decision model edits save with the dialog, so switching the tool on
+      // or off restarts the gateway once, on Save, rather than per field.
+      if (decisionModelDraftRef.current) {
+        await window.electron.decisionModel.saveConfig(decisionModelDraftRef.current);
+        decisionModelDraftRef.current = null;
+      }
+
       if (usageAnalyticsEnabled) {
         if (previousConfig.language !== language) {
           reportGeneralSettingChanged('language', language, previousConfig.language);
@@ -4851,7 +4862,12 @@ const Settings: React.FC<SettingsProps> = ({
   const renderTabContent = () => {
     switch(activeTab) {
       case 'experimental':
-        return <DshExperimentalSettings />;
+        return (
+          <div className="space-y-4">
+            <DshExperimentalSettings />
+            <DecisionModelExperimentalSettings draftRef={decisionModelDraftRef} />
+          </div>
+        );
       case 'general':
         return (
           <div className="space-y-8">

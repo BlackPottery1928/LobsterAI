@@ -20,6 +20,7 @@ import {
 } from '../../shared/browserWebAccess/constants';
 import { COWORK_TEMP_DIR_NAME } from '../../shared/cowork/constants';
 import { CoworkErrorModelSource } from '../../shared/cowork/errorDetail';
+import { DECISION_MODEL_PLUGIN_ID } from '../../shared/decisionModel/constants';
 import { WeixinPlugin } from '../../shared/im/weixin';
 import { normalizeMcpServerUrlInput } from '../../shared/mcp/url';
 import { OPENCLAW_PLUGIN_INDEX_MANAGED_KEYS, OpenClawSkillReviewMode } from '../../shared/openclawEngine/constants';
@@ -1847,6 +1848,9 @@ type OpenClawConfigSyncDeps = {
   getResolvedMcpServers?: () => ResolvedMcpServer[];
   getAskUserCallbackUrl?: () => string | null;
   getMediaCallbackUrl?: () => string | null;
+  getDecisionCallbackUrl?: () => string | null;
+  /** The experimental decision model is switched on and has a usable key. */
+  isDecisionModelActive?: () => boolean;
   getBrowserCallbackUrl?: () => string | null;
   getLobsterBrowserMcpCommand?: () => string | null;
   getLobsterBrowserMcpStdioLaunch?: () => LobsterBrowserMcpStdioLaunch | null;
@@ -1879,6 +1883,8 @@ export class OpenClawConfigSync {
   private readonly getResolvedMcpServers?: () => ResolvedMcpServer[];
   private readonly getAskUserCallbackUrl?: () => string | null;
   private readonly getMediaCallbackUrl?: () => string | null;
+  private readonly getDecisionCallbackUrl?: () => string | null;
+  private readonly isDecisionModelActive?: () => boolean;
   private readonly getBrowserCallbackUrl?: () => string | null;
   private readonly getLobsterBrowserMcpCommand?: () => string | null;
   private readonly getLobsterBrowserMcpStdioLaunch?: () => LobsterBrowserMcpStdioLaunch | null;
@@ -1912,6 +1918,8 @@ export class OpenClawConfigSync {
     this.getResolvedMcpServers = deps.getResolvedMcpServers;
     this.getAskUserCallbackUrl = deps.getAskUserCallbackUrl;
     this.getMediaCallbackUrl = deps.getMediaCallbackUrl;
+    this.getDecisionCallbackUrl = deps.getDecisionCallbackUrl;
+    this.isDecisionModelActive = deps.isDecisionModelActive;
     this.getBrowserCallbackUrl = deps.getBrowserCallbackUrl;
     this.getLobsterBrowserMcpCommand = deps.getLobsterBrowserMcpCommand;
     this.getLobsterBrowserMcpStdioLaunch = deps.getLobsterBrowserMcpStdioLaunch;
@@ -2338,6 +2346,7 @@ export class OpenClawConfigSync {
     );
     const hasAskUserPlugin = isBundledPluginAvailable('ask-user-question');
     const hasMediaGenPlugin = isBundledPluginAvailable('lobster-media-generation');
+    const hasDecisionPlugin = isBundledPluginAvailable(DECISION_MODEL_PLUGIN_ID);
     // Runtime-bundled xai extension (dist/extensions/xai): provides the Grok
     // model compat hooks (e.g. only grok-4.3 accepts reasoningEffort) plus the
     // OAuth refresh hook for credentials in the auth-profiles store. Declare
@@ -2594,6 +2603,8 @@ export class OpenClawConfigSync {
             : {}),
           ...(hasAskUserPlugin ? { 'ask-user-question': { enabled: true } } : {}),
           ...(hasMediaGenPlugin ? { 'lobster-media-generation': { enabled: true } } : {}),
+          // Experimental; enabled below only once the user turns it on.
+          ...(hasDecisionPlugin ? { [DECISION_MODEL_PLUGIN_ID]: { enabled: false } } : {}),
           ...(hasModelCompatConfig
             ? {
                 [OPENCLAW_MODEL_COMPAT_PLUGIN_ID]: {
@@ -2735,6 +2746,24 @@ export class OpenClawConfigSync {
           callbackUrl: mediaCallbackUrl,
           secret: '${LOBSTER_MCP_BRIDGE_SECRET}',
           requestTimeoutMs: 150000,
+        },
+      };
+    }
+
+    // Sync the experimental decision model plugin. The API key never enters
+    // openclaw.json: the tool calls back into LobsterAI, which owns the key.
+    const decisionCallbackUrl = this.getDecisionCallbackUrl?.();
+    if (hasDecisionPlugin && decisionCallbackUrl && this.isDecisionModelActive?.() && managedConfig.plugins) {
+      const plugins = managedConfig.plugins as Record<string, unknown>;
+      const entries = plugins.entries as Record<string, Record<string, unknown>>;
+      entries[DECISION_MODEL_PLUGIN_ID] = {
+        enabled: true,
+        config: {
+          callbackUrl: decisionCallbackUrl,
+          secret: '${LOBSTER_MCP_BRIDGE_SECRET}',
+          // Longer than the provider timeout in main, so callers get its
+          // structured timeout error instead of a dropped connection.
+          requestTimeoutMs: 45000,
         },
       };
     }

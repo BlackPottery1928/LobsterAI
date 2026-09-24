@@ -270,6 +270,7 @@ import { registerAgentHandlers } from './ipcHandlers/agents';
 import { registerAsrIpcHandlers } from './ipcHandlers/asr';
 import { registerBrowserCredentialHandlers } from './ipcHandlers/browserCredentials/handlers';
 import { registerCoworkSubagentHandlers } from './ipcHandlers/coworkSubagent';
+import { isDecisionModelFeatureActive, registerDecisionModelHandlers } from './ipcHandlers/decisionModel/handlers';
 import { ensureDshEngineReady, registerDshHandlers } from './ipcHandlers/dsh/handlers';
 import { registerEnterpriseAccountHandlers } from './ipcHandlers/enterpriseAccount';
 import { registerIntranetAuthIpcHandlers } from './ipcHandlers/intranetAuth/handlers'; // [INTRA-ONLY]
@@ -2627,6 +2628,8 @@ const getOpenClawConfigSync = (): OpenClawConfigSync => {
       },
       getAskUserCallbackUrl: () => getMcpRuntime().getAskUserCallbackUrl(),
       getMediaCallbackUrl: () => getMcpRuntime().getMediaCallbackUrl(),
+      getDecisionCallbackUrl: () => getMcpRuntime().getDecisionCallbackUrl(),
+      isDecisionModelActive: () => isDecisionModelFeatureActive(getStore()),
       getBrowserCallbackUrl: () => getMcpRuntime().getBrowserCallbackUrl(),
       getLobsterBrowserMcpCommand: () => {
         const mcpRuntime = getMcpRuntime();
@@ -9355,6 +9358,12 @@ if (!gotTheLock) {
 
   registerMcpHandlers({ getMcpRuntime, syncOpenClawConfig });
 
+  registerDecisionModelHandlers({
+    getStore: () => getStore(),
+    setDecisionToolHandler: handler => getMcpRuntime().setDecisionToolHandler(handler),
+    syncOpenClawConfig,
+  });
+
   registerDshHandlers({
     getStore: () => getStore(),
     getProviders: () => {
@@ -10450,11 +10459,15 @@ if (!gotTheLock) {
 
   ipcMain.handle('cowork:session:get', async (_event, sessionId: string) => {
     try {
-      const session = getCoworkStore().getSession(sessionId);
+      const store = getCoworkStore();
+      const session = store.getSession(sessionId);
       if (session) {
         console.log(
           `[CoworkIPC] loaded session ${sessionId}; returned ${session.messages.length} of ${session.totalMessages} messages from offset ${session.messagesOffset}.`,
         );
+        if (session.messagesOffset > 0) {
+          session.leadingTurnStartTimestamp = store.getTurnStartTimestampAt(sessionId, session.messagesOffset);
+        }
       } else {
         console.warn(`[CoworkIPC] session ${sessionId} was not found during load.`);
       }
@@ -10529,7 +10542,10 @@ if (!gotTheLock) {
         console.log(
           `[CoworkIPC] loaded message page for session ${sessionId}; returned ${messages.length} of ${total} messages from offset ${offset} with limit ${limit}.`,
         );
-        return { success: true, messages, offset, total };
+        const leadingTurnStartTimestamp = offset > 0 && messages.length > 0
+          ? store.getTurnStartTimestampAt(sessionId, offset)
+          : null;
+        return { success: true, messages, offset, total, leadingTurnStartTimestamp };
       } catch (error) {
         return {
           success: false,

@@ -1812,6 +1812,7 @@ class CoworkService {
                 messages: pageResult.messages,
                 messagesOffset: returnedOffset,
                 totalMessages: pageResult.total ?? session.totalMessages,
+                leadingTurnStartTimestamp: pageResult.leadingTurnStartTimestamp ?? null,
               };
               this.logDiagnostic(
                 'debug',
@@ -1938,6 +1939,7 @@ class CoworkService {
         messages: result.messages,
         messagesOffset: result.offset ?? offset,
         totalMessages: result.total ?? totalMessages,
+        leadingTurnStartTimestamp: result.leadingTurnStartTimestamp ?? null,
         preserveCurrentTotal: store.getState().cowork.currentSession!.totalMessages > totalMessages,
       }));
       return true;
@@ -1989,7 +1991,12 @@ class CoworkService {
         );
         return false;
       }
-      store.dispatch(prependMessages({ sessionId, messages: result.messages, newOffset }));
+      store.dispatch(prependMessages({
+        sessionId,
+        messages: result.messages,
+        newOffset,
+        leadingTurnStartTimestamp: result.leadingTurnStartTimestamp ?? null,
+      }));
       const nextCount = store.getState().cowork.currentSession?.messages.length ?? currentMessageCount;
       this.logDiagnostic(
         'info',
