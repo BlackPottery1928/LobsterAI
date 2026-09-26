@@ -222,4 +222,16 @@ describe('packaging filters', () => {
       expect(command, `${name} must load scripts/electron-builder-config.cjs`).toContain('scripts/electron-builder-config.cjs');
     }
   });
+
+  test('ships the config into the packaged app so installed builds can hide and clean up excluded skills', () => {
+    for (const platform of ['mac', 'win', 'linux']) {
+      const shipped = config[platform].extraResources.filter(
+        (resource: { from: string; to: string }) => resource.from === 'skill-exclusions.json',
+      );
+      expect(shipped, `${platform} must ship skill-exclusions.json into Resources`).toEqual([
+        { from: 'skill-exclusions.json', to: 'skill-exclusions.json' },
+      ]);
+    }
+    expect(fs.existsSync(path.join(REPO_ROOT, 'skill-exclusions.json'))).toBe(true);
+  });
 });

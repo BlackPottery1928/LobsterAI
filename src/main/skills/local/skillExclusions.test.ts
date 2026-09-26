@@ -19,7 +19,8 @@ import {
   getExcludedSkillIds,
   isSkillExcluded,
   parseExcludedSkillIds,
-  readExcludedSkillIdsFromRepo,
+  readExcludedSkillIdsFromRoot,
+  removeExcludedSkillCopies,
   resetSkillExclusionsCacheForTests,
 } from './skillExclusions';
 
@@ -38,10 +39,15 @@ function writeConfig(root: string, content: string): string {
   return root;
 }
 
+function setResourcesPath(value: string | undefined): void {
+  (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = value;
+}
+
 afterEach(() => {
   resetSkillExclusionsCacheForTests();
   appState.isPackaged = false;
   appState.appPath = '';
+  setResourcesPath(undefined);
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -57,26 +63,57 @@ test('parseExcludedSkillIds keeps trimmed string ids and ignores anything else',
   expect(parseExcludedSkillIds('web-search')).toEqual([]);
 });
 
-test('readExcludedSkillIdsFromRepo tolerates a missing or malformed config', () => {
-  expect(readExcludedSkillIdsFromRepo(tempDir())).toEqual([]);
+test('readExcludedSkillIdsFromRoot tolerates a missing or malformed config', () => {
+  expect(readExcludedSkillIdsFromRoot(tempDir())).toEqual([]);
   const malformed = writeConfig(tempDir(), '{ not json');
-  expect(readExcludedSkillIdsFromRepo(malformed)).toEqual([]);
+  expect(readExcludedSkillIdsFromRoot(malformed)).toEqual([]);
   const valid = writeConfig(tempDir(), JSON.stringify({ version: 1, exclusions: ['web-search'] }));
-  expect(readExcludedSkillIdsFromRepo(valid)).toEqual(['web-search']);
+  expect(readExcludedSkillIdsFromRoot(valid)).toEqual(['web-search']);
 });
 
-test('hides excluded skills in development and reads nothing once packaged', () => {
+test('reads the repo config in development and the Resources copy when packaged', () => {
   appState.appPath = writeConfig(tempDir(), JSON.stringify({ version: 1, exclusions: ['web-search', 'weather'] }));
-
-  expect(isSkillExcluded('web-search')).toBe(true);
-  expect(isSkillExcluded('docx')).toBe(false);
   expect([...getExcludedSkillIds()].sort()).toEqual(['weather', 'web-search']);
+  expect(isSkillExcluded('docx')).toBe(false);
 
   appState.isPackaged = true;
-  appState.appPath = tempDir();
+  setResourcesPath(writeConfig(tempDir(), JSON.stringify({ version: 1, exclusions: ['seedance'] })));
+  resetSkillExclusionsCacheForTests();
+  expect([...getExcludedSkillIds()]).toEqual(['seedance']);
+  expect(isSkillExcluded('web-search')).toBe(false);
+
+  // A package built before the config was shipped has no exclusions to apply.
+  setResourcesPath(tempDir());
   resetSkillExclusionsCacheForTests();
   expect(getExcludedSkillIds().size).toBe(0);
-  expect(isSkillExcluded('web-search')).toBe(false);
+});
+
+test('removeExcludedSkillCopies deletes only the excluded user-data copies', () => {
+  appState.appPath = writeConfig(tempDir(), JSON.stringify({ version: 1, exclusions: ['web-search', 'weather'] }));
+  const skillsRoot = tempDir();
+  for (const id of ['web-search', 'weather', 'docx']) {
+    fs.mkdirSync(path.join(skillsRoot, id), { recursive: true });
+    fs.writeFileSync(path.join(skillsRoot, id, 'SKILL.md'), 'fixture');
+  }
+  fs.writeFileSync(path.join(skillsRoot, 'skills.config.json'), '{}');
+
+  expect(removeExcludedSkillCopies(skillsRoot)).toEqual({ removed: ['web-search', 'weather'], failed: [] });
+  expect(fs.existsSync(path.join(skillsRoot, 'web-search'))).toBe(false);
+  expect(fs.existsSync(path.join(skillsRoot, 'weather'))).toBe(false);
+  expect(fs.existsSync(path.join(skillsRoot, 'docx', 'SKILL.md'))).toBe(true);
+  expect(fs.existsSync(path.join(skillsRoot, 'skills.config.json'))).toBe(true);
+  // Idempotent: nothing left to remove.
+  expect(removeExcludedSkillCopies(skillsRoot)).toEqual({ removed: [], failed: [] });
+});
+
+test('removeExcludedSkillCopies has nothing to do without exclusions', () => {
+  appState.isPackaged = true;
+  setResourcesPath(tempDir());
+  const skillsRoot = tempDir();
+  fs.mkdirSync(path.join(skillsRoot, 'web-search'), { recursive: true });
+
+  expect(removeExcludedSkillCopies(skillsRoot)).toEqual({ removed: [], failed: [] });
+  expect(fs.existsSync(path.join(skillsRoot, 'web-search'))).toBe(true);
 });
 
 test('agrees with the repo config that packaged builds exclude', () => {

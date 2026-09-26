@@ -45,6 +45,10 @@
   ],
   "extraResources": [
     {
+      "from": "skill-exclusions.json",
+      "to": "skill-exclusions.json"
+    },
+    {
       "from": ".keyfrom-build",
       "to": "keyfrom",
       "filter": [

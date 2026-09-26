@@ -16,7 +16,7 @@ import { appendPythonRuntimeToEnv } from '../libs/pythonRuntime';
 import { mergeReports,scanMultipleSkillDirs } from '../libs/skillSecurity/skillSecurityScanner';
 import type { SecurityReportAction,SkillSecurityReport } from '../libs/skillSecurity/skillSecurityTypes';
 import { SqliteStore } from '../sqliteStore';
-import { isSkillExcluded } from './local/skillExclusions';
+import { isSkillExcluded, removeExcludedSkillCopies } from './local/skillExclusions';
 import {
   createSkillChangeBatch,
   type SkillChangeBatch,
@@ -411,6 +411,7 @@ const SKILLS_DIR_NAME = 'SKILLs';
 const SKILL_FILE_NAME = 'SKILL.md';
 const SKILLS_CONFIG_FILE = 'skills.config.json';
 const SKILL_STATE_KEY = 'skills_state';
+const EXCLUDED_SKILLS_CLEANUP_KEY = 'skill_exclusions_cleanup';
 const WATCH_DEBOUNCE_MS = 250;
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
@@ -1484,6 +1485,31 @@ export class SkillManager {
     }
   }
 
+  /**
+   * One-shot removal of user-data copies of excluded skills.
+   *
+   * The marker is recorded once the run completes so later version updates never
+   * repeat the deletion. A directory that could not be removed (locked by another
+   * process) leaves the marker unset, so the next launch retries.
+   */
+  private cleanupExcludedSkillCopiesOnce(userRoot: string): void {
+    const store = this.getStore();
+    if (store.get(EXCLUDED_SKILLS_CLEANUP_KEY)) return;
+
+    const { removed, failed } = removeExcludedSkillCopies(userRoot);
+    if (failed.length > 0) {
+      console.warn(`[skills] Excluded-skill cleanup will retry on the next launch; still present: ${failed.join(', ')}`);
+      return;
+    }
+
+    store.set(EXCLUDED_SKILLS_CLEANUP_KEY, {
+      version: app.getVersion(),
+      removed,
+      completedAt: Date.now(),
+    });
+    console.log(`[skills] Excluded-skill cleanup complete: ${removed.length} removed (version ${app.getVersion()})`);
+  }
+
   syncBundledSkillsToUserData(): void {
     console.log('[skills] syncBundledSkillsToUserData: start', { packaged: app.isPackaged });
     const userRoot = this.ensureSkillsRoot();
@@ -1496,6 +1522,11 @@ export class SkillManager {
     }
 
     try {
+      // Excluded skills must not linger in this profile: OpenClaw loads skills
+      // from the user-data directory, so a copy left by an earlier sync would
+      // stay callable even though the skill is hidden and not packaged.
+      this.cleanupExcludedSkillCopiesOnce(userRoot);
+
       // Build allowlist of bundled skill IDs from skills.config.json so
       // user-added skill folders that happen to sit in the bundled root
       // (e.g. restored by the installer's AppData backup) are not synced

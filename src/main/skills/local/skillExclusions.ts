@@ -31,12 +31,12 @@ export const parseExcludedSkillIds = (parsed: unknown): string[] => {
 };
 
 /**
- * Read the exclusions from `<repoRoot>/skill-exclusions.json`. A missing or
- * malformed file means no exclusions: development must still start, and the
+ * Read the exclusions from `<rootDir>/skill-exclusions.json`. A missing or
+ * malformed file means no exclusions: the app must still start, and the
  * packaging build is where a bad config is rejected.
  */
-export const readExcludedSkillIdsFromRepo = (repoRoot: string): string[] => {
-  const configPath = path.join(repoRoot, CONFIG_FILE_NAME);
+export const readExcludedSkillIdsFromRoot = (rootDir: string): string[] => {
+  const configPath = path.join(rootDir, CONFIG_FILE_NAME);
   if (!fs.existsSync(configPath)) return [];
   try {
     return parseExcludedSkillIds(JSON.parse(fs.readFileSync(configPath, 'utf8')));
@@ -46,18 +46,30 @@ export const readExcludedSkillIdsFromRepo = (repoRoot: string): string[] => {
   }
 };
 
-/** Excluded skill ids for this run; always empty in a packaged app. */
+/**
+ * Directory holding the config for this run. A packaged app reads the copy
+ * electron-builder places in Resources (see `extraResources` in
+ * electron-builder.json), so an installed app can hide and clean up skills that
+ * an earlier version synced into user data; development reads the repo copy.
+ */
+const resolveConfigRoot = (): string | null => {
+  if (app.isPackaged) {
+    return process.resourcesPath || null;
+  }
+  return app.getAppPath();
+};
+
+/** Excluded skill ids for this run; empty when no config is available. */
 export const getExcludedSkillIds = (): ReadonlySet<string> => {
   if (cachedExcludedSkillIds) return cachedExcludedSkillIds;
 
   cachedExcludedSkillIds = new Set();
   try {
-    if (!app.isPackaged) {
-      const ids = readExcludedSkillIdsFromRepo(app.getAppPath());
-      cachedExcludedSkillIds = new Set(ids);
-      if (ids.length > 0) {
-        console.log(`[skills] Excluded skills hidden in development: ${ids.join(', ')}`);
-      }
+    const configRoot = resolveConfigRoot();
+    const ids = configRoot ? readExcludedSkillIdsFromRoot(configRoot) : [];
+    cachedExcludedSkillIds = new Set(ids);
+    if (ids.length > 0) {
+      console.log(`[skills] Excluded skills hidden: ${ids.join(', ')}`);
     }
   } catch (error) {
     console.warn('[skills] Failed to read skill exclusions:', error);
@@ -71,6 +83,35 @@ export const getExcludedSkillIds = (): ReadonlySet<string> => {
  * like a package.
  */
 export const isSkillExcluded = (skillId: string): boolean => getExcludedSkillIds().has(skillId);
+
+/**
+ * Delete user-data copies of excluded skills.
+ *
+ * OpenClaw discovers skills by scanning `skills.load.extraDirs`, which is the
+ * user-data skills directory, so a copy left there stays callable even when
+ * LobsterAI hides the skill. Fresh installs never seed these copies, but
+ * development profiles and upgraded installs can hold ones from an earlier sync.
+ *
+ * A directory that could not be removed is reported in `failed` instead of
+ * throwing: a locked directory must not break startup.
+ */
+export const removeExcludedSkillCopies = (skillsRoot: string): { removed: string[]; failed: string[] } => {
+  const removed: string[] = [];
+  const failed: string[] = [];
+  for (const id of getExcludedSkillIds()) {
+    const target = path.join(skillsRoot, id);
+    if (!fs.existsSync(target)) continue;
+    try {
+      fs.rmSync(target, { recursive: true, force: true });
+      console.log(`[skills] Removed user-data copy of excluded skill "${id}"`);
+      removed.push(id);
+    } catch (error) {
+      console.warn(`[skills] Failed to remove user-data copy of excluded skill "${id}":`, error);
+      failed.push(id);
+    }
+  }
+  return { removed, failed };
+};
 
 /** Test-only: drop the memoized exclusions so a different app path can be read. */
 export const resetSkillExclusionsCacheForTests = (): void => {
