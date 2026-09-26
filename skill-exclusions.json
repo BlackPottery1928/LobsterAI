@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "exclusions": [
+    "content-planner",
+    "daily-trending",
+    "develop-web-game",
+    "films-search",
+    "imap-smtp-email",
+    "music-search",
+    "remotion",
+    "seedance",
+    "seedream",
+    "skill-vetter",
+    "skin-creator",
+    "stock-analyzer",
+    "stock-announcements",
+    "stock-explorer",
+    "technology-news-search",
+    "weather",
+    "web-search",
+    "youdaonote"
+  ]
+}

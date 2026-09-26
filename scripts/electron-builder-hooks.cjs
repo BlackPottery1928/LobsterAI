@@ -21,6 +21,7 @@ const { verifyOpenClawPluginSdkBridge } = require('./openclaw-plugin-sdk-bridge.
 const { createOpenClawWindowsPayload } = require('./openclaw-windows-payload.cjs');
 const { pruneOpenClawMacPayload } = require('./openclaw-mac-payload.cjs');
 const { configureBetterSqlite3MacPayload } = require('./better-sqlite3-mac-payload.cjs');
+const { createSkillExclusionFilter, loadSkillExclusions } = require('./skill-exclusions.cjs');
 
 function isWindowsTarget(context) {
   return context?.electronPlatformName === 'win32';
@@ -547,6 +548,7 @@ function installSkillDependencies() {
   console.log('[electron-builder-hooks] Installing skill dependencies...');
 
   const entries = readdirSync(skillsDir);
+  const excludedSkillIds = loadSkillExclusions().idSet;
   let installedCount = 0;
   let skippedCount = 0;
   let failedCount = 0;
@@ -555,6 +557,11 @@ function installSkillDependencies() {
     const skillPath = path.join(skillsDir, entry);
     const stat = statSync(skillPath);
     if (!stat.isDirectory()) continue;
+
+    if (excludedSkillIds.has(entry)) {
+      console.log(`[electron-builder-hooks]   ${entry}: excluded from packaging, skipping dependency install`);
+      continue;
+    }
 
     const packageJsonPath = path.join(skillPath, 'package.json');
     const nodeModulesPath = path.join(skillPath, 'node_modules');
@@ -729,6 +736,8 @@ async function beforePack(context) {
         label: 'SKILLs',
         dir: path.join(__dirname, '..', 'SKILLs'),
         prefix: 'SKILLs',
+        // Skills listed in skill-exclusions.json are never packed.
+        filter: createSkillExclusionFilter(),
       },
       {
         label: 'Python runtime',

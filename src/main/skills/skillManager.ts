@@ -16,6 +16,7 @@ import { appendPythonRuntimeToEnv } from '../libs/pythonRuntime';
 import { mergeReports,scanMultipleSkillDirs } from '../libs/skillSecurity/skillSecurityScanner';
 import type { SecurityReportAction,SkillSecurityReport } from '../libs/skillSecurity/skillSecurityTypes';
 import { SqliteStore } from '../sqliteStore';
+import { isSkillExcluded } from './local/skillExclusions';
 import {
   createSkillChangeBatch,
   type SkillChangeBatch,
@@ -1517,6 +1518,11 @@ export class SkillManager {
       console.log('[skills] syncBundledSkillsToUserData: found', bundledSkillDirs.length, 'bundled skills');
       bundledSkillDirs.forEach((dir) => {
         const id = path.basename(dir);
+        // Excluded skills are not packaged, so do not seed user data with them in development.
+        if (isSkillExcluded(id)) {
+          console.log(`[skills] syncBundledSkillsToUserData: skipping excluded "${id}"`);
+          return;
+        }
         if (bundledIds && !bundledIds.has(id)) {
           console.log(`[skills] syncBundledSkillsToUserData: skipping non-bundled "${id}"`);
           return;
@@ -1681,6 +1687,8 @@ export class SkillManager {
       const skillDirs = listSkillDirs(root);
       skillDirs.forEach(dir => {
         const skillId = path.basename(dir);
+        // Excluded skills are absent from a package; hide them in development too.
+        if (isSkillExcluded(skillId)) return;
         if (skillId === ComputerUseSkillId.BuiltIn && !isComputerUseKitInstalled(this.getStore())) {
           return;
         }
