@@ -22,6 +22,7 @@ const { createOpenClawWindowsPayload } = require('./openclaw-windows-payload.cjs
 const { pruneOpenClawMacPayload } = require('./openclaw-mac-payload.cjs');
 const { configureBetterSqlite3MacPayload } = require('./better-sqlite3-mac-payload.cjs');
 const { createSkillExclusionFilter, loadSkillExclusions } = require('./skill-exclusions.cjs');
+const { ensureSkillPythonDeps } = require('./setup-skill-python-deps.js');
 
 function isWindowsTarget(context) {
   return context?.electronPlatformName === 'win32';
@@ -725,6 +726,15 @@ async function beforePack(context) {
 
     const outputTar = path.join(buildTarDir, 'win-resources.tar');
     const runtimeRoot = path.join(__dirname, '..', 'vendor', 'openclaw-runtime', 'current');
+
+    // The SKILLs and python-win sources below are snapshotted into the tar, so
+    // the pinned Python dependencies have to be installed into the runtime
+    // before it is packed. Preparing the runtime here also guarantees the
+    // python-win source exists: packing skips a missing source silently, and
+    // the installer rejects a tar without it.
+    await ensurePortablePythonRuntime({ required: true });
+    await ensureSkillPythonDeps({ required: true });
+
     const sources = [
       {
         label: 'OpenClaw runtime',
@@ -765,7 +775,9 @@ async function beforePack(context) {
     return;
   }
 
-  console.log('[electron-builder-hooks] Windows target detected, ensuring portable Python runtime is prepared...');
+  // Already prepared before the tar was packed; this re-checks that the runtime
+  // that went into the tar is the healthy one (and is a no-op when it is).
+  console.log('[electron-builder-hooks] Windows target detected, verifying portable Python runtime...');
   await ensurePortablePythonRuntime({ required: true });
   const runtimeRoot = path.join(__dirname, '..', 'resources', 'python-win');
   const runtimeHealth = checkRuntimeHealth(runtimeRoot, { requirePip: true });

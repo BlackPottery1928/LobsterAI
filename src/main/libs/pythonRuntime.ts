@@ -7,6 +7,8 @@ import { repairPipShims } from './pythonPipShim';
 
 const PYTHON_RUNTIME_DIR_NAME = 'python-win';
 const PYTHON_RUNTIME_STATE_FILE = 'runtime.json';
+/** Written by scripts/setup-skill-python-deps.js when it preinstalls skill dependencies. */
+const PYTHON_DEPS_MANIFEST_FILE = 'python-deps-manifest.json';
 
 const REQUIRED_FILES = [
   'python.exe',
@@ -82,6 +84,55 @@ function ensureEmbedSitePackages(rootDir: string): void {
   if (normalized !== raw) {
     fs.writeFileSync(pthPath, normalized, 'utf8');
   }
+}
+
+/**
+ * Identifier of the skill dependency set baked into a Python runtime root, or
+ * `null` when the runtime carries no manifest (development trees and builds
+ * made before this feature). A missing or malformed manifest deliberately reads
+ * as "none": config problems must fail the packaging build loudly, never make a
+ * shipped app re-copy the runtime on every launch.
+ */
+export function readDepsManifestId(rootDir: string): string | null {
+  try {
+    const raw = fs.readFileSync(path.join(rootDir, PYTHON_DEPS_MANIFEST_FILE), 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    const manifestId = (parsed as { manifestId?: unknown } | null)?.manifestId;
+    return typeof manifestId === 'string' && manifestId.length > 0 ? manifestId : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the user runtime must be re-synced from the bundled one because the
+ * bundled skill dependencies changed.
+ *
+ * An unversioned bundled runtime never triggers a re-sync, so development
+ * behavior and builds without preinstalled dependencies are unchanged.
+ */
+export function shouldResyncPythonRuntime(input: {
+  bundledManifestId: string | null;
+  userManifestId: string | null;
+}): boolean {
+  if (!input.bundledManifestId) {
+    return false;
+  }
+  return input.bundledManifestId !== input.userManifestId;
+}
+
+function needsDependencyResync(userRoot: string): boolean {
+  const bundledRoot = getBundledPythonRoot();
+  const bundledManifestId = bundledRoot ? readDepsManifestId(bundledRoot) : null;
+  const userManifestId = readDepsManifestId(userRoot);
+  const needed = shouldResyncPythonRuntime({ bundledManifestId, userManifestId });
+  if (needed) {
+    console.log(
+      `[python-runtime] Bundled skill dependencies changed (${userManifestId ?? 'none'} -> ${bundledManifestId}): `
+      + 're-syncing the user runtime',
+    );
+  }
+  return needed;
 }
 
 function appendWindowsPath(current: string | undefined, entries: string[]): string | undefined {
@@ -176,6 +227,7 @@ function ensureRuntimeStateFile(runtimeRoot: string, sourceRoot: string): void {
     syncedAt: Date.now(),
     sourceRoot,
     signature: computeRuntimeSignature(runtimeRoot),
+    depsManifestId: readDepsManifestId(runtimeRoot),
   };
   fs.writeFileSync(statePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
@@ -259,7 +311,7 @@ export async function ensurePythonRuntimeReady(): Promise<{ success: boolean; er
       convergeUserPipShims(userRoot);
     }
     const userHealth = runtimeHealth(userRoot);
-    if (userHealth.ok) {
+    if (userHealth.ok && !needsDependencyResync(userRoot)) {
       ensureRuntimeStateFile(userRoot, 'existing-user-runtime');
       if (!hasPipSupport(userRoot)) {
         console.warn('[python-runtime] User runtime is ready without full pip support; pip commands may fail.');

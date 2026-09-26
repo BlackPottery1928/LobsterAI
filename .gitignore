@@ -21,6 +21,9 @@ vendor/dsh-dist/
 # Tar archives generated during Windows packaging
 build-tar/
 
+# Build caches that must never reach an installer (see docs/skill-python-deps.md)
+.cache/
+
 # Bundled PortableGit for Windows builds (downloaded via scripts/setup-mingit.js)
 resources/mingit/
 resources/MinGit-*.zip
