@@ -91,10 +91,33 @@ decision, not an oversight:
 | `pytesseract` | Needs the tesseract binary, which is not a pip package. |
 | poppler | `pdf2image` shells out to `pdftoppm`; not distributable through pip. |
 | tesseract | OCR of scanned documents; not a pip package. |
-| LibreOffice | Some document-to-PDF conversions in `docx` / `pptx`; not a pip package. |
+| LibreOffice | Not a pip package. Only one built-in skill truly depends on it: `xlsx/scripts/recalc.py` (formula recalculation, an all-or-nothing dependency). `docx`/`pptx` use `soffice` only for optional validation (`ooxml/scripts/pack.py` warns and skips when absent) and slide thumbnails (`pptx/scripts/thumbnail.py`, which needs `pdftoppm` too). Not bundled: a Windows install is ~400-500 MB unpacked, roughly doubling an installer whose resource tar is already ~517 MB, and it cannot ride the wheel cache — it would need its own download/extract/PATH pipeline. |
 
 The non-pip entries cannot be solved by pip at all — the affected skills need the
 user to provide the binary.
+
+### LibreOffice cannot be fixed by bundling it
+
+Worth recording, because it is the obvious-looking answer and it does not work.
+`xlsx/scripts/recalc.py` sets up its recalc macro in a profile directory derived
+from the platform, but only handles two cases:
+
+```python
+if platform.system() == 'Darwin':
+    macro_dir = '~/Library/Application Support/LibreOffice/4/user/basic/Standard'
+else:
+    macro_dir = '~/.config/libreoffice/4/user/basic/Standard'   # Windows lands here too
+```
+
+On Windows, LibreOffice reads its profile from `%APPDATA%\LibreOffice\4\user\...`,
+not `~/.config`. So the macro is written where LibreOffice never looks, and
+`setup_libreoffice_macro()` reports the macro as unconfigured — **even if
+LibreOffice were installed, and therefore even if it were bundled.**
+
+Making xlsx formula recalculation work on Windows is a skill-side fix: add a
+Windows branch pointing at `%APPDATA%\LibreOffice\4\user\basic\Standard`, and let
+the user install LibreOffice. That is a few lines in the skill, versus ~400-500 MB
+of binary in every installer.
 
 ## Building
 

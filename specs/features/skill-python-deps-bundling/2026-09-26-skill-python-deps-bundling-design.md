@@ -26,8 +26,12 @@ Windows 安装包已经内置了可移植 CPython 3.11.9（`resources/python-win
 
 - **仅 Windows**。只有 Windows 打包 Python 运行时，mac/linux 检测到无内置运行时即跳过并打日志，
   `dist:mac` / `dist:linux` 行为完全不变。
-- **不处理非 pip 的系统二进制**：poppler（`pdf2image`）、tesseract（OCR）、LibreOffice（文档转 PDF）
+- **不处理非 pip 的系统二进制**：poppler（`pdf2image`/`pdftoppm`）、tesseract（OCR）、LibreOffice
   无法通过 pip 分发，在 `docs/skill-python-deps.md` 里记录为已知限制，不做打包。
+  其中 LibreOffice **单独论证过不内置**：体积约 400~500 MB（会让 517 MB 的 tar 翻倍）、走不了
+  wheel 缓存（要另做一套下载/解压/PATH 管线，与"少改原生代码"冲突），而且**内置了也没用** ——
+  `xlsx/scripts/recalc.py` 的宏目录只判了 macOS 和 Unix 两种路径，Windows 落进 `~/.config/...`，
+  而 LibreOffice 在 Windows 上读 `%APPDATA%\LibreOffice\...`，宏永远找不到。
 - **不做用户自扩展依赖**：只预装内置技能的依赖。用户自定义技能需要的额外包没有受支持入口，
   只能首次运行时联网安装 —— 这正是本能力为内置技能解决的问题。
 - **不做已装依赖的卸载/回收**：`pip install` 不会主动移除不再需要的包，残留包无害。
