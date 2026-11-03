@@ -1,4 +1,4 @@
-import { ArchiveBoxIcon, ArrowPathIcon, ArrowPathRoundedSquareIcon, ChatBubbleLeftIcon, CheckCircleIcon, CpuChipIcon, CubeIcon, EnvelopeIcon, ExclamationTriangleIcon, GlobeAltIcon, InformationCircleIcon, MagnifyingGlassIcon, QuestionMarkCircleIcon, SignalIcon, SunIcon, TrashIcon, WrenchScrewdriverIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { ArchiveBoxIcon, ArrowPathIcon, ArrowPathRoundedSquareIcon, CheckCircleIcon, CpuChipIcon, CubeIcon, ExclamationTriangleIcon, GlobeAltIcon, InformationCircleIcon, MagnifyingGlassIcon, QuestionMarkCircleIcon, SignalIcon, SunIcon, TrashIcon, WrenchScrewdriverIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import React, { useCallback,useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
@@ -917,6 +917,7 @@ const SettingsSlidersIcon: React.FC<{ className?: string }> = ({ className }) =>
   </svg>
 );
 
+/*
 const DreamingTabIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg
     width="34"
@@ -933,6 +934,7 @@ const DreamingTabIcon: React.FC<{ className?: string }> = ({ className }) => (
     />
   </svg>
 );
+*/
 
 // A desktop screen with the floating orb docked on its corner.
 const FloatingOrbTabIcon: React.FC<{ className?: string }> = ({ className }) => (

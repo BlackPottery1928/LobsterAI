@@ -1291,16 +1291,13 @@ class AuthService {
   }
 
   /**
-   * Load public pricing catalog models for unauthenticated read-only display.
+   * Requests the public pricing catalog for a logged-out read-only load.
+   * The retry/backoff chain lives in runServerModelLoad, the same chain the
+   * logged-in path uses; the two only differ in the request body.
    */
-  private async loadPublicPricingCatalogModels() {
-    if (!SERVER_PLAN_MODELS_ENABLED) {
-      return;
-    }
-    const authStateAtStart = store.getState().auth;
-    if (authStateAtStart.isLoggedIn || authStateAtStart.ownerAccountKey) {
-      return;
-    }
+  private async requestPublicPricingCatalogModels(
+    requestSnapshot: AuthAccountRequestSnapshot,
+  ): Promise<ServerModelLoadOutcome> {
     try {
       const catalogResult = await window.electron.auth.getPricingCatalog();
       if (!isAuthAccountRequestCurrent(requestSnapshot, store.getState().auth)) {

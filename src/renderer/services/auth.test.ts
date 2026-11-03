@@ -590,6 +590,14 @@ describe('quota checks', () => {
 });
 
 describe('server model loading', () => {
+  const serverModel = {
+    modelId: 'qwen3.7-plus',
+    modelName: 'Qwen3.7 Plus',
+    provider: 'LobsterAI',
+    apiFormat: 'openai',
+    accessible: true,
+  };
+
   const signIn = (ownerAccountKey = 'personal:tester') => {
     store.dispatch(setLoggedIn({
       user: { yid: 'tester', nickname: 'Tester', avatarUrl: null },
@@ -597,6 +605,10 @@ describe('server model loading', () => {
       ownerAccountKey,
     }));
   };
+
+  const planModelIds = (): string[] => store.getState().model.availableModels
+    .filter(model => model.isServerModel)
+    .map(model => model.id);
 
   test('does not request or dispatch server models while disabled', async () => {
     const getModels = vi.fn();
