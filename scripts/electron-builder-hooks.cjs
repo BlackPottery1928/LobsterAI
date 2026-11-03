@@ -21,6 +21,8 @@ const { verifyOpenClawPluginSdkBridge } = require('./openclaw-plugin-sdk-bridge.
 const { createOpenClawWindowsPayload } = require('./openclaw-windows-payload.cjs');
 const { pruneOpenClawMacPayload } = require('./openclaw-mac-payload.cjs');
 const { configureBetterSqlite3MacPayload } = require('./better-sqlite3-mac-payload.cjs');
+const { createSkillExclusionFilter, loadSkillExclusions } = require('./skill-exclusions.cjs');
+const { ensureSkillPythonDeps } = require('./setup-skill-python-deps.js');
 const { prepareMacSkills, verifyPackagedMacSkills } = require('./skill-mac-dependencies.cjs');
 
 function isWindowsTarget(context) {
@@ -548,6 +550,7 @@ function installSkillDependencies() {
   console.log('[electron-builder-hooks] Installing skill dependencies...');
 
   const entries = readdirSync(skillsDir);
+  const excludedSkillIds = loadSkillExclusions().idSet;
   let installedCount = 0;
   let skippedCount = 0;
   let failedCount = 0;
@@ -556,6 +559,11 @@ function installSkillDependencies() {
     const skillPath = path.join(skillsDir, entry);
     const stat = statSync(skillPath);
     if (!stat.isDirectory()) continue;
+
+    if (excludedSkillIds.has(entry)) {
+      console.log(`[electron-builder-hooks]   ${entry}: excluded from packaging, skipping dependency install`);
+      continue;
+    }
 
     const packageJsonPath = path.join(skillPath, 'package.json');
     const nodeModulesPath = path.join(skillPath, 'node_modules');
@@ -722,6 +730,9 @@ async function beforePack(context) {
 
     const outputTar = path.join(buildTarDir, 'win-resources.tar');
     const runtimeRoot = path.join(__dirname, '..', 'vendor', 'openclaw-runtime', 'current');
+    await ensurePortablePythonRuntime({ required: true });
+    await ensureSkillPythonDeps({ required: true });
+
     const sources = [
       {
         label: 'OpenClaw runtime',
@@ -733,6 +744,7 @@ async function beforePack(context) {
         label: 'SKILLs',
         dir: path.join(__dirname, '..', 'SKILLs'),
         prefix: 'SKILLs',
+        filter: createSkillExclusionFilter(),
       },
       {
         label: 'Python runtime',

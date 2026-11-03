@@ -6,6 +6,10 @@ const config = require('../electron-builder.json');
 const { BuildEnv } = require('./build-env.cjs');
 const { readBuildKeyfrom } = require('./build-keyfrom.cjs');
 const { configureMacWebAuthnEntitlements } = require('./mac-webauthn-entitlements.cjs');
+const {
+  applySkillExclusionsToExtraResources,
+  loadSkillExclusions,
+} = require('./skill-exclusions.cjs');
 
 // Opt-in web installer (small NSIS stub that downloads the app package from a
 // CDN at install time). Default builds are full offline installers; nothing
@@ -101,6 +105,15 @@ const silentOnDoubleClick = isChannelBuild && isTruthyBuildEnv(BuildEnv.SilentOn
 
 for (const platformName of ['mac', 'win', 'linux']) {
   mergeExtraResources(platformName);
+}
+
+const { ids: excludedSkillIds, bundledCount } = loadSkillExclusions();
+applySkillExclusionsToExtraResources(config, ['mac', 'linux']);
+if (excludedSkillIds.length) {
+  console.log(
+    `[skill-exclusions] ${excludedSkillIds.length} of ${bundledCount} bundled skills excluded from packaging: `
+    + excludedSkillIds.join(', '),
+  );
 }
 
 configureMacWebAuthnEntitlements(config, process.env.APPLE_TEAM_ID);

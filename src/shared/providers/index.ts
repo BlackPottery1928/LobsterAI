@@ -2,8 +2,11 @@ export { resolveCodingPlanBaseUrl } from './codingPlan';
 export type { ProviderDef } from './constants';
 export {
   ApiFormat,
+  applyDefinitionOwnedProviderConfig,
+  applyDefinitionOwnedProviders,
   AuthType,
   OpenAIApiMode,
+  isDefinitionOwnedProvider,
   OpenClawApi,
   OpenClawProviderId,
   ProviderAuthType,

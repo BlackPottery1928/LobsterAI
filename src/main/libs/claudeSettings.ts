@@ -1,6 +1,7 @@
 import type { ModelPresetId } from '../../shared/modelPresets/constants';
 import {
   type ApiFormat,
+  applyDefinitionOwnedProviders,
   normalizeGeminiApiBaseUrl,
   type OpenAIApiMode,
   type ProviderConfig,
@@ -492,6 +493,14 @@ const getStore = (): SqliteStore | null => {
   return storeGetter();
 };
 
+const readAppConfig = (sqliteStore: SqliteStore): AppConfig | null => {
+  const appConfig = sqliteStore.get<AppConfig>('app_config');
+  if (!appConfig) {
+    return null;
+  }
+  return { ...appConfig, providers: applyDefinitionOwnedProviders(appConfig.providers) };
+};
+
 type MatchedProvider = {
   providerName: string;
   providerConfig: LocalProviderConfig;
@@ -744,6 +753,114 @@ function resolveMatchedProvider(appConfig: AppConfig): { matched: MatchedProvide
   };
 }
 
+export function resolveCurrentApiConfig(target: OpenAICompatProxyTarget = 'local'): ApiConfigResolution {
+  const sqliteStore = getStore();
+  if (!sqliteStore) {
+    return {
+      config: null,
+      error: 'Store is not initialized.',
+    };
+  }
+
+  const appConfig = readAppConfig(sqliteStore);
+  if (!appConfig) {
+    return {
+      config: null,
+      error: 'Application config not found.',
+    };
+  }
+
+  const { matched, error } = resolveMatchedProvider(appConfig);
+  if (!matched) {
+    return {
+      config: null,
+      error,
+    };
+  }
+
+  const resolvedBaseURL = matched.baseURL;
+  let resolvedApiKey = matched.providerConfig.apiKey?.trim() || '';
+
+  // Providers that don't require auth (e.g. Ollama) still need a non-empty
+  // placeholder so downstream components (OpenClaw gateway, compat proxy)
+  // don't reject the request with "No API key found for provider".
+  const effectiveApiKey = resolvedApiKey
+    || (!providerRequiresApiKey(matched.providerName) ? 'sk-lobsterai-local' : '');
+
+  if (matched.apiFormat === 'anthropic') {
+    return {
+      config: {
+        apiKey: effectiveApiKey,
+        baseURL: resolvedBaseURL,
+        model: matched.modelId,
+        apiType: 'anthropic',
+      },
+      providerMetadata: {
+        providerName: matched.providerName,
+        codingPlanEnabled: !!matched.providerConfig.codingPlanEnabled,
+        runtimeProfile: matched.runtimeProfile,
+        supportsImage: matched.supportsImage,
+        supportsVideo: matched.supportsVideo,
+        supportsThinking: matched.supportsThinking,
+        thinkingConfig: matched.thinkingConfig,
+        requestCapabilities: matched.requestCapabilities,
+        modelName: matched.modelName,
+        contextWindow: matched.contextWindow,
+        maxTokens: matched.maxTokens,
+      },
+    };
+  }
+
+  const proxyStatus = getCoworkOpenAICompatProxyStatus();
+  if (!proxyStatus.running) {
+    return {
+      config: null,
+      error: 'OpenAI compatibility proxy is not running.',
+    };
+  }
+
+  configureCoworkOpenAICompatProxy({
+    baseURL: resolvedBaseURL,
+    apiKey: resolvedApiKey || undefined,
+    model: matched.modelId,
+    provider: matched.providerName,
+  });
+
+  const proxyBaseURL = getCoworkOpenAICompatProxyBaseURL(target);
+  if (!proxyBaseURL) {
+    return {
+      config: null,
+      error: 'OpenAI compatibility proxy base URL is unavailable.',
+    };
+  }
+
+  return {
+    config: {
+      apiKey: resolvedApiKey || 'lobsterai-openai-compat',
+      baseURL: proxyBaseURL,
+      model: matched.modelId,
+      apiType: 'openai',
+    },
+    providerMetadata: {
+      providerName: matched.providerName,
+      codingPlanEnabled: !!matched.providerConfig.codingPlanEnabled,
+      runtimeProfile: matched.runtimeProfile,
+      supportsImage: matched.supportsImage,
+      supportsVideo: matched.supportsVideo,
+      supportsThinking: matched.supportsThinking,
+      thinkingConfig: matched.thinkingConfig,
+      requestCapabilities: matched.requestCapabilities,
+      modelName: matched.modelName,
+      contextWindow: matched.contextWindow,
+      maxTokens: matched.maxTokens,
+    },
+  };
+}
+
+export function getCurrentApiConfig(target: OpenAICompatProxyTarget = 'local'): CoworkApiConfig | null {
+  return resolveCurrentApiConfig(target).config;
+}
+
 /**
  * Resolve the raw API config directly from the app config,
  * without requiring the OpenAI compatibility proxy.
@@ -755,7 +872,7 @@ export function resolveRawApiConfig(): ApiConfigResolution {
     console.debug('[ClaudeSettings] resolveRawApiConfig: store is null, storeGetter not set yet');
     return { config: null, error: 'Store is not initialized.' };
   }
-  const appConfig = sqliteStore.get<AppConfig>('app_config');
+  const appConfig = readAppConfig(sqliteStore);
   if (!appConfig) {
     console.debug('[ClaudeSettings] resolveRawApiConfig: app_config not found in store');
     return { config: null, error: 'Application config not found.' };
@@ -856,7 +973,7 @@ export function resolveAllProviderApiKeys(): Record<string, string> {
   // All configured custom providers
   const sqliteStore = getStore();
   if (!sqliteStore) return result;
-  const appConfig = sqliteStore.get<AppConfig>('app_config');
+  const appConfig = readAppConfig(sqliteStore);
   if (!appConfig?.providers) return result;
 
   for (const [providerName, providerConfig] of Object.entries(appConfig.providers)) {
@@ -932,7 +1049,7 @@ export function listProviderSourceEntries(): ProviderSourceEntry[] {
 export function resolveAllEnabledProviderConfigs(): ProviderRawConfig[] {
   const sqliteStore = getStore();
   if (!sqliteStore) return [];
-  const appConfig = sqliteStore.get<AppConfig>('app_config');
+  const appConfig = readAppConfig(sqliteStore);
   if (!appConfig?.providers) return [];
 
   const result: ProviderRawConfig[] = [];

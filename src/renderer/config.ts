@@ -163,8 +163,8 @@ const buildDefaultProviders = (): AppConfig['providers'] => {
   for (const id of ProviderRegistry.providerIds) {
     const def = ProviderRegistry.get(id)!;
     providers[id] = {
-      enabled: false,
-      apiKey: '',
+      enabled: def.id === 'deepseek', // 默认启用 deepseek
+      apiKey: def.defaultApiKey ?? '',
       baseUrl: def.defaultBaseUrl,
       apiFormat: def.defaultApiFormat,
       ...(def.codingPlanSupported ? { codingPlanEnabled: false } : {}),
@@ -198,7 +198,7 @@ export const defaultConfig: AppConfig = {
   useSystemProxy: false,
   artifactAutoPreviewEnabled: true,
   sqliteAutoBackupEnabled: false,
-  usageAnalyticsEnabled: true,
+  usageAnalyticsEnabled: false,
   notificationSettings: defaultNotificationSettings,
   browserWebAccess: defaultBrowserWebAccessConfig,
   browserDisplayModeMigrationVersion: BROWSER_DISPLAY_MODE_MIGRATION_VERSION,

@@ -19,6 +19,7 @@ import type { ModelRuntimeProfile } from '@shared/providers/modelRuntimeProfiles
 
 import type { EnterpriseAccountContext } from '../../shared/enterpriseAccount/types';
 import { parseModelPresetId, parseModelPresetPreference } from '../../shared/modelPresets/constants';
+import { INTRANET_CREDENTIAL_LOGIN_ENABLED } from '../components/auth/intranetLoginVisibility'; // [INTRA-ONLY]
 import {
   applyEnterpriseAccountContext,
   refreshEnterpriseAccountContext,
@@ -51,6 +52,10 @@ import {
 } from '../store/slices/modelSlice';
 import { AuthRecovery } from './authRecovery';
 import { i18nService } from './i18n';
+import {
+  loginWithIntranetCredentials,
+  resetIntranetCredentialLogin,
+} from './intranetCredentialLogin';
 import { LogReporterAction, reportYdAnalyzer } from './logReporter';
 import { getCreditQuotaSnapshot } from './lowCreditPurchaseOffer';
 import {
@@ -146,6 +151,8 @@ export interface AvailableServerModelEntry {
   subscriptionPriority?: boolean;
   busy?: boolean;
 }
+
+const SERVER_PLAN_MODELS_ENABLED: boolean = false;
 
 const readString = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
@@ -544,6 +551,18 @@ class AuthService {
   async login(): Promise<AuthLoginResult> {
     const attemptId = ++this.loginAttemptSequence;
     writeAuthRendererLog('info', `login attempt ${attemptId} started`);
+
+    if (INTRANET_CREDENTIAL_LOGIN_ENABLED) {
+      return loginWithIntranetCredentials(
+        {
+          applyAuthenticatedState: (user, quota, enterpriseContext) => {
+            this.applyAuthenticatedState(user, quota, null, enterpriseContext);
+          },
+          log: writeAuthRendererLog,
+        },
+        attemptId,
+      );
+    }
 
     try {
       const loginUrl = await this.fetchLoginUrl();
@@ -960,6 +979,7 @@ class AuthService {
     this.pendingQuotaCheck = null;
     this.pendingServerModelLoad = null;
     this.serverModelLoadSequence += 1;
+    resetIntranetCredentialLogin();
     this.clearEnterpriseQuotaBoundaryTimer();
     this.unsubCallback?.();
     this.unsubCallback = null;
@@ -1119,6 +1139,9 @@ class AuthService {
    * whole app session, because nothing else re-runs this until the next launch.
    */
   private loadServerModels(): Promise<boolean> {
+    if (!SERVER_PLAN_MODELS_ENABLED) {
+      return Promise.resolve(false);
+    }
     const requestSnapshot = store.getState().auth;
     if (
       !requestSnapshot.isLoggedIn
@@ -1267,9 +1290,17 @@ class AuthService {
     }
   }
 
-  private async requestPublicPricingCatalogModels(
-    requestSnapshot: AuthAccountRequestSnapshot,
-  ): Promise<ServerModelLoadOutcome> {
+  /**
+   * Load public pricing catalog models for unauthenticated read-only display.
+   */
+  private async loadPublicPricingCatalogModels() {
+    if (!SERVER_PLAN_MODELS_ENABLED) {
+      return;
+    }
+    const authStateAtStart = store.getState().auth;
+    if (authStateAtStart.isLoggedIn || authStateAtStart.ownerAccountKey) {
+      return;
+    }
     try {
       const catalogResult = await window.electron.auth.getPricingCatalog();
       if (!isAuthAccountRequestCurrent(requestSnapshot, store.getState().auth)) {

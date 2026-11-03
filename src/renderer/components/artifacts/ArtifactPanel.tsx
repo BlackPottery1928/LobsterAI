@@ -120,8 +120,10 @@ import {
   getArtifactBrowserUrlType,
   reportArtifactPreviewAction,
 } from './artifactAnalytics';
+import { ARTIFACT_DEPLOY_HIDDEN } from './artifactDeployVisibility';
 import { useOptionalArtifactFileShare } from './ArtifactFileShareController';
 import {
+  ARTIFACT_SHARE_HIDDEN,
   type ArtifactFileShareRequest as HtmlSharePendingRequest,
   ArtifactFileShareRequestSource as HtmlSharePendingSource,
 } from './artifactFileSharePolicy';
@@ -5157,7 +5159,10 @@ const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
     }
   })();
   const browserPublishAction: BrowserPublishAction | undefined = (() => {
-    if (browserToolbarPublishTarget?.kind === ArtifactToolbarPublishActionKind.Share) {
+    if (
+      !ARTIFACT_SHARE_HIDDEN
+      && browserToolbarPublishTarget?.kind === ArtifactToolbarPublishActionKind.Share
+    ) {
       return {
         kind: ArtifactToolbarPublishActionKind.Share,
         label: t('htmlShare'),
@@ -5166,7 +5171,10 @@ const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
         onClick: handleShareBrowserHtmlArtifact,
       };
     }
-    if (browserToolbarPublishTarget?.kind === ArtifactToolbarPublishActionKind.Deploy) {
+    if (
+      !ARTIFACT_DEPLOY_HIDDEN
+      && browserToolbarPublishTarget?.kind === ArtifactToolbarPublishActionKind.Deploy
+    ) {
       return {
         kind: ArtifactToolbarPublishActionKind.Deploy,
         label: browserDeploymentActionLabel,
@@ -5210,7 +5218,7 @@ const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
                 {selectedArtifact.fileName || selectedArtifact.title}
               </span>
               <span className="flex-1" />
-              {artifactToolbarPublishTarget && (
+              {!ARTIFACT_SHARE_HIDDEN && artifactToolbarPublishTarget && (
                 <button
                   type="button"
                   onClick={handleShareSelectedArtifact}
@@ -7305,7 +7313,7 @@ const BrowserTabContent: React.FC<BrowserTabContentProps> = ({
 
   useEffect(() => {
     if (currentUrl) return;
-    void loadLocalServices();
+    // void loadLocalServices();
   }, [currentUrl, loadLocalServices]);
 
   useEffect(() => {
@@ -8344,7 +8352,7 @@ const BrowserTabContent: React.FC<BrowserTabContentProps> = ({
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 items-center justify-center overflow-auto px-6 py-10">
+        <div className="hidden flex-1 items-center justify-center overflow-auto px-6 py-10">
           <div className="w-full max-w-[420px]">
             <div className="mb-3 flex items-center justify-between px-1">
               <div className="text-xs text-muted">{t('artifactBrowserLocalServices')}</div>

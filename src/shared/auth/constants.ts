@@ -26,6 +26,7 @@ export interface AuthLoginResult {
   success: boolean;
   redirectUrl?: string;
   error?: string;
+  cancelled?: boolean;
 }
 
 export const AuthSessionStatus = {

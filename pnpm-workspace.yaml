@@ -1,0 +1,7 @@
+allowBuilds:
+  bufferutil: true
+  esbuild: true
+  koffi: true
+  protobufjs: true
+  selection-hook: true
+  utf-8-validate: true

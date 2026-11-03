@@ -17,6 +17,7 @@ import { mergeReports,scanMultipleSkillDirs } from '../libs/skillSecurity/skillS
 import type { SecurityReportAction,SkillSecurityReport } from '../libs/skillSecurity/skillSecurityTypes';
 import { SqliteStore } from '../sqliteStore';
 import { removeRetiredBundledSkills, removeRetiredSkillEntries, RETIRED_BUNDLED_SKILL_IDS } from './retiredBundledSkills';
+import { isSkillExcluded, removeExcludedSkillCopies } from './local/skillExclusions';
 import {
   createSkillChangeBatch,
   type SkillChangeBatch,
@@ -414,6 +415,7 @@ const SKILL_FILE_NAME = 'SKILL.md';
 const SKILL_META_FILE_NAME = '_meta.json';
 const SKILLS_CONFIG_FILE = 'skills.config.json';
 const SKILL_STATE_KEY = 'skills_state';
+const EXCLUDED_SKILLS_CLEANUP_KEY = 'skill_exclusions_cleanup';
 const WATCH_DEBOUNCE_MS = 250;
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
@@ -1682,6 +1684,24 @@ export class SkillManager {
     }
   }
 
+  private cleanupExcludedSkillCopiesOnce(userRoot: string): void {
+    const store = this.getStore();
+    if (store.get(EXCLUDED_SKILLS_CLEANUP_KEY)) return;
+
+    const { removed, failed } = removeExcludedSkillCopies(userRoot);
+    if (failed.length > 0) {
+      console.warn(`[skills] Excluded-skill cleanup will retry on the next launch; still present: ${failed.join(', ')}`);
+      return;
+    }
+
+    store.set(EXCLUDED_SKILLS_CLEANUP_KEY, {
+      version: app.getVersion(),
+      removed,
+      completedAt: Date.now(),
+    });
+    console.log(`[skills] Excluded-skill cleanup complete: ${removed.length} removed (version ${app.getVersion()})`);
+  }
+
   syncBundledSkillsToUserData(): void {
     console.log('[skills] syncBundledSkillsToUserData: start', { packaged: app.isPackaged });
     const userRoot = this.ensureSkillsRoot();
@@ -1697,6 +1717,8 @@ export class SkillManager {
     }
 
     try {
+      this.cleanupExcludedSkillCopiesOnce(userRoot);
+
       // Build allowlist of bundled skill IDs from skills.config.json so
       // user-added skill folders that happen to sit in the bundled root
       // (e.g. restored by the installer's AppData backup) are not synced
@@ -1719,6 +1741,11 @@ export class SkillManager {
       console.log('[skills] syncBundledSkillsToUserData: found', bundledSkillDirs.length, 'bundled skills');
       bundledSkillDirs.forEach((dir) => {
         const id = path.basename(dir);
+        // Excluded skills are not packaged, so do not seed user data with them in development.
+        if (isSkillExcluded(id)) {
+          console.log(`[skills] syncBundledSkillsToUserData: skipping excluded "${id}"`);
+          return;
+        }
         if (RETIRED_BUNDLED_SKILL_IDS.has(id)) return;
         if (bundledIds && !bundledIds.has(id)) {
           console.log(`[skills] syncBundledSkillsToUserData: skipping non-bundled "${id}"`);
@@ -1886,6 +1913,7 @@ export class SkillManager {
       skillDirs.forEach(dir => {
         const skillId = path.basename(dir);
         if (root !== primaryRoot && RETIRED_BUNDLED_SKILL_IDS.has(skillId)) return;
+        if (isSkillExcluded(skillId)) return;
         if (skillId === ComputerUseSkillId.BuiltIn && !isComputerUseKitInstalled(this.getStore())) {
           return;
         }

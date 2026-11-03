@@ -24,6 +24,7 @@ import { coworkService } from '../services/cowork';
 import { i18nService } from '../services/i18n';
 import { LogReporterAction } from '../services/logReporter';
 import type { RootState } from '../store';
+import { INTRANET_CREDENTIAL_LOGIN_ENABLED } from './auth/intranetLoginVisibility';
 import {
   reportStartupCreditCampaignEvent,
   StartupCreditCampaignSource,
@@ -725,7 +726,18 @@ const StartupCreditCampaign: React.FC<StartupCreditCampaignProps> = ({
       showTerminalView(CampaignModalView.StartingLogin);
       try {
         const loginResult = await authService.login();
-        if (!loginResult.success || !loginResult.redirectUrl) {
+        if (loginResult.cancelled) {
+          clearPendingStartupCreditClaim(localStorage);
+          if (mountedRef.current) {
+            setModalView(CampaignModalView.Offer);
+            modalOpenRef.current = false;
+            setModalOpen(false);
+          }
+          return;
+        }
+        
+        if (!loginResult.success
+            || (!INTRANET_CREDENTIAL_LOGIN_ENABLED && !loginResult.redirectUrl)) {
           throw new Error(
             loginResult.error || i18nService.t('startupCreditLoginFailed'),
           );

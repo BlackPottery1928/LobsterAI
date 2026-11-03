@@ -3,6 +3,7 @@ import { app } from 'electron';
 import { HtmlSharePublicRoute } from '../../shared/htmlShare/constants';
 import type { SqliteStore } from '../sqliteStore';
 import { resolveDevelopmentServerBaseUrl } from './developmentServerBaseUrl';
+import { getIntranetBaseUrl } from './intranetEndpoints';
 
 let cachedTestMode: boolean | null = null;
 let loggedDevelopmentServerBaseUrl: string | null = null;
@@ -52,16 +53,16 @@ export const getHtmlSharePublicBaseUrl = (): string => {
   return `${getServerApiBaseUrl()}${HtmlSharePublicRoute.Root}`;
 };
 
+const getUpdateCheckBaseUrl = (): string => getIntranetBaseUrl() ?? 'https://api-overmind.youdao.com';
+
+const getUpdateOvermindChannel = (): 'test' | 'prod' => (isTestModeEnabled() ? 'test' : 'prod');
+
 export const getUpdateCheckUrl = (): string => (
-  isTestModeEnabled()
-    ? 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/test/update'
-    : 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/prod/update'
+  `${getUpdateCheckBaseUrl()}/ai-platform/desktop/lobsterai/${getUpdateOvermindChannel()}/update`
 );
 
 export const getManualUpdateCheckUrl = (): string => (
-  isTestModeEnabled()
-    ? 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/test/update-manual'
-    : 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/prod/update-manual'
+  `${getUpdateCheckBaseUrl()}/ai-platform/desktop/lobsterai/${getUpdateOvermindChannel()}/update`
 );
 
 export const getFallbackDownloadUrl = (): string => (

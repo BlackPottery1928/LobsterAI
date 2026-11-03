@@ -77,7 +77,7 @@ import FeedbackDialog from './feedback/FeedbackDialog';
 import BrainIcon from './icons/BrainIcon';
 import EditIcon from './icons/EditIcon';
 import MessageCopyIcon from './icons/MessageCopyIcon';
-import PlugIcon from './icons/PlugIcon';
+// import PlugIcon from './icons/PlugIcon';
 import PlusCircleIcon from './icons/PlusCircleIcon';
 import IMSettings from './im/IMSettings';
 import PluginsSettings, { type PluginPendingChanges, type PluginsSettingsHandle } from './plugins/PluginsSettings';
@@ -810,12 +810,12 @@ const SETTINGS_TAB_SHORTCUT_COMMANDS: ShortcutCommandDefinition[] = [
   { key: ShortcutAction.OpenSettingsDesktopCompanion, tabLabelKey: 'desktopCompanionTitle' },
   { key: ShortcutAction.OpenSettingsAgentEngine, tabLabelKey: 'coworkAgentEngine' },
   { key: ShortcutAction.OpenSettingsModel, tabLabelKey: 'settingsCustomModel' },
-  { key: ShortcutAction.OpenSettingsIm, tabLabelKey: 'imBot' },
+  // { key: ShortcutAction.OpenSettingsIm, tabLabelKey: 'imBot' },
   { key: ShortcutAction.OpenSettingsBrowser, tabLabelKey: 'browserWebAccessTab' },
-  { key: ShortcutAction.OpenSettingsEmail, tabLabelKey: 'emailTab' },
+  // { key: ShortcutAction.OpenSettingsEmail, tabLabelKey: 'emailTab' },
   { key: ShortcutAction.OpenSettingsMemory, tabLabelKey: 'coworkMemoryTitle' },
-  { key: ShortcutAction.OpenSettingsDreaming, tabLabelKey: 'coworkMemoryTabDreaming' },
-  { key: ShortcutAction.OpenSettingsPlugins, tabLabelKey: 'pluginsTab' },
+  // { key: ShortcutAction.OpenSettingsDreaming, tabLabelKey: 'coworkMemoryTabDreaming' },
+  // { key: ShortcutAction.OpenSettingsPlugins, tabLabelKey: 'pluginsTab' },
   { key: ShortcutAction.OpenSettingsAbout, tabLabelKey: 'about' },
 ].map(command => ({
   ...command,
@@ -1426,7 +1426,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [autoLaunch, setAutoLaunchState] = useState(false);
   const [useSystemProxy, setUseSystemProxy] = useState(false);
   const [sqliteAutoBackupEnabled, setSqliteAutoBackupEnabled] = useState(false);
-  const [usageAnalyticsEnabled, setUsageAnalyticsEnabled] = useState(true);
+  const [usageAnalyticsEnabled, setUsageAnalyticsEnabled] = useState(false);
   const [taskCompletionNotificationMode, setTaskCompletionNotificationMode] =
     useState<TaskCompletionNotificationMode>(TaskCompletionNotificationMode.Unfocused);
   const [permissionNotificationsEnabled, setPermissionNotificationsEnabled] = useState(true);
@@ -1542,7 +1542,7 @@ const Settings: React.FC<SettingsProps> = ({
   const openaiIsOAuthMode = providers.openai.authType === 'oauth';
   // xAI likewise defaults to API key mode; OAuth is an explicit opt-in
   const xaiIsOAuthMode = providers.xai.authType === 'oauth';
-  const isBaseUrlLocked = (activeProvider === 'zhipu' && providers.zhipu.codingPlanEnabled) || (activeProvider === 'qwen' && providers.qwen.codingPlanEnabled) || (activeProvider === 'volcengine' && providers.volcengine.codingPlanEnabled) || (activeProvider === 'moonshot' && providers.moonshot.codingPlanEnabled) || (activeProvider === 'qianfan' && providers.qianfan.codingPlanEnabled) || (activeProvider === 'xiaomi' && providers.xiaomi.codingPlanEnabled) || (activeProvider === 'minimax' && minimaxIsOAuthMode) || (activeProvider === 'openai' && openaiIsOAuthMode) || (activeProvider === 'xai' && xaiIsOAuthMode);
+  const isBaseUrlLocked = (activeProvider === 'zhipu' && providers.zhipu.codingPlanEnabled) || (activeProvider === 'qwen' && providers.qwen.codingPlanEnabled) || (activeProvider === 'volcengine' && providers.volcengine.codingPlanEnabled) || (activeProvider === 'moonshot' && providers.moonshot.codingPlanEnabled) || (activeProvider === 'qianfan' && providers.qianfan.codingPlanEnabled) || (activeProvider === 'xiaomi' && providers.xiaomi.codingPlanEnabled) || (activeProvider === 'minimax' && minimaxIsOAuthMode) || (activeProvider === 'openai' && openaiIsOAuthMode) || (activeProvider === 'xai' && xaiIsOAuthMode) || (activeProvider === 'deepseek');
 
   // 创建引用来确保内容区域的滚动
   const contentRef = useRef<HTMLDivElement>(null);
@@ -4389,13 +4389,13 @@ const Settings: React.FC<SettingsProps> = ({
       { key: 'desktopCompanion' as TabType, label: i18nService.t('desktopCompanionTitle'), icon: <FloatingOrbTabIcon className="h-5 w-5" /> },
       { key: 'coworkAgentEngine' as TabType, label: i18nService.t('coworkAgentEngine'), icon: <CpuChipIcon className="h-5 w-5" /> },
       { key: 'model' as TabType,          label: i18nService.t('settingsCustomModel'), icon: <CubeIcon className="h-5 w-5" /> },
-      { key: 'im' as TabType,             label: i18nService.t('imBot'),          icon: <ChatBubbleLeftIcon className="h-5 w-5" /> },
+      // { key: 'im' as TabType,             label: i18nService.t('imBot'),          icon: <ChatBubbleLeftIcon className="h-5 w-5" /> },
       { key: 'browserWebAccess' as TabType, label: i18nService.t('browserWebAccessTab'), icon: <GlobeAltIcon className="h-5 w-5" /> },
-      { key: 'email' as TabType,          label: i18nService.t('emailTab'),       icon: <EnvelopeIcon className="h-5 w-5" /> },
+      // { key: 'email' as TabType,          label: i18nService.t('emailTab'),       icon: <EnvelopeIcon className="h-5 w-5" /> },
       { key: 'coworkMemory' as TabType,   label: i18nService.t('coworkMemoryTitle'), icon: <BrainIcon className="h-5 w-5" /> },
-      { key: 'coworkDreaming' as TabType, label: i18nService.t('coworkMemoryTabDreaming'), icon: <DreamingTabIcon className="h-5 w-5" /> },
-      { key: 'plugins' as TabType,        label: i18nService.t('pluginsTab'),     icon: <PlugIcon className="h-5 w-5" /> },
-      { key: 'experimental' as TabType,   label: i18nService.t('experimentalTab'), icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3v6.4c0 .35-.09.68-.27.98l-4.4 7.34A2 2 0 0 0 6.8 20.75h10.4a2 2 0 0 0 1.72-3.03l-4.4-7.34a1.9 1.9 0 0 1-.27-.98V3M8.25 3h7.5M7.5 14.25h9" /></svg> },
+      // { key: 'coworkDreaming' as TabType, label: i18nService.t('coworkMemoryTabDreaming'), icon: <DreamingTabIcon className="h-5 w-5" /> },
+      // { key: 'plugins' as TabType,        label: i18nService.t('pluginsTab'),     icon: <PlugIcon className="h-5 w-5" /> },
+      // { key: 'experimental' as TabType,   label: i18nService.t('experimentalTab'), icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3v6.4c0 .35-.09.68-.27.98l-4.4 7.34A2 2 0 0 0 6.8 20.75h10.4a2 2 0 0 0 1.72-3.03l-4.4-7.34a1.9 1.9 0 0 1-.27-.98V3M8.25 3h7.5M7.5 14.25h9" /></svg> },
       { key: 'shortcuts' as TabType,      label: i18nService.t('shortcuts'),      icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5"><rect x="2" y="4" width="20" height="14" rx="2" /><line x1="6" y1="8" x2="8" y2="8" /><line x1="10" y1="8" x2="12" y2="8" /><line x1="14" y1="8" x2="16" y2="8" /><line x1="6" y1="12" x2="8" y2="12" /><line x1="10" y1="12" x2="14" y2="12" /><line x1="16" y1="12" x2="18" y2="12" /><line x1="8" y1="15.5" x2="16" y2="15.5" /></svg> },
       { key: 'help' as TabType,           label: i18nService.t('helpAndFeedback'), icon: <QuestionMarkCircleIcon className="h-5 w-5" /> },
       { key: 'about' as TabType,          label: i18nService.t('about'),          icon: <InformationCircleIcon className="h-5 w-5" /> },
@@ -4952,16 +4952,18 @@ const Settings: React.FC<SettingsProps> = ({
                 />
               </SettingsRow>
 
-              <SettingsRow>
-                <SettingsToggleRow
-                  title={i18nService.t('usageAnalyticsEnabled')}
-                  description={i18nService.t('usageAnalyticsEnabledDescription')}
-                  checked={usageAnalyticsEnabled}
-                  onToggle={() => {
-                    setUsageAnalyticsEnabled((prev) => !prev);
-                  }}
-                />
-              </SettingsRow>
+              <div style={{ display: 'none' }}>
+                <SettingsRow>
+                  <SettingsToggleRow
+                    title={i18nService.t('usageAnalyticsEnabled')}
+                    description={i18nService.t('usageAnalyticsEnabledDescription')}
+                    checked={usageAnalyticsEnabled}
+                    onToggle={() => {
+                      setUsageAnalyticsEnabled((prev) => !prev);
+                    }}
+                  />
+                </SettingsRow>
+              </div>
             </SettingsGroup>
           </div>
         );
@@ -5002,7 +5004,7 @@ const Settings: React.FC<SettingsProps> = ({
                         </div>
 
                         {openClawGatewayHttpUrl ? (
-                          <div className="mt-3 flex max-w-full items-center gap-2 rounded-lg border border-border-subtle bg-surface-raised/60 p-1.5">
+                          <div className="mt-3 flex max-w-full items-center gap-2 rounded-lg border border-border-subtle bg-surface-raised/60 p-1.5" style={{ display: 'none' }}>
                             <span className={`shrink-0 rounded-md bg-background px-2 py-1 ${SETTINGS_META_TEXT} font-medium text-secondary`}>
                               {i18nService.t('openClawGatewayAddress')}
                             </span>
@@ -5318,7 +5320,7 @@ const Settings: React.FC<SettingsProps> = ({
       case 'coworkMemory': {
         const memoryTabs = [
           { key: 'entries' as const, titleKey: 'coworkMemoryTabEntries' },
-          { key: 'embedding' as const, titleKey: 'coworkMemoryTabEmbedding' },
+          // { key: 'embedding' as const, titleKey: 'coworkMemoryTabEmbedding' },
         ];
         const coworkMemoryGroups: Array<{ section?: string; entries: CoworkUserMemoryEntry[] }> = [];
         for (const entry of coworkMemoryEntries) {
@@ -5861,7 +5863,7 @@ const Settings: React.FC<SettingsProps> = ({
               <p className="mt-5 text-center text-xs text-secondary">
                 {i18nService.t('copyrightHolder')}
               </p>
-              <p className="mt-1 text-center text-xs text-secondary">
+              <p className="mt-1 text-center text-xs text-secondary" style={{ display: 'none' }}>
                 Copyright &copy; {new Date().getFullYear()} NetEase Youdao. All Rights Reserved.
               </p>
             </div>

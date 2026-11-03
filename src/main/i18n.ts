@@ -61,7 +61,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Quit confirmation (native dialog shown on user-initiated quit)
     appQuitConfirmTitle: '退出 LobsterAI？',
-    appQuitConfirmDetail: 'LobsterAI 关闭期间，定时任务不会运行，也无法回复 IM 消息。',
+    appQuitConfirmDetail: 'LobsterAI 关闭期间，定时任务不会运行。',
     appQuitConfirmUnsafeMarkdown: '有文档修改尚未保存，也尚未备份。退出后这些修改将丢失。请取消退出，返回文档保存修改。',
     appQuitConfirmQuit: '退出',
     appQuitConfirmCancel: '取消',

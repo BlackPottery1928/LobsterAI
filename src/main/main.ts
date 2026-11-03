@@ -292,6 +292,7 @@ import { isDecisionModelFeatureActive, registerDecisionModelHandlers } from './i
 import { ensureDshEngineReady, registerDshHandlers } from './ipcHandlers/dsh/handlers';
 import { registerEnterpriseAccountHandlers } from './ipcHandlers/enterpriseAccount';
 import { registerImageEditingHandlers } from './ipcHandlers/imageEditing';
+import { registerIntranetAuthIpcHandlers } from './ipcHandlers/intranetAuth/handlers'; // [INTRA-ONLY]
 import { registerKitHandlers } from './ipcHandlers/kits';
 import { hasUnsafeMarkdownEdits, registerMarkdownEditingHandlers } from './ipcHandlers/markdownEditing';
 import { cancelAllMcpOAuthLogins, registerMcpHandlers } from './ipcHandlers/mcp';
@@ -454,6 +455,7 @@ import {
   buildHtmlShareClientSourceKey,
 } from './libs/htmlShare/htmlShareSourceKey';
 import { composesImageEditLocally, ImageEditingService, ImageEditResultError } from './libs/imageEditing';
+import { getIntranetAuthBaseUrl } from './libs/intranetAuthLogin'; // [INTRA-ONLY]
 import { getKeyfromAttribution, initializeKeyfromAttribution } from './libs/keyfromAttribution';
 import { LibraryThumbnailRenderer } from './libs/libraryThumbnailRenderer';
 import { LibraryThumbnailService } from './libs/libraryThumbnailService';
@@ -3184,6 +3186,30 @@ const scheduleDeferredGatewayRestart = (
   requestedAt = Date.now(),
   respawnRequested = true,
 ) => {
+
+type PendingGatewayRestartReevaluation = {
+  reasons: string[];
+  requiresRespawn: boolean;
+  gatewayPid: number | null;
+};
+let pendingGatewayRestartReevaluation: PendingGatewayRestartReevaluation | null = null;
+
+const selfRestartSatisfiesSync = (
+  options: SyncOpenClawConfigOptions,
+  secretEnvVarsChanged: boolean,
+): boolean => {
+  if (secretEnvVarsChanged) {
+    return false;
+  }
+  if (options.restartGatewayIfRunning === true) {
+    return options.reason.startsWith(
+      `${DEFERRED_SYNC_REASON_PREFIX}${CONFIG_DELIVERY_FALLBACK_REASON_PREFIX}`,
+    );
+  }
+  return true;
+};
+
+const scheduleDeferredGatewayRestart = (reason: string) => {
   deferredRestartReason = mergeDeferredGatewayRestartReason(deferredRestartReason, reason);
   deferredRestartRespawnRequested ||= respawnRequested;
   // The latest demand decides which gateway spawn can satisfy the merged request.
@@ -3516,15 +3542,22 @@ const _syncOpenClawConfigImpl = async (
 
   const status = manager.getStatus();
   if (status.phase !== OpenClawEnginePhase.Running) {
-    // The respawn demand may predate the spawn now in progress, which meets it.
-    // A change that asks for no respawn of its own is only reapplied once ready.
-    const respawnRequested = requestedRespawn
-      || options.restartGatewayIfRunning === true
-      || options.expectedImpact === OpenClawConfigImpact.Restart;
-    scheduleDeferredGatewayRestart(options.reason, options.restartRequestedAt, respawnRequested);
-    console.log(
-      `${D()} ──── RESTART NEEDED but gateway not running (phase=${status.phase}), skipping. reason=${options.reason} respawnRequested=${respawnRequested}`,
-    );
+    const startupCannotSatisfy = secretEnvVarsChanged || nspClawguardPatched;
+    if (status.phase === OpenClawEnginePhase.Starting && startupCannotSatisfy) {
+      const pending = pendingGatewayRestartReevaluation;
+      pendingGatewayRestartReevaluation = {
+        reasons: [...(pending?.reasons ?? []), options.reason],
+        requiresRespawn: true,
+        gatewayPid: manager.getGatewayProcessPid(),
+      };
+      console.log(
+        `${D()} ──── RESTART PARKED (gateway still starting, spawned env is stale). reason=${options.reason}`,
+      );
+    } else {
+      console.log(
+        `${D()} ──── RESTART NEEDED but gateway not running (phase=${status.phase}), skipping. reason=${options.reason}`,
+      );
+    }
     return {
       success: true,
       changed: true,
@@ -3543,8 +3576,20 @@ const _syncOpenClawConfigImpl = async (
   }
 
   if (manager.isGatewaySelfRestartActive()) {
-    scheduleDeferredGatewayRestart(options.reason, options.restartRequestedAt);
-    return { success: true, changed: true, status: buildConfigApplyPendingStatus(t('openClawConfigApplyPending')) };
+    const requiresRespawn = nspClawguardPatched || !selfRestartSatisfiesSync(options, secretEnvVarsChanged);
+    pendingGatewayRestartReevaluation = {
+      reasons: [...(pendingGatewayRestartReevaluation?.reasons ?? []), options.reason],
+      requiresRespawn: (pendingGatewayRestartReevaluation?.requiresRespawn ?? false) || requiresRespawn,
+      gatewayPid: pendingGatewayRestartReevaluation?.gatewayPid ?? manager.getGatewayProcessPid(),
+    };
+    console.log(
+      `${D()} ──── RESTART PARKED (gateway self-restart in progress). reason=${options.reason}, requiresRespawn=${requiresRespawn}`,
+    );
+    return {
+      success: true,
+      changed: true,
+      status,
+    };
   }
 
   if (isQuitting || isDataMigrationRestoreInProgress) {
@@ -3681,28 +3726,33 @@ const syncOpenClawConfig = async (
     }
     if (generation === openClawConfigApplyGeneration) {
       openClawConfigApplyState = null;
-      // Task admission can publish a temporary starting state to the renderer.
-      // A hot apply leaves the real process running, so there is no manager
-      // phase transition to clear that UI state. Only the latest queue item may
-      // announce convergence; rejected config must not leave a startup spinner.
-      if (!isQuitting && !isDataMigrationRestoreInProgress) {
-        if (openClawConfigRecovery.rejected) {
-          forwardOpenClawStatus(buildConfigRejectedStatus());
-        } else if (openClawConfigRecovery.stalled || (!openClawConfigRecovery.pending && !deferredRestartReason)) {
-          forwardOpenClawStatus(getOpenClawEngineManager().getStatus());
-        }
-      }
     }
   }
 };
 
-// A handshake proves transport readiness only. Reconcile the pending target
-// after cold startup or a self-restart; same-process restarts cannot satisfy env changes.
-const handleGatewaySelfRestartSettled = () => {
-  getOpenClawEngineManager().clearGatewaySelfRestart();
-  if (openClawConfigRecovery.pending && !openClawConfigApplyState && !isQuitting && !isDataMigrationRestoreInProgress) {
-    void syncOpenClawConfig({ reason: 'gateway-ready:config-confirm' });
+const handleGatewayRestartReevaluation = () => {
+  const manager = getOpenClawEngineManager();
+  manager.clearGatewaySelfRestart();
+  const pending = pendingGatewayRestartReevaluation;
+  if (!pending) {
+    return;
   }
+  pendingGatewayRestartReevaluation = null;
+  const currentPid = manager.getGatewayProcessPid();
+  const respawned = pending.gatewayPid != null && currentPid != null && currentPid !== pending.gatewayPid;
+  if (pending.requiresRespawn && !respawned) {
+    console.log(
+      `${gwDiagTs()} parked restart still required after gateway settled (reasons: ${pending.reasons.join(', ')}); executing now`,
+    );
+    void syncOpenClawConfig({
+      reason: `gateway-settled-reevaluate:${pending.reasons[0]}`,
+      restartGatewayIfRunning: true,
+    });
+    return;
+  }
+  console.log(
+    `${gwDiagTs()} parked restart satisfied by gateway settle (reasons: ${pending.reasons.join(', ')}, respawned=${respawned})`,
+  );
 };
 
 type OpenClawGatewayRepairResult = {
@@ -4178,7 +4228,7 @@ const getCoworkEngineRouter = () => {
           ),
           onGatewayClientReady: () => {
             getCronJobService().notifyGatewayReady();
-            handleGatewaySelfRestartSettled();
+            handleGatewayRestartReevaluation();
           },
           onBrowserToolEvent: event => {
             const displayMode = normalizeBrowserWebAccessConfig(
@@ -8141,14 +8191,45 @@ if (!gotTheLock) {
     }
   });
 
-  registerFeedbackIpc({
+  // [INTRA-ONLY] Employee-ID (工号) + password login against the intranet
+  // permission service (replaces the browser portal handoff for intranet builds).
+  registerIntranetAuthIpcHandlers({
     ipcMain,
-    getMainWindow: () => mainWindow,
-    hasAuthTokens: () => getAuthTokens() !== null,
-    getServerBaseUrl: getServerApiBaseUrl,
-    getClientVersion: () => app.getVersion(),
-    fetchWithAuth,
-    getLogEntries: () => getLogExportEntries(getOpenClawEngineManager()),
+    fetch: (url, init) => net.fetch(url, init),
+    getBaseUrl: getIntranetAuthBaseUrl,
+    getAccountChangedMessage: () => t('authAccountChanged'),
+    accountGeneration: {
+      get: () => authAccountGeneration,
+      begin: () => {
+        authAccountGeneration += 1;
+      },
+    },
+    quotaGate: {
+      get: getAuthQuotaGateState,
+      sync: syncOpenClawConfigIfAuthQuotaGateChanged,
+      reset: resetAuthQuotaGateState,
+      normalize: normalizeQuota,
+    },
+    session: {
+      clearEnterpriseContext: () => clearEnterpriseAccountContext(getStore()),
+      clearServerModelMetadata,
+      saveTokens: saveAuthTokens,
+      saveUser: saveAuthUser,
+      clearMediaForAccountSwitch: () => {
+        const scope = getCurrentMediaAccountScope();
+        mediaSelectionBySession.clear();
+        mediaTurnAccountScopeBySession.clear();
+        mediaReferencesBySession.clear();
+        if (scope) {
+          clearMediaPollingStateForOwner(scope.ownerAccountKey);
+        }
+      },
+      settlePendingMediaTasks: () => {
+        if (pendingMediaTasks.size === 0) {
+          stopMediaPollTimer();
+        }
+      },
+    },
   });
 
   registerActivityIpcHandlers({

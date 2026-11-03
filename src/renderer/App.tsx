@@ -25,6 +25,8 @@ import type { LibrarySessionRef } from '../shared/library/types';
 import { OpenClawEnginePhase } from '../shared/openclawEngine/constants';
 import { ProviderName, ProviderRegistry } from '../shared/providers';
 import { SIDEBAR_TASK_FILTER_ENABLED } from './components/agentSidebar/SidebarTaskFilterButton';
+import IntranetCredentialLoginView from './components/auth/IntranetCredentialLoginView'; // [INTRA-ONLY]
+import { INTRANET_CREDENTIAL_LOGIN_ENABLED } from './components/auth/intranetLoginVisibility'; // [INTRA-ONLY]
 import { CoworkView } from './components/cowork';
 import {
   CoworkShortcutDirection,
@@ -1427,6 +1429,11 @@ const App: React.FC = () => {
     setNewUserWelcomeAfterLoginSignal((value) => value + 1);
     await authService.login()
       .then((result) => {
+        if (result.cancelled) {
+          console.log('[Onboarding] login handoff from new user onboarding cancelled by the user');
+          consumeNewUserWelcomeAfterLoginPending();
+          return;
+        }
         if (!result.success) {
           console.warn(
             `[Onboarding] login handoff from new user onboarding failed: ${result.error ?? 'unknown error'}`,
@@ -2177,6 +2184,7 @@ const App: React.FC = () => {
       <StartupCreditCampaign
         enabled={privacyAgreed === true && !isEnterpriseAccount}
       />
+      {INTRANET_CREDENTIAL_LOGIN_ENABLED && <IntranetCredentialLoginView />}
       {windowsStandaloneTitleBar}
       <div
         className="relative flex flex-1 min-h-0 overflow-hidden"

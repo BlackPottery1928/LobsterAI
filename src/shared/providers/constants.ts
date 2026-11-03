@@ -135,6 +135,8 @@ interface ProviderDefInput {
   readonly apiKeyUrl?: string;
   /** Default base URL */
   readonly defaultBaseUrl: string;
+  /** Default API key value, when one is configured by the provider definition */
+  readonly defaultApiKey?: string;
   /** Default API format */
   readonly defaultApiFormat: ApiFormat;
   /** Whether this provider supports codingPlan mode */
@@ -232,21 +234,21 @@ const PROVIDER_DEFINITIONS = [
     website: 'https://platform.deepseek.com',
     apiKeyUrl: 'https://platform.deepseek.com/api_keys',
     openClawProviderId: OpenClawProviderId.DeepSeek,
-    defaultBaseUrl: 'https://api.deepseek.com',
+    defaultBaseUrl: 'http://higressai.app.cz:5555/desktop-agent-provider/v1',
+    defaultApiKey: 'sk-g3COlon528Z9KO117DJQGA',
     defaultApiFormat: ApiFormat.OpenAI,
     codingPlanSupported: false,
     switchableBaseUrls: {
-      anthropic: 'https://api.deepseek.com/anthropic',
-      openai: 'https://api.deepseek.com',
+      anthropic: 'http://higressai.app.cz:5555/desktop-agent-provider/v1',
+      openai: 'http://higressai.app.cz:5555/desktop-agent-provider/v1',
     },
     region: 'china',
     enPriority: 0,
     defaultModels: [
-      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', supportsImage: false, supportsThinking: true, contextWindow: DEEPSEEK_V4_CONTEXT_WINDOW },
-      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', supportsImage: false, supportsThinking: true, contextWindow: DEEPSEEK_V4_CONTEXT_WINDOW },
+      { id: 'DeepSeek-V4-Flash', name: 'DeepSeek V4 Flash', supportsImage: false, supportsThinking: true, contextWindow: DEEPSEEK_V4_CONTEXT_WINDOW },
     ],
     legacyModels: [
-      { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', supportsImage: false, supportsThinking: true },
+      { id: 'DeepSeek-V4-Flash', name: 'DeepSeek V4 Flash', supportsImage: false, supportsThinking: true },
     ],
   },
   {
@@ -638,6 +640,8 @@ export interface ProviderDef {
   readonly apiKeyUrl?: string;
   /** Default base URL */
   readonly defaultBaseUrl: string;
+  /** Default API key value, when one is configured by the provider definition */
+  readonly defaultApiKey?: string;
   /** Default API format */
   readonly defaultApiFormat: ApiFormat;
   /** Whether this provider supports codingPlan mode */
@@ -955,3 +959,69 @@ class ProviderRegistryImpl {
 }
 
 export const ProviderRegistry = new ProviderRegistryImpl(PROVIDER_DEFINITIONS);
+
+// ═══════════════════════════════════════════════════════
+// 6. [INTRA-ONLY] Definition-owned providers
+// ═══════════════════════════════════════════════════════
+
+/**
+ * [INTRA-ONLY] Providers whose runtime config is owned by this build's
+ * PROVIDER_DEFINITIONS rather than the persisted `app_config` row. This build
+ * points DeepSeek at a fixed intranet proxy serving a fixed catalogue, so a
+ * stored override can only ever be a dead route.
+ *
+ * Applied at every read of the persisted provider map, in both processes:
+ *   - renderer: src/renderer/services/config.ts (config load + Settings writes)
+ *   - main:     src/main/libs/claudeSettings.ts (chat / OpenClaw gateway config)
+ * Delete this section together with its call sites when the intranet
+ * deployment goes away.
+ */
+const DEFINITION_OWNED_PROVIDER_IDS: ReadonlySet<string> = new Set([ProviderName.DeepSeek]);
+
+/** Whether a provider's config is owned by PROVIDER_DEFINITIONS. */
+export const isDefinitionOwnedProvider = (providerKey: string): boolean =>
+  DEFINITION_OWNED_PROVIDER_IDS.has(providerKey);
+
+/**
+ * Overlay the build-owned config onto one provider entry. Only the connection
+ * fields are overlaid — `enabled`, `codingPlanEnabled` and OAuth credentials
+ * keep the caller's values.
+ */
+export const applyDefinitionOwnedProviderConfig = <T extends object>(
+  providerKey: string,
+  providerConfig: T,
+): T => {
+  if (!isDefinitionOwnedProvider(providerKey)) {
+    return providerConfig;
+  }
+  const def = ProviderRegistry.get(providerKey);
+  if (!def) {
+    return providerConfig;
+  }
+  return {
+    ...providerConfig,
+    baseUrl: def.defaultBaseUrl,
+    apiKey: def.defaultApiKey ?? '',
+    apiFormat: def.defaultApiFormat,
+    models: def.defaultModels.map(model => ({ ...model })),
+  };
+};
+
+/**
+ * Overlay the build-owned config across a persisted provider map. A provider
+ * the stored config does not have is never injected, so the user's
+ * enable/disable intent survives.
+ */
+export const applyDefinitionOwnedProviders = <T extends object>(
+  providers: Record<string, T> | undefined,
+): Record<string, T> | undefined => {
+  if (!providers) {
+    return providers;
+  }
+  return Object.fromEntries(
+    Object.entries(providers).map(([providerKey, providerConfig]) => [
+      providerKey,
+      applyDefinitionOwnedProviderConfig(providerKey, providerConfig),
+    ]),
+  );
+};

@@ -647,7 +647,7 @@ const UserMenu: React.FC<UserMenuProps> = ({
       </div>
 
       {/* Account destinations */}
-      <div className="py-1">
+      <div className="py-1" style={{ display: 'none' }}>
         {visibleAccountPlan && (
           <AccountPlanAction
             label={visibleAccountPlan.label}
@@ -665,8 +665,7 @@ const UserMenu: React.FC<UserMenuProps> = ({
           />
         )}
         <DailyCheckInAccountMenuEntry
-          enabled={startupCreditEntry.resolved
-            && !startupCreditEntry.available}
+          enabled={false}
           initialSnapshot={dailyCheckInSnapshot}
           loadOnMount={false}
           suppressed={!startupCreditEntry.resolved
@@ -688,17 +687,17 @@ const UserMenu: React.FC<UserMenuProps> = ({
           label={i18nService.t('authUsageOverview')}
           onClick={handleUsageOverview}
         />
-        <AccountMenuAction
-          icon={<PortalMenuIcon src={rechargeIconUrl} darkInvert />}
-          label={i18nService.t('authGoRecharge')}
-          onClick={handleRecharge}
-        />
+          <AccountMenuAction
+            icon={<PortalMenuIcon src={rechargeIconUrl} darkInvert />}
+            label={i18nService.t('authGoRecharge')}
+            onClick={handleRecharge}
+          />
       </div>
 
       <AccountMenuSeparator />
 
       {/* Campaigns, invitations and feedback */}
-      <div className="py-1">
+      <div className="py-1"  style={{ display: 'none' }}>
         {campaignActionLabel && (
           <AccountMenuAction
             icon={<PortalMenuIcon src={promoSubscriptionIconUrl} darkInvert />}

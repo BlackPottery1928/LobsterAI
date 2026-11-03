@@ -1,5 +1,6 @@
 import {
   ApiFormat,
+  applyDefinitionOwnedProviderConfig,
   applyModelRuntimeProfileMetadata,
   ModelRuntimeProfileSource,
   normalizeModelIdForComparison as getProviderModelIdentity,
@@ -177,7 +178,8 @@ const normalizeProvidersConfig = (providers: AppConfig['providers']): AppConfig[
   }
 
   return Object.fromEntries(
-    Object.entries(providers).map(([providerKey, providerConfig]) => {
+    Object.entries(providers).map(([providerKey, storedProviderConfig]) => {
+      const providerConfig = applyDefinitionOwnedProviderConfig(providerKey, storedProviderConfig);
       const baseUrl = normalizeProviderBaseUrl(providerKey, providerConfig.baseUrl);
       const apiFormat = normalizeProviderApiFormat(providerKey, providerConfig.apiFormat);
       return [
@@ -568,10 +570,10 @@ const hydrateStoredConfig = (storedConfig: AppConfig): AppConfig => {
         }).map(([providerKey, providerConfig]) => [
           providerKey,
           (() => {
-            const mergedProvider = {
+            const mergedProvider = applyDefinitionOwnedProviderConfig(providerKey, {
               ...((defaultConfig.providers as Record<string, unknown>)?.[providerKey] as Record<string, unknown> ?? {}),
               ...providerConfig,
-            };
+            });
             // Filter out removed models
             const removedIds = REMOVED_PROVIDER_MODELS[providerKey];
             if (removedIds && mergedProvider.models) {

@@ -26,6 +26,7 @@ export type StartupCacheWarmupResult = {
 };
 
 const WARMUP_TIMEOUT = 5000;
+const SERVER_MODEL_WARMUP_ENABLED: boolean = false;
 
 export const buildServerModelCapabilityHeaders = (
   clientVersion: string,
@@ -80,6 +81,7 @@ export async function runStartupCacheWarmup(deps: StartupCacheWarmupDeps): Promi
       }
     })(),
     (async () => {
+      if (!SERVER_MODEL_WARMUP_ENABLED) return;
       try {
         const url = appendKeyfromQuery(`${serverBaseUrl}/api/models/available`);
         const resp = await fetchWithAuth(url, {

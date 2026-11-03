@@ -63,7 +63,7 @@ import {
   ArtifactFileShareProvider,
   useOptionalArtifactFileShare,
 } from '../artifacts/ArtifactFileShareController';
-import { isArtifactFileShareable } from '../artifacts/artifactFileSharePolicy';
+import { ARTIFACT_SHARE_HIDDEN, isArtifactFileShareable } from '../artifacts/artifactFileSharePolicy';
 import { shouldShowFreePublishingDeleteQuotaNotice } from '../artifacts/publishingDeleteNoticePolicy';
 import CardOverflowMenu, { type CardOverflowMenuItem } from '../common/CardOverflowMenu';
 import {
@@ -227,6 +227,8 @@ const SOURCE_FILTERS = [
   LibrarySourceFilter.Cloud,
 ] as const;
 
+const CLOUD_SOURCE_HIDDEN = true;
+
 const getLocalLibraryError = (code?: LibraryErrorCode, fallback?: string): string => {
   if (code === LibraryErrorCode.ProtocolMismatch) return i18nService.t('libraryRestartForUpdate');
   if (code === LibraryErrorCode.InvalidCursor || code === LibraryErrorCode.InvalidLocalData) {
@@ -388,7 +390,9 @@ const LibraryViewContent: React.FC<LibraryViewProps> = ({
   ));
   const favoriteOwnerScope = ownerAccountKey ?? undefined;
   const [analyticsPageViewId] = useState(createLibraryAnalyticsPageViewId);
-  const [source, setSource] = useState<LibrarySourceFilter>(requestedSource);
+  const [source, setSource] = useState<LibrarySourceFilter>(() => (
+    CLOUD_SOURCE_HIDDEN ? LibrarySourceFilter.Local : requestedSource
+  ));
   const [category, setCategory] = useState<LibraryCategory>(LibraryCategory.All);
   const [keywordInput, setKeywordInput] = useState('');
   const [keyword, setKeyword] = useState('');
@@ -482,7 +486,7 @@ const LibraryViewContent: React.FC<LibraryViewProps> = ({
   const wantsLocal = source === LibrarySourceFilter.Local;
   const wantsLocalGrid = wantsLocal && viewMode === LibraryViewMode.Grid;
   const wantsLocalList = wantsLocal && !wantsLocalGrid;
-  const wantsCloud = source === LibrarySourceFilter.Cloud;
+  const wantsCloud = !CLOUD_SOURCE_HIDDEN && source === LibrarySourceFilter.Cloud;
   const hasActiveLocalFilter = category !== LibraryCategory.All
     || keyword.length > 0
     || favoritesOnly;
@@ -737,7 +741,7 @@ const LibraryViewContent: React.FC<LibraryViewProps> = ({
     setCategory(LibraryCategory.All);
     setKeywordInput('');
     setKeyword('');
-    setSource(requestedSource);
+    setSource(CLOUD_SOURCE_HIDDEN ? LibrarySourceFilter.Local : requestedSource);
     scrollContainerRef.current?.scrollTo({ top: 0 });
   }, [navigationRequestId, requestedSource]);
 
@@ -1623,8 +1627,15 @@ const LibraryViewContent: React.FC<LibraryViewProps> = ({
     return <ArrowTopRightOnSquareIcon className="h-4 w-4" />;
   };
 
+  // [INTRA-ONLY] Drop the share entry from the card menu for intranet builds.
+  const getVisibleCardActionIds = (item: LibraryItem): readonly LibraryItemActionValue[] => (
+    ARTIFACT_SHARE_HIDDEN
+      ? getLibraryCardActionIds(item).filter(action => action !== LibraryItemAction.ShareLocal)
+      : getLibraryCardActionIds(item)
+  );
+
   const buildCardMenuItems = (item: LibraryItem): CardOverflowMenuItem[] => (
-    getLibraryCardActionIds(item).map(action => ({
+    getVisibleCardActionIds(item).map(action => ({
       key: action,
       label: getCardActionLabel(item, action),
       icon: getCardActionIcon(item, action),
@@ -1722,16 +1733,18 @@ const LibraryViewContent: React.FC<LibraryViewProps> = ({
           aria-label={i18nService.t('libraryTitle')}
           className="non-draggable flex items-center gap-1"
         >
-          {SOURCE_FILTERS.map(value => (
-            <SourceTab
-              key={value}
-              source={value}
-              active={source === value}
-              loading={source === value && loadingFeedback.showSourceActivity}
-              announceLoading={loadingFeedback.showLongWaitLabel}
-              onClick={() => handleSourceChange(value)}
-            />
-          ))}
+          {SOURCE_FILTERS
+            .filter(value => !CLOUD_SOURCE_HIDDEN || value !== LibrarySourceFilter.Cloud)
+            .map(value => (
+              <SourceTab
+                key={value}
+                source={value}
+                active={source === value}
+                loading={source === value && loadingFeedback.showSourceActivity}
+                announceLoading={loadingFeedback.showLongWaitLabel}
+                onClick={() => handleSourceChange(value)}
+              />
+            ))}
         </div>
       </div>
 

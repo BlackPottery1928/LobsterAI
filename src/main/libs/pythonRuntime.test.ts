@@ -1,60 +1,99 @@
-import fs from 'fs';
-import path from 'path';
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-import { PythonEncodingEnv } from './pythonEncodingEnv';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 vi.mock('electron', () => ({
-  app: { getAppPath: () => process.cwd(), getPath: () => path.join(process.cwd(), 'test-python-profile'), isPackaged: false },
+  app: {
+    isPackaged: false,
+    getPath: () => path.join(os.tmpdir(), 'lobsterai-test-userdata'),
+    getAppPath: () => process.cwd(),
+  },
 }));
 
-import { appendPythonRuntimeToEnv, getUserPythonRoot } from './pythonRuntime';
+const { readDepsManifestId, shouldResyncPythonRuntime } = await import('./pythonRuntime');
 
-const originalPlatform = process.platform;
+const tempDirs: string[] = [];
 
-beforeEach(() => {
-  Object.defineProperty(process, 'platform', { value: 'win32' });
-  vi.spyOn(fs, 'existsSync').mockReturnValue(false);
-});
+function makeRuntimeRoot(): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lobsterai-pyruntime-'));
+  tempDirs.push(root);
+  return root;
+}
+
+function writeManifest(root: string, payload: unknown): void {
+  fs.writeFileSync(path.join(root, 'python-deps-manifest.json'), JSON.stringify(payload), 'utf8');
+}
 
 afterEach(() => {
-  Object.defineProperty(process, 'platform', { value: originalPlatform });
-  vi.restoreAllMocks();
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
-describe('Python runtime child environments', () => {
-  test('sets encoding defaults even when no managed Python directory exists', () => {
-    const env = { PATH: 'system-python' };
-    appendPythonRuntimeToEnv(env);
-
-    expect(env).toEqual({ PATH: 'system-python', [PythonEncodingEnv.Utf8]: '1', [PythonEncodingEnv.IoEncoding]: 'utf-8' });
-  });
-
-  test('retains managed runtime precedence and the existing PATH while adding defaults', () => {
-    const root = getUserPythonRoot();
-    vi.mocked(fs.existsSync).mockImplementation(candidate => candidate === root);
-    const env = { PATH: 'system-python' };
-    appendPythonRuntimeToEnv(env);
-
-    expect(env).toEqual({
-      PATH: [root, path.join(root, 'Scripts'), 'system-python'].join(';'),
-      LOBSTERAI_PYTHON_ROOT: root,
-      [PythonEncodingEnv.Utf8]: '1', [PythonEncodingEnv.IoEncoding]: 'utf-8',
+describe('readDepsManifestId', () => {
+  test('reads the manifest id written by the packaging script', () => {
+    const root = makeRuntimeRoot();
+    writeManifest(root, {
+      version: 1,
+      manifestId: 'sha256:abc',
+      pins: { lxml: '==6.1.3' },
+      importAliases: { lxml: ['lxml.etree'] },
     });
+    expect(readDepsManifestId(root)).toBe('sha256:abc');
   });
 
-  test('preserves explicit encoding values from the caller', () => {
-    const env = { pythonutf8: '0', pythonioencoding: 'gbk' };
-    appendPythonRuntimeToEnv(env);
+  test('returns null for a missing, malformed or empty manifest', () => {
+    const root = makeRuntimeRoot();
+    expect(readDepsManifestId(root)).toBeNull();
 
-    expect(env).toEqual({ [PythonEncodingEnv.Utf8]: '0', [PythonEncodingEnv.IoEncoding]: 'gbk' });
+    fs.writeFileSync(path.join(root, 'python-deps-manifest.json'), '{not json', 'utf8');
+    expect(readDepsManifestId(root)).toBeNull();
+
+    writeManifest(root, { manifestId: '' });
+    expect(readDepsManifestId(root)).toBeNull();
+
+    writeManifest(root, { manifestId: 42 });
+    expect(readDepsManifestId(root)).toBeNull();
+
+    writeManifest(root, {});
+    expect(readDepsManifestId(root)).toBeNull();
+  });
+});
+
+describe('shouldResyncPythonRuntime', () => {
+  test('a runtime built without a manifest never triggers a re-sync', () => {
+    // Development trees and builds made before this feature (or with
+    // LOBSTERAI_SKILL_PYTHON_DEPS_SKIP=1) stay on the old behavior.
+    expect(shouldResyncPythonRuntime({ bundledManifestId: null, userManifestId: null })).toBe(false);
+    expect(shouldResyncPythonRuntime({ bundledManifestId: null, userManifestId: 'sha256:a' })).toBe(false);
   });
 
-  test.each(['darwin', 'linux'] as const)('leaves %s unchanged', platform => {
-    Object.defineProperty(process, 'platform', { value: platform });
-    const env = { PATH: 'system-python', pythonutf8: '' };
-    appendPythonRuntimeToEnv(env);
+  test('an existing install without a manifest is re-synced once', () => {
+    // Every install predating this feature lands here, and gets the preinstalled
+    // dependencies on the first launch after upgrading.
+    expect(shouldResyncPythonRuntime({ bundledManifestId: 'sha256:a', userManifestId: null })).toBe(true);
+  });
 
-    expect(env).toEqual({ PATH: 'system-python', pythonutf8: '' });
+  test('a changed bundled dependency set is re-synced', () => {
+    expect(shouldResyncPythonRuntime({ bundledManifestId: 'sha256:b', userManifestId: 'sha256:a' })).toBe(true);
+  });
+
+  test('an unchanged dependency set is left alone', () => {
+    // The common case: re-copying tens of megabytes on every launch would be a
+    // real startup regression.
+    expect(shouldResyncPythonRuntime({ bundledManifestId: 'sha256:a', userManifestId: 'sha256:a' })).toBe(false);
+  });
+
+  test('a malformed bundled manifest is treated as no manifest', () => {
+    // readDepsManifestId returns null for a corrupt file, so a damaged install
+    // must not re-copy the runtime on every single launch.
+    const root = makeRuntimeRoot();
+    fs.writeFileSync(path.join(root, 'python-deps-manifest.json'), '{oops', 'utf8');
+    const bundledManifestId = readDepsManifestId(root);
+    expect(bundledManifestId).toBeNull();
+    expect(shouldResyncPythonRuntime({ bundledManifestId, userManifestId: 'sha256:a' })).toBe(false);
   });
 });

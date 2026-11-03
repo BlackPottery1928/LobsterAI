@@ -859,7 +859,7 @@ const CoworkView: React.FC<CoworkViewProps> = ({
           </button>
         )}
         <DailyCheckInHeaderEntry
-          enabled={!isEnterpriseAccount}
+          enabled={false}
           suppressed={!startupCreditEntry.resolved
             || startupCreditEntry.available}
         />
@@ -1022,7 +1022,10 @@ const CoworkView: React.FC<CoworkViewProps> = ({
                     />
                   </div>
                 )}
-                <CreditsResetCampaignFloat />
+                
+                <div className="hidden">
+                  <CreditsResetCampaignFloat />
+                </div>
               </div>
 
               <div aria-hidden="true" className="w-full min-h-[24px] flex-[3_0_0px]" />

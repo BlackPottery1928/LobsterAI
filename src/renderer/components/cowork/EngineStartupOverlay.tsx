@@ -9,7 +9,6 @@ const TIP_KEYS = [
   'engineStartingTip1',
   'engineStartingTip2',
   'engineStartingTip3',
-  'engineStartingTip4',
   'engineStartingTip5',
   'engineStartingTip6',
 ] as const;

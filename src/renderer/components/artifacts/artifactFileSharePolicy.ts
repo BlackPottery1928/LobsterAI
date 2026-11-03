@@ -11,6 +11,8 @@ import {
   ArtifactTypeValue,
 } from '@/types/artifact';
 
+export const ARTIFACT_SHARE_HIDDEN = true;
+
 export const ArtifactFileShareRequestSource = {
   HtmlFile: 'htmlFile',
   ArtifactFile: 'artifactFile',
