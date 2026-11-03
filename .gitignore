@@ -68,3 +68,4 @@ logs/
 .scratch
 .sandbox-bg
 .wpscomate
+.pycell-cache

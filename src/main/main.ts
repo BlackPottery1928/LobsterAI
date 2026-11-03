@@ -3181,12 +3181,6 @@ const executeDeferredGatewayRestart = async (reason: string) => {
   });
 };
 
-const scheduleDeferredGatewayRestart = (
-  reason: string,
-  requestedAt = Date.now(),
-  respawnRequested = true,
-) => {
-
 type PendingGatewayRestartReevaluation = {
   reasons: string[];
   requiresRespawn: boolean;
@@ -3209,7 +3203,11 @@ const selfRestartSatisfiesSync = (
   return true;
 };
 
-const scheduleDeferredGatewayRestart = (reason: string) => {
+const scheduleDeferredGatewayRestart = (
+  reason: string,
+  requestedAt = Date.now(),
+  respawnRequested = true,
+) => {
   deferredRestartReason = mergeDeferredGatewayRestartReason(deferredRestartReason, reason);
   deferredRestartRespawnRequested ||= respawnRequested;
   // The latest demand decides which gateway spawn can satisfy the merged request.
