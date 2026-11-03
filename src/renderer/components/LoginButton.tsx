@@ -328,11 +328,13 @@ const LoggedOutMenu: React.FC<LoggedOutMenuProps> = ({ onClose, onLogin }) => {
           label={i18nService.t('login')}
           onClick={handleLogin}
         />
-        <AccountMenuAction
-          icon={<PennyActivityIcon />}
-          label={i18nService.t('authPennyActivityEntry')}
-          onClick={handlePennyActivity}
-        />
+        <div style={{ display: 'none' }}>
+          <AccountMenuAction
+            icon={<PennyActivityIcon />}
+            label={i18nService.t('authPennyActivityEntry')}
+            onClick={handlePennyActivity}
+          />
+        </div>
       </div>
     </div>
   );
@@ -717,11 +719,13 @@ const UserMenu: React.FC<UserMenuProps> = ({
           );
         })}
         {pennyActivityEntryVisible && (
-          <AccountMenuAction
-            icon={<PennyActivityIcon />}
-            label={i18nService.t('authPennyActivityEntry')}
-            onClick={handlePennyActivity}
-          />
+          <div style={{ display: 'none' }}>
+            <AccountMenuAction
+              icon={<PennyActivityIcon />}
+              label={i18nService.t('authPennyActivityEntry')}
+              onClick={handlePennyActivity}
+            />
+          </div>
         )}
         <AccountMenuAction
           icon={<PortalMenuIcon src={inviteCreditsIconUrl} darkInvert />}

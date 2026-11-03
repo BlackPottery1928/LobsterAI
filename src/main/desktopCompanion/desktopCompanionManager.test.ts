@@ -695,15 +695,13 @@ describe('desktop companion lifecycle', () => {
     expect(menu().some(item => item.label === 'desktopToolsPlayback')).toBe(false);
   });
 
-  test.each([undefined, {}, { shortcut: '' }])('starts with a visible orb when saved preferences omit enabled: %j', preferences => {
+  test.each([undefined, {}, { shortcut: '' }])('starts with the orb off when saved preferences omit enabled: %j', preferences => {
     values.set(DesktopCompanionStoreKey.Preferences, preferences);
     create();
-    expect(manager.getState().preferences.enabled).toBe(true);
-    expect(mocks.windows).toHaveLength(2);
-    orb().emit('ready-to-show');
-    expect(orb().visible).toBe(true);
-    expect(foreground.start).toHaveBeenCalled();
-    expect(fileDrag.start).toHaveBeenCalled();
+    expect(manager.getState().preferences.enabled).toBe(false);
+    expect(mocks.windows).toHaveLength(1);
+    expect(foreground.start).not.toHaveBeenCalled();
+    expect(fileDrag.start).not.toHaveBeenCalled();
     expect(manager.getState().panelVisible).toBe(false);
   });
 

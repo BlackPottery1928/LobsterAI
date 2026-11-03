@@ -4353,7 +4353,11 @@ const Settings: React.FC<SettingsProps> = ({
       } else {
         const data = response.data || {};
         // 提取错误信息
-        const errorMessage = data.error?.message || data.message || `${i18nService.t('connectionFailed')}: ${response.status}`;
+        // A zero status means the request never reached the server (DNS, TLS, proxy...);
+        // show the underlying network error instead of an opaque "failed: 0".
+        const errorMessage = (response.status === 0 && (response.error || response.statusText))
+          || data.error?.message || data.message
+          || `${i18nService.t('connectionFailed')}: ${response.status}`;
         if (typeof errorMessage === 'string' && errorMessage.toLowerCase().includes('model output limit was reached')) {
           enableProvider(testingProvider);
           reportCustomModelConnectionTested(testingProvider, effectiveApiFormat, 'success');
@@ -4633,7 +4637,9 @@ const Settings: React.FC<SettingsProps> = ({
           );
         })()}
 
-        <SkinSettingsSection onStartAiSkin={onStartAiSkin} />
+        <div style={{ display: 'none' }}>
+          <SkinSettingsSection onStartAiSkin={onStartAiSkin} />
+        </div>
 
         <div className="mt-5 divide-y divide-border rounded-xl border border-border bg-surface">
           <div className="px-4 py-3">

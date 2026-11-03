@@ -3,7 +3,6 @@ import { type CSSProperties } from 'react';
 
 import { CompanionSkinKind, getCompanionSkin } from '../../../../shared/desktopCompanion/skins';
 import { CompanionMood } from './companionMood';
-import LobsterMark from './LobsterMark';
 
 interface CompanionCharacterProps {
   skin: string;
@@ -23,7 +22,9 @@ export default function CompanionCharacter({ skin, mood, size, showBadge = true,
       data-kind={definition.kind}
       style={{ width: size, height: size, '--skin-accent': definition.accent } as CSSProperties}
     >
-      {definition.kind === CompanionSkinKind.Brand && <LobsterMark size={size} />}
+      {definition.kind === CompanionSkinKind.Brand && (
+        <img className="character-image brand-logo" src="logo.png" alt="" draggable={false} />
+      )}
       {definition.kind === CompanionSkinKind.Image && definition.asset
         && <img className="character-image" src={definition.asset} alt="" draggable={false} />}
       {showBadge && mood === CompanionMood.Working && (

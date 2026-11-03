@@ -34,7 +34,7 @@ const openExternalLink = (url: string): void => {
 /** Info-card rows for the repository and license; rendered inside the About card. */
 export const AboutOpenSourceRows: React.FC<AboutOpenSourceProps> = ({ onAction }) => (
   <>
-    <div className={infoRowClassName}>
+    <div className={infoRowClassName} style={{ display: 'none' }}>
       <span className={`shrink-0 ${SETTINGS_ITEM_TITLE_TEXT} text-foreground`}>{i18nService.t('aboutSourceCode')}</span>
       <button
         type="button"
@@ -48,7 +48,7 @@ export const AboutOpenSourceRows: React.FC<AboutOpenSourceProps> = ({ onAction }
         {OPEN_SOURCE_REPO_URL}
       </button>
     </div>
-    <div className={infoRowClassName}>
+    <div className={infoRowClassName} style={{ display: 'none' }}>
       <span className={`shrink-0 ${SETTINGS_ITEM_TITLE_TEXT} text-foreground`}>{i18nService.t('aboutLicense')}</span>
       <button
         type="button"
@@ -67,7 +67,7 @@ export const AboutOpenSourceRows: React.FC<AboutOpenSourceProps> = ({ onAction }
 
 /** Permanent invitation to star or fork the repository, shown below the About card. */
 export const AboutOpenSourceStarPrompt: React.FC<AboutOpenSourceProps> = ({ onAction }) => (
-  <div className="mt-4 flex w-full flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-primary/20 bg-primary/[0.06] px-4 py-3">
+  <div className="mt-4 flex w-full flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-primary/20 bg-primary/[0.06] px-4 py-3" style={{ display: 'none' }}>
     <div className="flex min-w-0 grow basis-72 items-center gap-3">
       <GitHubMarkIcon className="h-6 w-6 shrink-0 text-foreground" />
       <div className="min-w-0">

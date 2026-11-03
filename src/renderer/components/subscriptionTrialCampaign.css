@@ -1,4 +1,6 @@
+/* 新用户 0.01 元解锁 1000 积分活动弹窗：本版本不展示 */
 .subscription-trial-overlay {
+  display: none !important;
   padding: 24px;
   background: rgb(17 20 35 / 40%);
   backdrop-filter: blur(4px);

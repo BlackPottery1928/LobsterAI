@@ -53,8 +53,12 @@ svg { flex-shrink: 0; }
 .companion-character:not([data-kind="brand"])[data-mood="attention"] > :is(svg, img) { animation: wiggle 2.4s ease-in-out infinite; }
 .companion-character[data-mood="snooze"] { opacity: 0.82; }
 /* The brand mark stays still while working; a small badge carries the status. */
-.companion-character > .lobster-mark { transform-origin: 50% 50%; transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), filter 0.3s ease; }
-.companion-character[data-kind="brand"][data-mood="snooze"] > .lobster-mark { filter: saturate(0.15); }
+.companion-character[data-kind="brand"] > .brand-logo {
+  width: 120%; height: 120%; border-radius: 50%;
+  clip-path: circle(19px at 50% 50%);
+}
+.companion-character > :is(.lobster-mark, .brand-logo) { transform-origin: 50% 50%; transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), filter 0.3s ease; }
+.companion-character[data-kind="brand"][data-mood="snooze"] > :is(.lobster-mark, .brand-logo) { filter: saturate(0.15); }
 .companion-character[data-kind="brand"] .character-badge { right: -3px; top: -3px; width: 16px; height: 16px; border-width: 1.5px; font-size: 10px; }
 .companion-character[data-kind="brand"] .character-badge svg { width: 9px; height: 9px; }
 .companion-character[data-kind="image"][data-mood="curious"] > img { transform: rotate(-6deg); transition: transform 0.2s; }
@@ -105,8 +109,8 @@ svg { flex-shrink: 0; }
 .orb-button:hover .companion-character { transform: translateY(-2px); }
 .orb-button[data-moving="true"] .companion-character { transform: scale(1.04); }
 /* A file coming near: the disc leans in; over it: the disc opens up to take it. */
-.orb-button .companion-character[data-kind="brand"][data-mood="curious"] > .lobster-mark { transform: scale(1.06); }
-.orb-button .companion-character[data-kind="brand"][data-mood="catch"] > .lobster-mark { transform: scale(1.14); }
+.orb-button .companion-character[data-kind="brand"][data-mood="curious"] > :is(.lobster-mark, .brand-logo) { transform: scale(1.06); }
+.orb-button .companion-character[data-kind="brand"][data-mood="catch"] > :is(.lobster-mark, .brand-logo) { transform: scale(1.14); }
 
 /* ── Screenshot selection ─────────────────────────────── */
 

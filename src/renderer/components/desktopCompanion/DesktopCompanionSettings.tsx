@@ -10,14 +10,15 @@ import {
 import { COMPANION_SKINS, type CompanionSkin, CompanionSkinKind } from '../../../shared/desktopCompanion/skins';
 import { i18nService } from '../../services/i18n';
 import { SETTINGS_DESCRIPTION_TEXT, SETTINGS_ITEM_TITLE_TEXT } from '../settings/settingsTypography';
-import LobsterMark from './mascot/LobsterMark';
 import SelectionToolbarSettings from './SelectionToolbarSettings';
 import { useDesktopCompanionState } from './useDesktopCompanionState';
 
 type ToggleKey = 'enabled' | 'selectionToolbar' | 'dragAssist' | 'contextHints';
 
 function SkinPreview({ skin }: { skin: CompanionSkin }) {
-  if (skin.kind === CompanionSkinKind.Brand || !skin.asset) return <LobsterMark size={32} />;
+  if (skin.kind === CompanionSkinKind.Brand || !skin.asset) {
+    return <img src="logo.png" alt="" className="h-11 w-11 rounded-full object-contain" style={{ clipPath: 'circle(17.5px at 50% 50%)' }} draggable={false} />;
+  }
   return <img src={skin.asset} alt="" className="h-11 w-11 object-contain" draggable={false} />;
 }
 

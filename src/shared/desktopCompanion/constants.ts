@@ -342,7 +342,7 @@ export interface DesktopCompanionBridge extends LanguageToolsBridge, CompanionSc
 }
 
 export const DEFAULT_DESKTOP_COMPANION_PREFERENCES: DesktopCompanionPreferences = {
-  enabled: true,
+  enabled: false,
   // Electron's Alt accelerator maps to Option on macOS and Alt on Windows.
   shortcut: 'Alt+Space',
   skin: DEFAULT_COMPANION_SKIN,

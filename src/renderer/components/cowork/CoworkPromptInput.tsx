@@ -3291,11 +3291,13 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                 onManageKits={handleManageKits}
                 menuItem={{ open: foldedTool === PromptFoldedTool.Kits, side: submenuSide, onOpenChange: handleKitsMenuItemChange }}
               />
-              <MediaModelPicker
-                draftKey={draftKey}
-                disabled={disabled || voiceInputLocksEditing}
-                menuItem={{ open: foldedTool === PromptFoldedTool.Media, side: submenuSide, onOpenChange: handleMediaMenuItemChange }}
-              />
+              <div style={{ display: 'none' }}>
+                <MediaModelPicker
+                  draftKey={draftKey}
+                  disabled={disabled || voiceInputLocksEditing}
+                  menuItem={{ open: foldedTool === PromptFoldedTool.Media, side: submenuSide, onOpenChange: handleMediaMenuItemChange }}
+                />
+              </div>
               <div className="mx-3 my-1 h-px bg-border" role="separator" />
             </>
           )}
@@ -3394,7 +3396,11 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
   const largeInputToolActions = (
     <div className={`flex items-center ${useLargeToolbarCompactLayout ? 'gap-0' : 'gap-0.5'}`}>
       {largeInputActions}
-      {!narrow && <MediaModelPicker draftKey={draftKey} disabled={disabled || voiceInputLocksEditing} />}
+      {!narrow && (
+        <div style={{ display: 'none' }}>
+          <MediaModelPicker draftKey={draftKey} disabled={disabled || voiceInputLocksEditing} />
+        </div>
+      )}
     </div>
   );
   const largeSendButtonSizeClass = useCompactSendButton ? 'h-7 w-7' : 'h-8 w-8';
